@@ -11,7 +11,6 @@ pub(in crate::engine) mod workspace_symbols;
 mod type_at_tests;
 
 use crate::invariant::ExpectInvariant;
-use std::path::Path;
 
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::MethodVisibilityOverrideFact;
@@ -21,7 +20,7 @@ use crate::core::{
     SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
 };
 
-use crate::engine::{AnalysisQueryCache, Project, SourceFile};
+use crate::engine::{AnalysisQueryCache, Project};
 
 pub struct View<'a> {
     pub(crate) engine: &'a Project,
@@ -45,14 +44,6 @@ impl<'a> View<'a> {
 
     pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
         self.engine.query_cache_identity()
-    }
-
-    pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
-        self.engine.file_id(path)
-    }
-
-    pub fn file(&self, file_id: SourceFileId) -> Option<&'a SourceFile> {
-        self.engine.file(file_id)
     }
 
     pub fn execution_context_at(

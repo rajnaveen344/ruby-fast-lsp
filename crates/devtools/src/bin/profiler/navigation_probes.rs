@@ -124,8 +124,8 @@ pub(crate) async fn observe_first_live_definition(
                         .uri
                         .to_file_path()
                         .ok()
-                        .and_then(|path| engine.file_id(path))
-                        .and_then(|file_id| engine.file(file_id))
+                        .and_then(|path| engine.view().file_id(path))
+                        .and_then(|file_id| engine.view().file(file_id))
                         .map(|file| format!("{:?}", file.kind))
                         .unwrap_or_else(|| "Unknown".to_string())
                 })

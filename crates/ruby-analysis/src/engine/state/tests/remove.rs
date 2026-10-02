@@ -162,15 +162,22 @@ fn child_only_and_removed_parent() -> (Project, Project, SourceFileId, SourceFil
 fn removed_file_leaves_the_registered_sources() {
     let (_, engine, child_file, parent_file) = child_only_and_removed_parent();
 
-    assert_eq!(engine.file_count(), 1);
+    assert_eq!(engine.view().file_count(), 1);
     assert_eq!(
-        engine.files().map(|file| file.id).collect::<Vec<_>>(),
+        engine
+            .view()
+            .files()
+            .map(|file| file.id)
+            .collect::<Vec<_>>(),
         vec![child_file]
     );
-    assert_eq!(engine.file_id("parent.rb"), None);
-    assert!(engine.file(parent_file).is_none());
+    assert_eq!(engine.view().file_id("parent.rb"), None);
+    assert!(engine.view().file(parent_file).is_none());
     assert!(engine.semantic_export_fingerprint(parent_file).is_none());
-    assert!(engine.source_snapshot_for_path("parent.rb").is_none());
+    assert!(engine
+        .view()
+        .source_snapshot_for_path("parent.rb")
+        .is_none());
 }
 
 #[test]
@@ -279,7 +286,7 @@ fn references_and_callees_no_longer_reach_removed_methods() {
 fn stale_snapshots_are_rejected_after_removal() {
     let mut engine = Project::new();
     let parent_file = register_project_file(&mut engine, "parent.rb", PARENT_SOURCE);
-    let snapshot = engine.source_snapshot_for_path("parent.rb").unwrap();
+    let snapshot = engine.view().source_snapshot_for_path("parent.rb").unwrap();
     engine.update(
         parent_file,
         parent_facts(parent_file),
@@ -301,7 +308,7 @@ fn stale_snapshots_are_rejected_after_removal() {
         ),
         None
     );
-    assert_eq!(engine.file_count(), 0);
+    assert_eq!(engine.view().file_count(), 0);
     assert!(engine.reference_facts_for(&greet_fqn()).is_empty());
     assert!(engine.view().method_facts_in_file(parent_file).is_empty());
 }
@@ -310,11 +317,11 @@ fn stale_snapshots_are_rejected_after_removal() {
 fn remove_if_snapshot_keeps_a_file_edited_after_the_snapshot() {
     let mut engine = Project::new();
     let parent_file = register_project_file(&mut engine, "parent.rb", PARENT_SOURCE);
-    let snapshot = engine.source_snapshot_for_path("parent.rb").unwrap();
+    let snapshot = engine.view().source_snapshot_for_path("parent.rb").unwrap();
     register_project_file(&mut engine, "parent.rb", "class Parent; end\n");
 
     assert!(!engine.remove_if_snapshot(snapshot, ResolveMode::Immediate));
-    assert_eq!(engine.file_id("parent.rb"), Some(parent_file));
+    assert_eq!(engine.view().file_id("parent.rb"), Some(parent_file));
 }
 
 #[test]
@@ -331,7 +338,7 @@ fn reregistering_a_removed_path_starts_empty_with_a_new_id() {
     let reregistered = register_project_file(&mut engine, "parent.rb", PARENT_SOURCE);
 
     assert_ne!(reregistered, parent_file);
-    assert_eq!(engine.file_id("parent.rb"), Some(reregistered));
+    assert_eq!(engine.view().file_id("parent.rb"), Some(reregistered));
     assert!(engine.view().method_facts_in_file(reregistered).is_empty());
     assert!(engine.diagnostic_facts_in_file(reregistered).is_empty());
     assert!(engine.view().references_in_file(reregistered).is_empty());

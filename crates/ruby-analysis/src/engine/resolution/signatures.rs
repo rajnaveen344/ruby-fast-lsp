@@ -87,8 +87,7 @@ impl<'a> View<'a> {
                 let signatures = matching
                     .iter()
                     .filter(|fact| {
-                        self.engine
-                            .file(fact.range.file_id)
+                        self.file(fact.range.file_id)
                             .expect_invariant(
                                 "signature fact references an unregistered file",
                                 "signature selection requires source metadata",

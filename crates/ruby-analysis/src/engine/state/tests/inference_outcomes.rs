@@ -15,7 +15,7 @@ fn type_at_reads_engine_owned_store() {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::integer(),
-                engine.text_range(file_id, 0, 5),
+                engine.view().text_range(file_id, 0, 5),
                 TypeProvenance::Assignment,
             )],
             ..Default::default()
@@ -33,7 +33,7 @@ fn type_at_reads_engine_owned_store() {
 fn expression_query_preserves_an_exact_unknown_proof_barrier() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "@value");
-    let range = engine.text_range(file_id, 0, 6);
+    let range = engine.view().text_range(file_id, 0, 6);
 
     engine.update(
         file_id,
@@ -75,7 +75,7 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
 fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
-    let range = engine.text_range(file_id, 0, 5);
+    let range = engine.view().text_range(file_id, 0, 5);
 
     engine.update(
         file_id,
@@ -105,7 +105,7 @@ fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
 fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
-    let range = engine.text_range(file_id, 0, 5);
+    let range = engine.view().text_range(file_id, 0, 5);
     let empty_fingerprint = engine.semantic_result_fingerprint();
 
     engine.update(

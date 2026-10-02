@@ -211,7 +211,7 @@ fn partition_namespace_nodes(engine: &Project) -> PartitionedNamespaceNodes {
                 .push(node);
             continue;
         }
-        let Some(file) = engine.file(node.range.file_id) else {
+        let Some(file) = engine.view().file(node.range.file_id) else {
             continue;
         };
         match source_kind_library_section(file.kind) {
@@ -497,6 +497,7 @@ fn analysis_namespace_is_project(engine: &Project, fqn: &FullyQualifiedName) -> 
 
 fn analysis_range_is_project(engine: &Project, range: TextRange) -> bool {
     engine
+        .view()
         .file(range.file_id)
         .is_some_and(|file| file.kind.is_workspace_owned())
 }
@@ -513,7 +514,7 @@ pub(in crate::engine) fn analysis_location_info(
     engine: &Project,
     range: TextRange,
 ) -> Option<LocationInfo> {
-    let file = engine.file(range.file_id)?;
+    let file = engine.view().file(range.file_id)?;
     let (line, character) = file.byte_offset_to_line_character(range.start_byte)?;
     Some(LocationInfo {
         uri: file.path.to_string_lossy().to_string(),

@@ -22,7 +22,7 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
             .collect::<std::collections::HashMap<_, _>>();
         let resolution_fingerprints = engine.semantic_resolution_file_fingerprints();
         let mut files = engine
-            .files()
+            .view().files()
             .map(|file| {
                 let path = if file.kind == SourceKind::Project {
                     file.path

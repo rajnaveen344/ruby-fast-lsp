@@ -323,7 +323,7 @@ impl IndexerStdlib {
 
         let mut engine = analysis_engine.write();
         for ((path, _, _), template) in sources.iter().zip(templates) {
-            let file_id = engine.file_id(path).unwrap_or_else(|| {
+            let file_id = engine.view().file_id(path).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "deterministic stub collection lost registered file {}",
                     why = "both direct staging passes register every source before template collection",
@@ -453,10 +453,10 @@ impl IndexerStdlib {
         // both project/dependency truth and runtime stdlib truth in one engine.
         files.retain(|path| {
             let engine = analysis_engine.read();
-            let Some(file_id) = engine.file_id(path) else {
+            let Some(file_id) = engine.view().file_id(path) else {
                 return true;
             };
-            let file = engine.file(file_id).unwrap_or_else(|| {
+            let file = engine.view().file(file_id).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "stdlib collision lookup found file id {:?} for {} without a registered source file",
                     why = "file-path and file-record ownership must be updated atomically",
@@ -534,7 +534,7 @@ impl IndexerStdlib {
         let indexed_count = sources.len();
         let mut engine = analysis_engine.write();
         for ((path, _, _), template) in sources.iter().zip(templates) {
-            let file_id = engine.file_id(path).unwrap_or_else(|| {
+            let file_id = engine.view().file_id(path).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "deterministic stdlib collection lost registered file {}",
                     why = "the batch registers every source before template collection",

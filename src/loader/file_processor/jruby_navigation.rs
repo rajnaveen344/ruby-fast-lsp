@@ -157,8 +157,11 @@ impl FileProcessor {
                     signature_path.display()
                 )
             })?;
-            let signature_already_indexed =
-                analysis_engine.read().file_id(&signature_path).is_some();
+            let signature_already_indexed = analysis_engine
+                .read()
+                .view()
+                .file_id(&signature_path)
+                .is_some();
             if !signature_already_indexed {
                 let signature_index_started = Instant::now();
                 match &deferred_signature_known_namespaces {

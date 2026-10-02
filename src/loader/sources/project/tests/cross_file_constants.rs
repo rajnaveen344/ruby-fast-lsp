@@ -93,7 +93,7 @@ end
     .await;
     {
         let engine = workspace_state.analysis_engine.read();
-        let file_id = engine.file_id(&first_consumer_path).unwrap();
+        let file_id = engine.view().file_id(&first_consumer_path).unwrap();
         let assignment_start = u32::try_from(first_consumer.find("code =").unwrap()).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
@@ -142,7 +142,7 @@ end
             "transitive constant equations must solve each alias before consumers"
         );
     }
-    let first_file_id = engine.file_id(&first_consumer_path).unwrap();
+    let first_file_id = engine.view().file_id(&first_consumer_path).unwrap();
     let final_read_offset =
         u32::try_from(first_consumer.rfind("        code\n").unwrap() + 8).unwrap();
     assert_eq!(
@@ -154,7 +154,7 @@ end
         (&first_consumer_path, first_consumer, "code"),
         (&second_consumer_path, second_consumer, "result"),
     ] {
-        let file_id = engine.file_id(path).unwrap();
+        let file_id = engine.view().file_id(path).unwrap();
         let assignment_start = u32::try_from(source.find(&format!("{name} =")).unwrap()).unwrap();
         let assignment_end = assignment_start + u32::try_from(name.len()).unwrap();
         assert_eq!(
@@ -173,7 +173,7 @@ end
         (&first_consumer_path, first_consumer, "first_code"),
         (&second_consumer_path, second_consumer, "second_code"),
     ] {
-        let file_id = engine.file_id(path).unwrap();
+        let file_id = engine.view().file_id(path).unwrap();
         let method_offset = u32::try_from(source.find(method).unwrap()).unwrap();
         assert_eq!(
             query.method_return_type_at(method, file_id, method_offset),
@@ -193,7 +193,7 @@ end
         Some(ruby_analysis::core::RubyType::string()),
         "a late-resolved value constant must update the stable source assignment for ||= writes"
     );
-    let cycle_file_id = engine.file_id(&cycle_consumer_path).unwrap();
+    let cycle_file_id = engine.view().file_id(&cycle_consumer_path).unwrap();
     assert_eq!(
         query.variable_assignment_type_at(
             ruby_analysis::core::VariableTypeKind::Local,
@@ -273,7 +273,7 @@ end
     let assignment_end = assignment_start + u32::try_from("tags".len()).unwrap();
     {
         let engine = workspace_state.analysis_engine.read();
-        let file_id = engine.file_id(&consumer_path).unwrap();
+        let file_id = engine.view().file_id(&consumer_path).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
                 ruby_analysis::core::VariableTypeKind::Local,
@@ -304,7 +304,7 @@ end
     workspace_state.analysis_engine.write().resolve();
 
     let engine = workspace_state.analysis_engine.read();
-    let file_id = engine.file_id(&consumer_path).unwrap();
+    let file_id = engine.view().file_id(&consumer_path).unwrap();
     let expected = ruby_analysis::core::RubyType::Class(FullyQualifiedName::constant(vec![
         ruby_analysis::core::RubyConstant::new("Registry").unwrap(),
     ]));

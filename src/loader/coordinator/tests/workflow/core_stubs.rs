@@ -93,6 +93,7 @@ async fn identical_core_stubs_use_one_template_but_keep_isolated_engines() {
         server_workspace
             .analysis_engine
             .read()
+            .view()
             .file_id(&unique)
             .is_none(),
         "mutating one engine must not change a sibling cloned from the same template"
@@ -138,10 +139,11 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
 
     let engine = workspace.analysis_engine.read();
     let file_id = engine
+        .view()
         .file_id(&path)
         .expect("binding a core template must not erase the open document");
     assert!(
-        engine.file_content_matches(file_id, content),
+        engine.view().file_content_matches(file_id, content),
         "binding a core template must preserve the exact unsaved document content"
     );
     drop(engine);
@@ -216,7 +218,7 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
         .expect("live-document core seed must be prepared");
 
     assert!(
-        live_seed.file_id(&live_path).is_none(),
+        live_seed.view().file_id(&live_path).is_none(),
         "the reusable dependency seed must never inherit project-owned open-document facts"
     );
     assert_eq!(

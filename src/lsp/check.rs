@@ -313,7 +313,7 @@ impl CheckSession {
         let mut inference = InferenceTelemetry::default();
         for workspace in &workspaces {
             let engine = workspace.analysis_engine.read();
-            for file in engine.files() {
+            for file in engine.view().files() {
                 if !matches!(file.kind, SourceKind::Project | SourceKind::Signature)
                     || !source_is_selected(&file.path, selected_file.as_deref(), &root)
                 {
@@ -338,7 +338,7 @@ impl CheckSession {
                             )
                         })?,
                     };
-                    if !engine.file_content_matches(file.id, &source) {
+                    if !engine.view().file_content_matches(file.id, &source) {
                         return Err(anyhow!(
                             "check source {} changed while analysis was running; rerun the check \
                              so syntax and semantic diagnostics use one byte-identical input",
@@ -402,6 +402,7 @@ fn solved_types_in_file(
     file_id: ruby_analysis::core::SourceFileId,
 ) -> Result<Vec<CheckInferredType>> {
     let file = engine
+        .view()
         .file(file_id)
         .ok_or_else(|| anyhow!("inferred types reference unknown file id {file_id:?}"))?;
     let query = AnalysisQuery::new(engine);
@@ -589,12 +590,15 @@ fn domain_diagnostics(
 ) -> Result<Vec<CheckDiagnostic>> {
     let mut diagnostics = Vec::new();
     for diagnostic in engine.all_diagnostic_facts() {
-        let file = engine.file(diagnostic.range.file_id).ok_or_else(|| {
-            anyhow!(
-                "diagnostic references unknown file id {:?}",
-                diagnostic.range.file_id
-            )
-        })?;
+        let file = engine
+            .view()
+            .file(diagnostic.range.file_id)
+            .ok_or_else(|| {
+                anyhow!(
+                    "diagnostic references unknown file id {:?}",
+                    diagnostic.range.file_id
+                )
+            })?;
         if selected_file.is_some_and(|selected| file.path != selected) {
             continue;
         }

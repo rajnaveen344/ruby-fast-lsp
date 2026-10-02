@@ -116,7 +116,10 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
     let file_id = {
         let mut engine = engine.write();
         engine.resolve();
-        let file_id = engine.file_id(&path).expect("cold source registered");
+        let file_id = engine
+            .view()
+            .file_id(&path)
+            .expect("cold source registered");
         let diagnostics = engine
             .diagnostic_facts_in_file(file_id)
             .into_iter()
@@ -134,7 +137,7 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
         file_id
     };
     editor.open(filename, source).await;
-    assert_eq!(engine.read().file_id(&path), Some(file_id));
+    assert_eq!(engine.read().view().file_id(&path), Some(file_id));
     assert_eq!(
         nil_calls(&editor, filename).await,
         vec![expected_nil_call()]

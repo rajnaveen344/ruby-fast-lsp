@@ -272,8 +272,7 @@ impl View<'_> {
     }
 
     fn definition_source_priority(&self, range: TextRange) -> u8 {
-        self.engine
-            .file(range.file_id)
+        self.file(range.file_id)
             .expect_invariant(
                 "a definition destination has no registered source",
                 "navigation must retain source ownership",
@@ -287,7 +286,7 @@ impl View<'_> {
     /// This is a presentation tie-breaker, never Ruby load order or dispatch priority.
     pub(in crate::engine) fn sort_definition_ranges(&self, ranges: &mut [TextRange]) {
         ranges.sort_by_key(|range| {
-            let file = self.engine.file(range.file_id).expect_invariant(
+            let file = self.file(range.file_id).expect_invariant(
                 "a definition destination has no registered source",
                 "navigation must retain source ownership",
                 "register sources before publishing definition facts",

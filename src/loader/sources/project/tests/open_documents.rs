@@ -66,8 +66,8 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
         .unwrap();
 
     let engine = workspace.analysis_engine.read();
-    let open_file = engine.file_id(&open_path).unwrap();
-    let closed_file = engine.file_id(&closed_path).unwrap();
+    let open_file = engine.view().file_id(&open_path).unwrap();
+    let closed_file = engine.view().file_id(&closed_path).unwrap();
     let query = AnalysisQuery::new(&engine);
     assert!(
         !query.references_in_file(open_file).is_empty(),
@@ -120,6 +120,7 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     let caller_file = workspace_state
         .analysis_engine
         .read()
+        .view()
         .file_id(&caller_path)
         .unwrap();
     assert!(
@@ -140,9 +141,11 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     workspace_state.analysis_engine.write().resolve();
 
     let engine = workspace_state.analysis_engine.read();
-    let utility_file = engine.file_id(&utility_path).unwrap();
+    let utility_file = engine.view().file_id(&utility_path).unwrap();
     assert!(
-        engine.file_content_matches(utility_file, open_source),
+        engine
+            .view()
+            .file_content_matches(utility_file, open_source),
         "cold indexing must retain the editor's newer source snapshot"
     );
     assert!(

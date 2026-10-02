@@ -345,7 +345,10 @@ impl IndexerProject {
 
         let collect_start = Instant::now();
         let read_file = |file_path: &PathBuf| -> Result<ProjectFileInput> {
-            let expected_snapshot = analysis_engine.read().source_snapshot_for_path(file_path);
+            let expected_snapshot = analysis_engine
+                .read()
+                .view()
+                .source_snapshot_for_path(file_path);
             let read_started = Instant::now();
             let (content, open_document) = Self::read_authoritative_project_source(ctx, file_path)?;
             let read_elapsed = read_started.elapsed();
@@ -397,8 +400,8 @@ impl IndexerProject {
             let mut semantic_engine = base_semantic_read_engine.write();
             for (index, input) in inputs.into_iter().enumerate() {
                 if input.open_document {
-                    if let Some(file_id) = engine.file_id(&input.path) {
-                        if !engine.file_content_matches(file_id, &input.content) {
+                    if let Some(file_id) = engine.view().file_id(&input.path) {
+                        if !engine.view().file_content_matches(file_id, &input.content) {
                             info!(
                                 "Skipping stale project snapshot for open document {}",
                                 input.path.display()
@@ -425,7 +428,7 @@ impl IndexerProject {
                     SourceKind::Project,
                 );
                 invariant_eq!(
-                    engine.file_id(&input.path).unwrap(),
+                    engine.view().file_id(&input.path).unwrap(),
                     semantic_id,
                     what = "immutable semantic context assigned a different file id for {}",
                     why = "retained FileAnalysis ranges must be valid in the live engine",
@@ -442,8 +445,8 @@ impl IndexerProject {
             let mut engine = analysis_engine.write();
             for (index, input) in inputs.into_iter().enumerate() {
                 if input.open_document {
-                    if let Some(file_id) = engine.file_id(&input.path) {
-                        if !engine.file_content_matches(file_id, &input.content) {
+                    if let Some(file_id) = engine.view().file_id(&input.path) {
+                        if !engine.view().file_content_matches(file_id, &input.content) {
                             info!(
                                 "Skipping stale project snapshot for open document {}",
                                 input.path.display()
@@ -491,7 +494,7 @@ impl IndexerProject {
             let stale_file_ids = registered_inputs
                 .iter()
                 .filter_map(|registered| {
-                    let file_id = engine.file_id(&registered.input.path)?;
+                    let file_id = engine.view().file_id(&registered.input.path)?;
                     engine.semantic_export_fingerprint(file_id).map(|_| file_id)
                 })
                 .collect::<Vec<_>>();
@@ -558,7 +561,7 @@ impl IndexerProject {
             for outcome in semantic_seed_outcomes {
                 let (path, facts) = outcome?;
                 let Some(facts) = facts else { continue };
-                let file_id = engine.file_id(&path).unwrap_or_else(|| {
+                let file_id = engine.view().file_id(&path).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "project semantic seed lost the registered identity for {}",
                         why = "declaration collection and replacement must address the same batch file",

@@ -90,13 +90,14 @@ impl IndexerProject {
         let mut snapshot = {
             let mut engine = analysis_engine.write();
             for path in project_files {
-                if engine.file_id(path).is_none() {
+                if engine.view().file_id(path).is_none() {
                     engine.register_file_borrowed(path.clone(), "", SourceKind::Project);
                 }
             }
             engine.clone()
         };
         let stale_project_file_ids = snapshot
+            .view()
             .files()
             .filter(|file| {
                 matches!(file.kind, SourceKind::Project | SourceKind::Excluded)
@@ -151,7 +152,7 @@ impl IndexerProject {
             for outcome in outcomes {
                 let (path, facts) = outcome?;
                 let Some(facts) = facts else { continue };
-                let file_id = engine.file_id(&path).unwrap_or_else(|| {
+                let file_id = engine.view().file_id(&path).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "project semantic seed lost the registered identity for {}",
                         why = "the skeleton addresses the same pre-registered file as collection",
@@ -220,7 +221,7 @@ impl IndexerProject {
             open_project_paths
                 .iter()
                 .map(|path| {
-                    engine.file_id(path).unwrap_or_else(|| {
+                    engine.view().file_id(path).unwrap_or_else(|| {
                         unreachable_invariant!(
                             what = "open document {} has no registered analysis file after collection",
                             why = "didOpen and the project pass share one engine",

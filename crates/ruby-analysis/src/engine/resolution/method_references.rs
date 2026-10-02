@@ -484,6 +484,7 @@ fn non_core_fact_requires_ancestry_proof(
     }
 
     let source_kind = engine
+        .view()
         .file(fact.range.file_id)
         .unwrap_or_else(|| {
             unreachable_invariant!(

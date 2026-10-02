@@ -313,6 +313,7 @@ impl EngineQuery {
                 return query.file(file_id)?.source.clone();
             }
             return engine
+                .view()
                 .files()
                 .find(|file| file.path.ends_with(relative))
                 .and_then(|file| file.source.clone());

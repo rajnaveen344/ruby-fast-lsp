@@ -200,7 +200,7 @@ impl Project {
                 let owner_parts = fact.owner.namespace_parts();
                 let is_builtin_class_owner = owner_parts.len() == 1
                     && owner_parts[0].as_str() == "Class"
-                    && self.file(fact.range.file_id).is_some_and(|file| {
+                    && self.view().file(fact.range.file_id).is_some_and(|file| {
                         matches!(
                             file.kind,
                             crate::core::SourceKind::Stub

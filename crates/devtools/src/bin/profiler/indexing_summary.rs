@@ -89,6 +89,7 @@ pub(crate) fn indexing_summary_json(
                 "inspect memory accounting",
             );
         let mut project_sources = engine
+            .view()
             .files()
             .filter(|file| file.kind == SourceKind::Project)
             .collect::<Vec<_>>();

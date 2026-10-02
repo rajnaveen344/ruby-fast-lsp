@@ -142,7 +142,7 @@ impl IndexingCoordinator {
         let dependency_seed = template.as_ref().clone();
         let installed_template = {
             let mut engine = analysis_engine.write();
-            if engine.file_count() == 0 {
+            if engine.view().file_count() == 0 {
                 *engine = template.as_ref().clone();
                 true
             } else {

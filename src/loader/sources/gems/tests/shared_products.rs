@@ -41,11 +41,11 @@ fn assert_shared_dependency_semantics(engine: &AnalysisEngine, expected_path: &P
         query.constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[]);
     assert_eq!(definitions.len(), 1);
     assert_eq!(
-        engine.file(definitions[0].file_id).unwrap().path,
+        engine.view().file(definitions[0].file_id).unwrap().path,
         expected_path
     );
     assert_eq!(
-        engine.file(definitions[0].file_id).unwrap().kind,
+        engine.view().file(definitions[0].file_id).unwrap().kind,
         SourceKind::Gem
     );
 
@@ -168,16 +168,21 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     let second_path = second_gem.join("lib/shared_widget.rb");
     assert_shared_dependency_semantics(&first_engine.read(), &first_path);
     assert_shared_dependency_semantics(&second_engine.read(), &second_path);
-    let first_file_id = first_engine.read().file_id(&first_path).unwrap();
-    let second_file_id = second_engine.read().file_id(&second_path).unwrap();
-    assert!(first_engine.read().file_id(&second_path).is_none());
-    assert!(second_engine.read().file_id(&first_path).is_none());
+    let first_file_id = first_engine.read().view().file_id(&first_path).unwrap();
+    let second_file_id = second_engine.read().view().file_id(&second_path).unwrap();
+    assert!(first_engine.read().view().file_id(&second_path).is_none());
+    assert!(second_engine.read().view().file_id(&first_path).is_none());
     assert_eq!(
-        first_engine.read().file(first_file_id).unwrap().path,
+        first_engine.read().view().file(first_file_id).unwrap().path,
         first_path
     );
     assert_eq!(
-        second_engine.read().file(second_file_id).unwrap().path,
+        second_engine
+            .read()
+            .view()
+            .file(second_file_id)
+            .unwrap()
+            .path,
         second_path
     );
 

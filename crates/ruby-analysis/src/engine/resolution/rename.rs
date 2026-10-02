@@ -147,8 +147,7 @@ impl<'a> View<'a> {
                     .method_facts_matching_owner_name(&owner, &new_name)
                     .into_iter()
                     .any(|fact| {
-                        self.engine
-                            .file(fact.range.file_id)
+                        self.file(fact.range.file_id)
                             .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     })
             }) || self.engine.all_method_facts().into_iter().any(|fact| {
@@ -157,7 +156,6 @@ impl<'a> View<'a> {
                 };
                 fact_method == new_name
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     && (target_chain.contains(&fact.owner)
@@ -175,15 +173,13 @@ impl<'a> View<'a> {
             .iter()
             .filter(|fact| fact.owner == identity.owner)
             .filter(|fact| {
-                self.engine
-                    .file(fact.range.file_id)
+                self.file(fact.range.file_id)
                     .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
             })
             .collect::<Vec<_>>();
         if declaration_facts.is_empty()
             || declaration_facts.iter().any(|fact| {
                 !self
-                    .engine
                     .file(fact.range.file_id)
                     .is_some_and(|file| file.kind.is_editable())
                     || fact
@@ -220,8 +216,7 @@ impl<'a> View<'a> {
                 .method_visibility_overrides_matching_owner_name(&identity.owner, &identity.method)
                 .into_iter()
                 .filter(|fact| {
-                    self.engine
-                        .file(fact.range.file_id)
+                    self.file(fact.range.file_id)
                         .is_some_and(|file| file.kind.is_editable())
                 })
                 .map(|fact| fact.range),
@@ -262,7 +257,6 @@ impl<'a> View<'a> {
                             }
                         }
                         if self
-                            .engine
                             .file(candidate.range.file_id)
                             .is_some_and(|file| file.kind.is_editable())
                         {
@@ -291,7 +285,6 @@ impl<'a> View<'a> {
                         return None;
                     }
                     if self
-                        .engine
                         .file(candidate.range.file_id)
                         .is_some_and(|file| file.kind.is_editable())
                     {
@@ -392,7 +385,6 @@ impl<'a> View<'a> {
                     .checked_sub(fact.name_range.start_byte)
                     == u32::try_from(current_name.as_str().len()).ok()
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind.is_editable())
             })
@@ -408,8 +400,7 @@ impl<'a> View<'a> {
                     .reference_facts_for(&fqn)
                     .iter()
                     .filter(|fact| {
-                        self.engine
-                            .file(fact.range.file_id)
+                        self.file(fact.range.file_id)
                             .is_some_and(|file| file.kind.is_editable())
                     })
                     .filter_map(|fact| {
@@ -480,7 +471,7 @@ fn constant_reference_name_range(
     range: TextRange,
     name: RubyConstant,
 ) -> Option<TextRange> {
-    let file = engine.file(range.file_id)?;
+    let file = engine.view().file(range.file_id)?;
     let start = usize::try_from(range.start_byte).ok()?;
     let end = usize::try_from(range.end_byte).ok()?;
     if let Some(source) = file.source_text() {

@@ -366,8 +366,9 @@ fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKi
     let analysis_engine = server.analysis_engine_for_uri(uri);
     let engine = analysis_engine.read();
     engine
+        .view()
         .file_id(&path)
-        .and_then(|file_id| engine.file(file_id))
+        .and_then(|file_id| engine.view().file(file_id))
         .map(|file| file.kind)
 }
 
@@ -884,6 +885,7 @@ fn clear_file_facts_if_kind(
         return false;
     };
     let path = engine
+        .view()
         .file(file_id)
         .map(|file| file.path.clone())
         .expect_invariant(
@@ -908,8 +910,9 @@ fn registered_file_of_kind(
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let file_id = engine.file_id(&path)?;
+    let file_id = engine.view().file_id(&path)?;
     engine
+        .view()
         .file(file_id)
         .is_some_and(|file| file.kind == expected_kind)
         .then_some(file_id)

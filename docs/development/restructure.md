@@ -151,8 +151,36 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B4d. `impl Semantics for View`; the `RwLock<Project>` impl takes a
         guard and delegates.
   - [ ] B4e. Move read-only methods from `Project` to `View`, one component
-        per commit (files, decls, hierarchy, diagnostics, solver telemetry,
-        fingerprints).
+        per commit. `Project` keeps writes and `view()`; callers read through
+        `project.view().x()`. Each component's reads become an `impl View`
+        block in the component's own module.
+    - [x] B4e1. Files: `file_id`, `file`, `files`, `file_count`,
+          `file_content_matches`, `text_range`, `source_snapshot_for_path`.
+    - [ ] B4e2. Decls: `execution_context_at`, `symbol_facts_for`,
+          `symbol_facts_in_file`, `all_symbol_facts`, `has_symbol_facts`,
+          `method_facts_for`, `method_facts_in_file`, `all_method_facts`,
+          `method_facts_matching_owner`, `method_facts_matching_owner_name`,
+          `method_visibility_overrides_matching_owner_name`,
+          `method_visibility_overrides_in_file`,
+          `all_method_visibility_overrides`, `method_names_for_owner`; fold
+          the `View` duplicates `symbols_for_fqn`, `methods_for_fqn`, and
+          `has_symbols` into them.
+    - [ ] B4e3. Hierarchy: the `graph_*` node and edge reads,
+          `proven_superclass_edge`, `superclass_is_ambiguous`, and
+          `unresolved_graph_edges`.
+    - [ ] B4e4. Uses and types: `reference_facts_for` (folding
+          `references_for_fqn`), `type_at`, `type_facts_for`.
+    - [ ] B4e5. Diagnostics: `diagnostic_facts_in_file`,
+          `all_diagnostic_facts`.
+    - [ ] B4e6. Solver telemetry: `inference_telemetry`,
+          `inference_telemetry_in_file`, `inference_evidence_in_file`,
+          `method_return_outcomes_in_file`, `method_return_equations_in_file`.
+    - [ ] B4e7. Fingerprints: `semantic_export_fingerprint`,
+          `semantic_context_fingerprint`, `semantic_result_fingerprint`,
+          `semantic_result_file_fingerprints`,
+          `semantic_resolution_file_fingerprints`.
+    - [ ] B4e8. Statistics: `stats`, `estimated_memory_stats`,
+          `last_resolve_stats`. Profiler comparison.
   - [x] B4f. Add `Project::remove(file_id)` and `remove_if_snapshot`: drop
         the file from every component, `Files` maps, and export fingerprints;
         advance the revision; re-queue dependents. Ids are never reused. Tests

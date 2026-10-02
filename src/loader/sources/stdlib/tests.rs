@@ -228,12 +228,16 @@ async fn every_supported_jruby_series_composes_its_exact_runtime_overlay() {
             series.label()
         );
         assert!(
-            engine.file_id(&selected.join("runtime.rb")).is_some(),
+            engine
+                .view()
+                .file_id(&selected.join("runtime.rb"))
+                .is_some(),
             "{} must index its exact selected overlay file",
             series.label()
         );
         assert!(
             engine
+                .view()
                 .files()
                 .filter(|file| file.path.ends_with("jruby-stubs/common/runtime.rb"))
                 .count()
@@ -260,7 +264,7 @@ async fn bundled_stub_navigation_retains_source_positions() {
         .constant_definition_ranges(&[RubyConstant::new("Thread").unwrap()], &[]);
     assert_eq!(ranges.len(), 1);
     let range = ranges[0];
-    let file = engine.file(range.file_id).unwrap();
+    let file = engine.view().file(range.file_id).unwrap();
     assert_eq!(file.path, path);
     assert_eq!(
         file.byte_offset_to_line_character(range.start_byte),
@@ -347,6 +351,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
 
     let engine = engine.read();
     let file_id = engine
+        .view()
         .file_id(&project)
         .expect("project source must remain registered");
     let query = AnalysisQuery::new(&engine);
@@ -417,10 +422,15 @@ fn runtime_stdlib_cannot_replace_bundled_stub_ownership() {
 
     let engine = engine.read();
     let file_id = engine
+        .view()
         .file_id(&path)
         .expect("stub fixture must retain a registered file");
     assert_eq!(
-        engine.file(file_id).expect("stub fixture must exist").kind,
+        engine
+            .view()
+            .file(file_id)
+            .expect("stub fixture must exist")
+            .kind,
         ruby_analysis::core::SourceKind::Stub,
         "runtime stdlib discovery must never reclassify bundled language semantics"
     );

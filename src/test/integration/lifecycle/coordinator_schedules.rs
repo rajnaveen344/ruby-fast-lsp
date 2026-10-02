@@ -56,6 +56,7 @@ async fn edit_between_real_collection_and_commit(
     let old_snapshot = workspace
         .analysis_engine
         .read()
+        .view()
         .source_snapshot_for_path(&path)
         .expect("cold collection must register its input before reaching the commit boundary");
     let mut updated = server
@@ -76,6 +77,7 @@ async fn edit_between_real_collection_and_commit(
         workspace
             .analysis_engine
             .read()
+            .view()
             .source_snapshot_for_path(&path),
         Some(old_snapshot),
         "the real document handler must invalidate the collected source before cold commit"
@@ -166,11 +168,17 @@ async fn edit_between_real_collection_and_commit(
         )],
         "a delayed cold commit must preserve the exact new method definition"
     );
-    let file_id = workspace.analysis_engine.read().file_id(&path).unwrap();
+    let file_id = workspace
+        .analysis_engine
+        .read()
+        .view()
+        .file_id(&path)
+        .unwrap();
     assert!(
         workspace
             .analysis_engine
             .read()
+            .view()
             .file_content_matches(file_id, NEW),
         "cold indexing must never restore disk source over the editor buffer"
     );

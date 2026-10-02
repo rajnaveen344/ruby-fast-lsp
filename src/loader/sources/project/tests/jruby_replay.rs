@@ -404,11 +404,14 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
 
         let engine = workspace_state.analysis_engine.read();
         let first_signature_path = signature_cache.path().join("com/example/First.rb");
-        let first_signature_id = engine.file_id(&first_signature_path).expect_invariant(
-            "generated First signature was not indexed",
-            "both schedules import the exact catalog class",
-            "keep the fixture import and signature cache identity aligned",
-        );
+        let first_signature_id = engine
+            .view()
+            .file_id(&first_signature_path)
+            .expect_invariant(
+                "generated First signature was not indexed",
+                "both schedules import the exact catalog class",
+                "keep the fixture import and signature cache identity aligned",
+            );
         (
             engine
                 .semantic_export_fingerprint(first_signature_id)
@@ -510,7 +513,7 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
         workspace_state.analysis_engine.write().resolve();
 
         let engine = workspace_state.analysis_engine.read();
-        let ordinary_id = engine.file_id(&ordinary_path).expect_invariant(
+        let ordinary_id = engine.view().file_id(&ordinary_path).expect_invariant(
             "ordinary include fixture was not indexed",
             "the exhaustive batch must register every selected source",
             "keep the fixture inside the project root and finish the batch",

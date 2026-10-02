@@ -286,6 +286,7 @@ fn file_name_for(
     file_id: ruby_analysis::core::SourceFileId,
 ) -> String {
     engine
+        .view()
         .file(file_id)
         .and_then(|file| {
             file.path

@@ -303,6 +303,7 @@ end
     let analysis_engine = editor.server().analysis_engine_for_uri(&main_uri);
     let main_file_id = analysis_engine
         .read()
+        .view()
         .file_id(&crate::test::harness::fixture_path("/main.rb"))
         .expect("rescue fixture must be registered in the analysis engine");
     let method_return_outcomes = analysis_engine

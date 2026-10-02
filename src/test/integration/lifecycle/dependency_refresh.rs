@@ -54,6 +54,7 @@ async fn delayed_refresh(change: Change) {
     let source_snapshot = workspace
         .analysis_engine
         .read()
+        .view()
         .source_snapshot_for_path(&path);
     if matches!(change, Change::Close) {
         workspace.set_dependency_require_paths(vec![dependency.clone()]);
@@ -87,6 +88,7 @@ async fn delayed_refresh(change: Change) {
                 workspace
                     .analysis_engine
                     .read()
+                    .view()
                     .source_snapshot_for_path(&path),
                 source_snapshot,
                 "dependency-only changes must exercise unchanged consumer source identity"
@@ -100,6 +102,7 @@ async fn delayed_refresh(change: Change) {
                 workspace
                     .analysis_engine
                     .read()
+                    .view()
                     .source_snapshot_for_path(&path),
                 source_snapshot,
                 "the retired engine must retain its old source, distinct from the new owner"
@@ -118,6 +121,7 @@ async fn delayed_refresh(change: Change) {
                 workspace
                     .analysis_engine
                     .read()
+                    .view()
                     .source_snapshot_for_path(&path),
                 source_snapshot,
                 "opening a required file must exercise unchanged consumer source identity"

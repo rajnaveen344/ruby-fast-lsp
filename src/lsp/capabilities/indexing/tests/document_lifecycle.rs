@@ -23,9 +23,10 @@ async fn did_open_registers_source_in_analysis_engine() {
     let path = uri.to_file_path().expect("file URI must convert to path");
     let engine = server.orphan_engine().read();
     let file_id = engine
+        .view()
         .file_id(path)
         .expect("did_open must register file in analysis engine");
-    let file = engine.file(file_id).unwrap();
+    let file = engine.view().file(file_id).unwrap();
     assert_eq!(file.line_index.len(), "A = 1".len());
     assert!(file.source_text().is_none());
 }
@@ -303,9 +304,13 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
     let path = uri.to_file_path().expect("file URI must convert to path");
     let engine = server.orphan_engine().read();
     let file_id = engine
+        .view()
         .file_id(path)
         .expect("known external file must remain registered");
-    let file = engine.file(file_id).expect("registered file must exist");
+    let file = engine
+        .view()
+        .file(file_id)
+        .expect("registered file must exist");
     assert_eq!(file.kind, SourceKind::Stub);
     let query = AnalysisQuery::new(&engine);
     assert_eq!(query.methods_for_fqn(&puts_fqn).len(), 1);
@@ -343,9 +348,10 @@ async fn did_change_updates_analysis_engine_source() {
     let path = uri.to_file_path().expect("file URI must convert to path");
     let engine = server.orphan_engine().read();
     let file_id = engine
+        .view()
         .file_id(path)
         .expect("did_change must register file in analysis engine");
-    let file = engine.file(file_id).unwrap();
+    let file = engine.view().file(file_id).unwrap();
     assert_eq!(file.line_index.len(), "A = 2".len());
     assert!(file.source_text().is_none());
 }

@@ -306,7 +306,7 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let file_id = analysis_engine.read().file_id(&path).unwrap_or_else(|| {
+        let file_id = analysis_engine.read().view().file_id(&path).unwrap_or_else(|| {
             unreachable_invariant!(
                 what = "project semantic seed received an unregistered source {}",
                 why = "batch file identities must be fixed before declaration collection",
@@ -391,14 +391,19 @@ impl FileProcessor {
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
         facts: FileAnalysis,
     ) {
-        let file_id = analysis_engine.read().file_id(path).unwrap_or_else(|| {
-            unreachable_invariant!(
-                what = "deterministic project fact replacement received an unregistered source {}",
-                why = "the bounded batch must be registered before semantic collection",
-                fix = "preserve the pre-registration and ordered replacement lifecycle",
-                path.display(),
-            )
-        });
+        let file_id = analysis_engine
+            .read()
+            .view()
+            .file_id(path)
+            .unwrap_or_else(|| {
+                unreachable_invariant!(
+                    what =
+                        "deterministic project fact replacement received an unregistered source {}",
+                    why = "the bounded batch must be registered before semantic collection",
+                    fix = "preserve the pre-registration and ordered replacement lifecycle",
+                    path.display(),
+                )
+            });
         replace_file_analysis(analysis_engine, file_id, facts, FileResolution::Deferred);
     }
 
@@ -410,7 +415,7 @@ impl FileProcessor {
         facts: FileAnalysis,
     ) -> bool {
         let mut engine = analysis_engine.write();
-        if engine.source_snapshot_for_path(path) != Some(source_snapshot) {
+        if engine.view().source_snapshot_for_path(path) != Some(source_snapshot) {
             return false;
         }
         engine
@@ -571,7 +576,7 @@ impl FileProcessor {
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         let registration_started = Instant::now();
         let analysis_file_id = if retain_collected_facts {
-            analysis_engine.read().file_id(&path).unwrap_or_else(|| {
+            analysis_engine.read().view().file_id(&path).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "deterministic project batch collection received an unregistered source {}",
                         why = "every batch file must be pre-registered before parallel semantic reads begin",
@@ -582,7 +587,7 @@ impl FileProcessor {
         } else {
             let mut engine = analysis_engine.write();
             if !insert_collected_facts {
-                if let Some(file_id) = engine.file_id(&path) {
+                if let Some(file_id) = engine.view().file_id(&path) {
                     file_id
                 } else {
                     engine.register_file(ruby_analysis::engine::SourceFileInput {
@@ -772,8 +777,9 @@ impl FileProcessor {
         let analysis_engine = sink.engine_for_uri(uri);
         let engine = analysis_engine.read();
         engine
+            .view()
             .file_id(&path)
-            .and_then(|file_id| engine.file(file_id))
+            .and_then(|file_id| engine.view().file(file_id))
             .map(|file| file.kind)
             .unwrap_or(SourceKind::Project)
     }

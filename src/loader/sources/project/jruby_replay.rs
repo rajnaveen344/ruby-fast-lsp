@@ -75,7 +75,7 @@ impl IndexerProject {
                     })?;
                     let source_snapshot = {
                         let engine = analysis_engine.read();
-                        let Some(file_id) = engine.file_id(file_path) else {
+                        let Some(file_id) = engine.view().file_id(file_path) else {
                             unreachable_invariant!(
                                 what = "JRuby project replay received an unregistered source {}",
                                 why = "replay is selected only from the completed project pass",
@@ -83,14 +83,14 @@ impl IndexerProject {
                                 file_path.display(),
                             );
                         };
-                        if open_document && !engine.file_content_matches(file_id, &content) {
+                        if open_document && !engine.view().file_content_matches(file_id, &content) {
                             info!(
                                 "Skipping stale JRuby replay snapshot for open document {}",
                                 file_path.display()
                             );
                             return Ok(None);
                         }
-                        engine.source_snapshot_for_path(file_path).unwrap_or_else(|| {
+                        engine.view().source_snapshot_for_path(file_path).unwrap_or_else(|| {
                             unreachable_invariant!(
                                 what = "JRuby project replay lost source revision for {}",
                                 why = "every registered source has one monotonic revision",

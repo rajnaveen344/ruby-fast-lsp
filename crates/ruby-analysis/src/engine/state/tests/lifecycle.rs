@@ -26,8 +26,8 @@ fn file_ids_are_stable_across_updates() {
     let second = register_project_file(&mut engine, "app/user.rb", "A = 2");
 
     assert_eq!(first, second);
-    assert_eq!(engine.file_count(), 1);
-    let file = engine.file(first).unwrap();
+    assert_eq!(engine.view().file_count(), 1);
+    let file = engine.view().file(first).unwrap();
     assert_eq!(file.line_index.len(), "A = 2".len());
     assert!(file.source_text().is_none());
 }
@@ -37,12 +37,12 @@ fn source_revisions_change_only_for_distinct_registered_snapshots() {
     let mut engine = Project::new();
     let path = std::path::PathBuf::from("app/utility.rb");
     let first = register_project_file(&mut engine, path.clone(), "module Utility; end");
-    let first_snapshot = engine.source_snapshot_for_path(&path).unwrap();
+    let first_snapshot = engine.view().source_snapshot_for_path(&path).unwrap();
 
     let identical = register_project_file(&mut engine, path.clone(), "module Utility; end");
     assert_eq!(identical, first);
     assert_eq!(
-        engine.source_snapshot_for_path(&path),
+        engine.view().source_snapshot_for_path(&path),
         Some(first_snapshot),
         "byte-identical registration must retain the source snapshot identity"
     );
@@ -53,7 +53,7 @@ fn source_revisions_change_only_for_distinct_registered_snapshots() {
         "module Utility; def self.lookup; end; end",
     );
     assert_ne!(
-        engine.source_snapshot_for_path(&path),
+        engine.view().source_snapshot_for_path(&path),
         Some(first_snapshot),
         "a content change must create a new source snapshot identity"
     );
@@ -64,7 +64,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
     let mut engine = Project::new();
     let path = std::path::PathBuf::from("app/utility.rb");
     let file_id = register_project_file(&mut engine, path.clone(), "module Utility; end");
-    let stale_snapshot = engine.source_snapshot_for_path(&path).unwrap();
+    let stale_snapshot = engine.view().source_snapshot_for_path(&path).unwrap();
     register_project_file(
         &mut engine,
         path,
@@ -107,7 +107,7 @@ fn source_kind_updates_with_file() {
         kind: SourceKind::Gem,
     });
 
-    assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
+    assert_eq!(engine.view().file(file_id).unwrap().kind, SourceKind::Gem);
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn replace_facts_removes_stale_type_facts() {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::integer(),
-                engine.text_range(file_id, 0, 5),
+                engine.view().text_range(file_id, 0, 5),
                 TypeProvenance::Assignment,
             )],
             ..Default::default()
@@ -166,7 +166,7 @@ fn replace_facts_removes_stale_type_facts() {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::string(),
-                engine.text_range(file_id, 10, 15),
+                engine.view().text_range(file_id, 10, 15),
                 TypeProvenance::Assignment,
             )],
             ..Default::default()
@@ -196,7 +196,7 @@ fn replace_facts_removes_stale_symbol_facts() {
             symbols: vec![SymbolFact::new(
                 fqn.clone(),
                 SymbolKind::Class,
-                engine.text_range(file_id, 0, 10),
+                engine.view().text_range(file_id, 0, 10),
             )],
             ..Default::default()
         },
@@ -208,7 +208,7 @@ fn replace_facts_removes_stale_symbol_facts() {
             symbols: vec![SymbolFact::new(
                 fqn.clone(),
                 SymbolKind::Class,
-                engine.text_range(file_id, 20, 30),
+                engine.view().text_range(file_id, 20, 30),
             )],
             ..Default::default()
         },
@@ -246,6 +246,7 @@ fn source_positions_use_utf16_code_units() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "unicode.rb", "a😀b\n");
     let file = engine
+        .view()
         .file(file_id)
         .expect("registered source should exist");
 
@@ -265,10 +266,13 @@ fn borrowed_source_registration_preserves_ascii_and_utf16_semantics() {
     drop(ascii);
     drop(unicode);
 
-    assert!(engine.file_content_matches(ascii_id, "class User\nend\n"));
-    assert!(engine.file_content_matches(unicode_id, "a😀b\n"));
+    assert!(engine
+        .view()
+        .file_content_matches(ascii_id, "class User\nend\n"));
+    assert!(engine.view().file_content_matches(unicode_id, "a😀b\n"));
     assert_eq!(
         engine
+            .view()
             .file(unicode_id)
             .expect("borrowed Unicode source should remain registered")
             .byte_offset_to_line_character(5),

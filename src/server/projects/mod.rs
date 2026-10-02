@@ -285,8 +285,9 @@ impl RubyLanguageServer {
         let kind = {
             let engine = engine.read();
             engine
+                .view()
                 .file_id(&path)
-                .and_then(|file_id| engine.file(file_id).map(|file| file.kind))
+                .and_then(|file_id| engine.view().file(file_id).map(|file| file.kind))
                 .unwrap_or(SourceKind::Excluded)
         };
         self.extension_project_context_for_uri(uri, kind)
@@ -524,7 +525,13 @@ impl ProjectRegistry {
         let path = uri.to_file_path().ok()?;
         let mut owner = None;
         for workspace in self.workspaces.read().iter() {
-            if workspace.analysis_engine.read().file_id(&path).is_none() {
+            if workspace
+                .analysis_engine
+                .read()
+                .view()
+                .file_id(&path)
+                .is_none()
+            {
                 continue;
             }
             if owner.is_some() {
@@ -574,7 +581,7 @@ impl ProjectRegistry {
                 continue;
             }
             let mut engine = analysis_engine.write();
-            if let Some(file_id) = engine.file_id(&path) {
+            if let Some(file_id) = engine.view().file_id(&path) {
                 engine.remove(file_id, ruby_analysis::engine::ResolveMode::Immediate);
             }
         }

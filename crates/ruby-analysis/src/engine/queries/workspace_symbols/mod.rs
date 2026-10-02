@@ -73,6 +73,7 @@ fn fact_is_project(query: &View<'_>, fact: &SymbolFact) -> bool {
     !fact.fqn.has_generated_owner()
         && query
             .engine
+            .view()
             .file(fact.range.file_id)
             .is_some_and(|file| file.kind.is_workspace_owned())
 }

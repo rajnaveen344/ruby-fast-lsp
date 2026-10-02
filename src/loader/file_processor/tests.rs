@@ -475,10 +475,16 @@ fn explicit_project_engine_owns_external_gem_source() {
     let engine = project.analysis_engine.read();
     let path = dependency_uri.to_file_path().unwrap();
     let file_id = engine
+        .view()
         .file_id(&path)
         .expect("gem source must be registered");
-    assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
-    assert!(server.orphan_engine().read().file_id(&path).is_none());
+    assert_eq!(engine.view().file(file_id).unwrap().kind, SourceKind::Gem);
+    assert!(server
+        .orphan_engine()
+        .read()
+        .view()
+        .file_id(&path)
+        .is_none());
 }
 
 fn collect_gem_template_facts(source: &str) -> FileAnalysis {
@@ -580,7 +586,7 @@ fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
     assert_eq!(definitions.len(), 1);
     assert_eq!(definitions[0].file_id, dependency_file);
     assert_eq!(
-        consumer.file(definitions[0].file_id).unwrap().path,
+        consumer.view().file(definitions[0].file_id).unwrap().path,
         crate::test::harness::fixture_path("/consumer/cache/widget/lib/widget.rb")
     );
 }

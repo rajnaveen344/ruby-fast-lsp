@@ -65,6 +65,7 @@ fn method_fact_in_path(
             return false;
         }
         engine
+            .view()
             .file(fact.range.file_id)
             .map(|file| file.path.ends_with(path_suffix))
             .unwrap_or(false)

@@ -326,7 +326,7 @@ impl IndexingCoordinator {
         let startup_dependency_seed = {
             let dependency_seed = dependency_seed_engine.read();
             invariant!(
-                dependency_seed.files().all(|source| matches!(
+                dependency_seed.view().files().all(|source| matches!(
                     source.kind,
                     ruby_analysis::core::SourceKind::Stub
                         | ruby_analysis::core::SourceKind::Stdlib
@@ -412,7 +412,7 @@ impl IndexingCoordinator {
         self.dependency_seed_engine = Some({
             let dependency_seed = dependency_seed_engine.read();
             invariant!(
-                dependency_seed.files().all(|source| matches!(
+                dependency_seed.view().files().all(|source| matches!(
                     source.kind,
                     ruby_analysis::core::SourceKind::Stub
                         | ruby_analysis::core::SourceKind::Stdlib

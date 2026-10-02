@@ -62,6 +62,7 @@ impl RequireFeatureIndex {
     pub fn build(roots: &[PathBuf], engine: Option<&AnalysisEngine>) -> Self {
         if let Some(engine) = engine {
             let paths: Vec<PathBuf> = engine
+                .view()
                 .files()
                 .filter(|file| {
                     file.path

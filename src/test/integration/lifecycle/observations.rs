@@ -252,6 +252,7 @@ async fn editing_a_definition_cannot_refresh_another_projects_consumer() {
     );
     assert!(
         beta.read()
+            .view()
             .file_id(alpha_uri.to_file_path().unwrap())
             .is_none(),
         "editing beta must not import an open consumer from another project"

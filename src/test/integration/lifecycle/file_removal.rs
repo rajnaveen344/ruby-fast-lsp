@@ -57,6 +57,7 @@ fn registered_paths(editor: &FakeEditor, filename: &str) -> Vec<PathBuf> {
         .expect("file has a workspace");
     let engine = workspace.analysis_engine.read();
     let mut paths = engine
+        .view()
         .files()
         .filter(|file| file.path.starts_with(Path::new(filename).parent().unwrap()))
         .map(|file| file.path.clone())
@@ -178,6 +179,7 @@ async fn deleted_then_recreated_file_matches_a_fresh_index() {
         let workspace = editor.workspace_for(&gateway).unwrap();
         let engine = workspace.analysis_engine.read();
         engine
+            .view()
             .file_id(Path::new(&gateway))
             .expect("indexed gateway")
     };
@@ -211,6 +213,7 @@ async fn deleted_then_recreated_file_matches_a_fresh_index() {
         let workspace = editor.workspace_for(&gateway).unwrap();
         let engine = workspace.analysis_engine.read();
         engine
+            .view()
             .file_id(Path::new(&gateway))
             .expect("indexed gateway")
     };
@@ -244,6 +247,7 @@ async fn a_rehomed_open_document_leaves_its_previous_project() {
         .server()
         .orphan_engine()
         .read()
+        .view()
         .file_id(&path)
         .is_some());
 
@@ -269,6 +273,7 @@ async fn a_rehomed_open_document_leaves_its_previous_project() {
             .server()
             .orphan_engine()
             .read()
+            .view()
             .file_id(&path)
             .is_none(),
         "the previous owner must forget a rehomed document"
@@ -281,7 +286,7 @@ fn is_registered(editor: &FakeEditor, filename: &str) -> bool {
         .workspace_for(filename)
         .expect("file has a workspace");
     let engine = workspace.analysis_engine.read();
-    engine.file_id(Path::new(filename)).is_some()
+    engine.view().file_id(Path::new(filename)).is_some()
 }
 
 #[tokio::test]

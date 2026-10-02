@@ -72,7 +72,6 @@ impl<'a> View<'a> {
             .filter(|fact| {
                 fact.owner == *owner
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind == SourceKind::Signature)
             })
@@ -129,7 +128,6 @@ impl<'a> View<'a> {
             .filter(|fact| {
                 fact.owner == *owner
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind == SourceKind::Signature)
             })

@@ -14,6 +14,7 @@ use crate::core::{LibraryPackageId, SourceFileId, SourceKind, TextRange};
 use crate::engine::persist::fingerprint::SemanticExportFingerprint;
 
 use super::Project;
+use crate::engine::View;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
@@ -466,10 +467,6 @@ impl Project {
         self.files.register_borrowed(path, content, kind)
     }
 
-    pub fn source_snapshot_for_path(&self, path: impl AsRef<Path>) -> Option<SourceFileSnapshot> {
-        self.files.snapshot_for_path(path, self.instance_id)
-    }
-
     /// Register a source only if no newer registration occurred after the
     /// caller captured `expected_snapshot`.
     pub fn register_file_borrowed_if_snapshot(
@@ -487,29 +484,38 @@ impl Project {
             self.instance_id,
         )
     }
+}
 
-    pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
-        self.files.id(path)
+impl<'a> View<'a> {
+    pub fn source_snapshot_for_path(&self, path: impl AsRef<Path>) -> Option<SourceFileSnapshot> {
+        self.engine
+            .files
+            .snapshot_for_path(path, self.engine.instance_id)
     }
 
-    pub fn file(&self, id: SourceFileId) -> Option<&SourceFile> {
-        self.files.get(id)
+    pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
+        self.engine.files.id(path)
+    }
+
+    pub fn file(&self, id: SourceFileId) -> Option<&'a SourceFile> {
+        self.engine.files.get(id)
     }
 
     pub fn file_content_matches(&self, id: SourceFileId, content: &str) -> bool {
-        self.files.content_matches(id, content)
+        self.engine.files.content_matches(id, content)
     }
 
-    pub fn files(&self) -> impl Iterator<Item = &SourceFile> {
-        self.files.iter()
+    pub fn files(&self) -> impl Iterator<Item = &'a SourceFile> + 'a {
+        self.engine.files.iter()
     }
 
     pub fn file_count(&self) -> usize {
-        self.files.len()
+        self.engine.files.len()
     }
 
     pub fn text_range(&self, file_id: SourceFileId, start_byte: u32, end_byte: u32) -> TextRange {
-        self.files
+        self.engine
+            .files
             .assert_known(file_id, "TextRange requested for unknown source file id");
         TextRange::new(file_id, start_byte, end_byte)
     }

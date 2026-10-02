@@ -902,11 +902,11 @@ mod tests {
         let second_definition =
             AnalysisQuery::new(&second).constant_definition_ranges(&parts, &[])[0];
         assert_eq!(
-            first.file(first_definition.file_id).unwrap().path,
+            first.view().file(first_definition.file_id).unwrap().path,
             crate::test::harness::fixture_path("/projects/one/vendor/widget.rb")
         );
         assert_eq!(
-            second.file(second_definition.file_id).unwrap().path,
+            second.view().file(second_definition.file_id).unwrap().path,
             crate::test::harness::fixture_path("/projects/two/vendor/widget.rb")
         );
         assert_ne!(first_definition.file_id, second_definition.file_id);
@@ -942,6 +942,6 @@ mod tests {
         assert!(error
             .to_string()
             .contains("source count does not match the requesting manifest"));
-        assert_eq!(engine.file_count(), 0);
+        assert_eq!(engine.view().file_count(), 0);
     }
 }

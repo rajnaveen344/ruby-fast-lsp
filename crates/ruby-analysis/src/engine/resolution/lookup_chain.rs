@@ -613,6 +613,7 @@ fn method_lookup_edge_is_language_owned(
 ) -> bool {
     matches!(
         engine
+            .view()
             .file(edge.range.file_id)
             .unwrap_or_else(|| {
                 unreachable_invariant!(

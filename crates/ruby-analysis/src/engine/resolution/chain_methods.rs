@@ -78,6 +78,7 @@ pub(in crate::engine) fn method_facts_in_chain(
 
         if facts.iter().any(|fact| {
             engine
+                .view()
                 .file(fact.range.file_id)
                 .expect_invariant(
                     "method fact references an unregistered source file",
@@ -89,6 +90,7 @@ pub(in crate::engine) fn method_facts_in_chain(
         }) {
             facts.retain(|fact| {
                 engine
+                    .view()
                     .file(fact.range.file_id)
                     .expect_invariant(
                         "method fact references an unregistered source file",
@@ -316,7 +318,7 @@ pub(super) fn default_basic_object_method_missing_fact(
 ) -> bool {
     fact.owner == basic_object_instance_fqn()
         && method_name_from_fact(fact) == method_missing_method()
-        && engine.file(fact.range.file_id).is_some_and(|file| {
+        && engine.view().file(fact.range.file_id).is_some_and(|file| {
             matches!(
                 file.kind,
                 crate::core::SourceKind::Stub | crate::core::SourceKind::Signature
@@ -331,7 +333,7 @@ fn default_basic_object_method_missing_callee(
     callee.owner == basic_object_instance_fqn()
         && !callee.definition_ranges.is_empty()
         && callee.definition_ranges.iter().all(|range| {
-            engine.file(range.file_id).is_some_and(|file| {
+            engine.view().file(range.file_id).is_some_and(|file| {
                 matches!(
                     file.kind,
                     crate::core::SourceKind::Stub | crate::core::SourceKind::Signature

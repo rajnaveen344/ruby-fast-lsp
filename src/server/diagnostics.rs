@@ -68,6 +68,7 @@ impl RubyLanguageServer {
         let path = uri.to_file_path().ok()?;
         self.analysis_engine_for_uri(uri)
             .read()
+            .view()
             .source_snapshot_for_path(path)
     }
 
@@ -192,6 +193,7 @@ impl RubyLanguageServer {
         let mut updates = {
             let engine = workspace.analysis_engine.read();
             engine
+                .view()
                 .files()
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
@@ -217,6 +219,7 @@ impl RubyLanguageServer {
                         );
                     }
                     let snapshot = engine
+                        .view()
                         .source_snapshot_for_path(&file.path)
                         .expect_invariant(
                             "a registered project file has no source snapshot",
@@ -291,17 +294,21 @@ impl RubyLanguageServer {
                         status.phase,
                         IndexingPhase::Cancelled | IndexingPhase::Failed
                     )
-                    || engine.source_snapshot_for_path(&path) != Some(snapshot)
+                    || engine.view().source_snapshot_for_path(&path) != Some(snapshot)
                 {
                     break 'commit;
                 }
-                let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
+                let Some(file) = engine
+                    .view()
+                    .file_id(&path)
+                    .and_then(|id| engine.view().file(id))
+                else {
                     break 'commit;
                 };
                 if !file.kind.contributes_project_diagnostics()
-                    || document
-                        .as_ref()
-                        .is_some_and(|doc| !engine.file_content_matches(file.id, &doc.content))
+                    || document.as_ref().is_some_and(|doc| {
+                        !engine.view().file_content_matches(file.id, &doc.content)
+                    })
                 {
                     break 'commit;
                 }
@@ -361,7 +368,7 @@ pub(crate) fn unresolved_diagnostics_from_engine(
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-    let Some(file_id) = engine.file_id(&path) else {
+    let Some(file_id) = engine.view().file_id(&path) else {
         return Vec::new();
     };
 
@@ -374,7 +381,7 @@ pub(crate) fn unresolved_diagnostics_from_engine(
 
 /// Project a fact through its owning source, which must form a file URI.
 fn diagnostic_from_fact(engine: &AnalysisEngine, fact: &DiagnosticFact) -> Option<Diagnostic> {
-    let file = engine.file(fact.range.file_id)?;
+    let file = engine.view().file(fact.range.file_id)?;
     Url::from_file_path(&file.path).ok()?;
     diagnostic_from_fact_fast(file, fact)
 }
@@ -479,11 +486,17 @@ impl RubyLanguageServer {
                     )
                 };
                 let engine = engine.read();
-                let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
+                let Some(file) = engine
+                    .view()
+                    .file_id(&path)
+                    .and_then(|id| engine.view().file(id))
+                else {
                     continue;
                 };
                 if !file.kind.contributes_project_diagnostics()
-                    || !engine.file_content_matches(file.id, &document.content)
+                    || !engine
+                        .view()
+                        .file_content_matches(file.id, &document.content)
                 {
                     continue;
                 }
@@ -495,7 +508,7 @@ impl RubyLanguageServer {
                 );
                 self.append_external_linter_diagnostics_for_snapshot(
                     &uri,
-                    engine.source_snapshot_for_path(&path),
+                    engine.view().source_snapshot_for_path(&path),
                     &mut diagnostics,
                 );
                 let state = run_state();

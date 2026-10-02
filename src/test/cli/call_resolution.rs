@@ -268,6 +268,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
     let even_file_id = analysis_engine
         .read()
+        .view()
         .file_id(&crate::test::harness::fixture_path("/cycle_even.rb"))
         .expect("cycle fixture must be registered in the analysis engine");
     let equations_before_unchanged_edit = analysis_engine

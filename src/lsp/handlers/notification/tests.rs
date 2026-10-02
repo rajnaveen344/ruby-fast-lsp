@@ -312,6 +312,7 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
     assert!(workspace
         .analysis_engine
         .read()
+        .view()
         .file_id(&external_path)
         .is_some());
 
@@ -336,11 +337,11 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
 
     let engine = workspace.analysis_engine.read();
     assert!(
-        engine.file_id(&external_path).is_none(),
+        engine.view().file_id(&external_path).is_none(),
         "runtime rebuild must remove stale external implementation facts"
     );
     assert!(
-        engine.file_id(&source_path).is_some(),
+        engine.view().file_id(&source_path).is_some(),
         "open project documents must be restored even when runtime setup fails closed"
     );
     drop(engine);
@@ -442,6 +443,7 @@ async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts(
     let initial_files = workspace
         .analysis_engine
         .read()
+        .view()
         .files()
         .map(|file| (file.kind, file.path.clone()))
         .collect::<Vec<_>>();
@@ -471,14 +473,14 @@ async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts(
 
     let engine = workspace.analysis_engine.read();
     assert!(
-        !engine.files().any(|file| {
+        !engine.view().files().any(|file| {
             matches!(file.kind, SourceKind::External | SourceKind::Signature)
                 && file.path.to_string_lossy().contains("RichFixture")
         }),
         "changing the winning artifact must remove stale source, decompiled, and signature facts"
     );
     assert!(
-        engine.file_id(&source_path).is_some(),
+        engine.view().file_id(&source_path).is_some(),
         "the project source must be reindexed after the runtime rebuild"
     );
     assert!(workspace.indexing_status.snapshot().is_ready());

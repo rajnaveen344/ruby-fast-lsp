@@ -3,7 +3,7 @@ use ruby_analysis::engine::{AnalysisEngine, SourceFile};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 pub(crate) fn location_for_range(engine: &AnalysisEngine, range: TextRange) -> Option<Location> {
-    let file = engine.file(range.file_id)?;
+    let file = engine.view().file(range.file_id)?;
     Some(Location {
         uri: source_file_uri(file)?,
         range: lsp_range_for_text_range(file, range)?,

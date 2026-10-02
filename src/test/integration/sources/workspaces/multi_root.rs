@@ -287,6 +287,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
             .server()
             .orphan_engine()
             .read()
+            .view()
             .file_id(
                 entry_uri
                     .to_file_path()
@@ -350,10 +351,12 @@ async fn unbound_external_document_is_not_promoted_to_project_source() {
         .expect("external URI must be a file path");
     let orphan = editor.server().orphan_engine().read();
     let file_id = orphan
+        .view()
         .file_id(&path)
         .expect("unbound open document must retain local interactive facts");
     assert_eq!(
         orphan
+            .view()
             .file(file_id)
             .expect("open file metadata must exist")
             .kind,
@@ -452,6 +455,7 @@ fn method_fact_in_path(
                     return false;
                 }
                 engine
+                    .view()
                     .file(fact.range.file_id)
                     .map(|file| file.path.ends_with(path_suffix))
                     .unwrap_or(false)

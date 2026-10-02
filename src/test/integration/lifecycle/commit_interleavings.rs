@@ -25,7 +25,11 @@ fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
     let uri = crate::test::harness::fixture_uri(format!("/{filename}"));
     let path = uri.to_file_path().unwrap();
     let engine = editor.server().analysis_engine_for_uri(&uri);
-    let snapshot = engine.read().source_snapshot_for_path(&path).unwrap();
+    let snapshot = engine
+        .read()
+        .view()
+        .source_snapshot_for_path(&path)
+        .unwrap();
     let known = Arc::new(engine.read().view().known_namespace_fqns());
     let facts = FileProcessor::new()
         .collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
@@ -37,7 +41,7 @@ fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
         .expect("controlled background collection must succeed")
         .analysis;
     assert_eq!(
-        engine.read().source_snapshot_for_path(&path),
+        engine.read().view().source_snapshot_for_path(&path),
         Some(snapshot),
         "collection must not replace the live source identity"
     );

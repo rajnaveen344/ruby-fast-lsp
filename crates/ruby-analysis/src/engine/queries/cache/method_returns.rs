@@ -171,8 +171,7 @@ impl<'a> View<'a> {
             .method_facts_matching_owner_name(&fact.owner, method)
             .into_iter()
             .filter(|signature| {
-                self.engine
-                    .file(signature.range.file_id)
+                self.file(signature.range.file_id)
                     .expect_invariant(
                         "RBS method fact references an unregistered source file",
                         "type overlay requires stable signature metadata",

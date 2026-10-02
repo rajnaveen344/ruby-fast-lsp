@@ -101,6 +101,7 @@ async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
         .server()
         .orphan_engine()
         .read()
+        .view()
         .file_id(path)
         .is_some());
 }
@@ -118,6 +119,7 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
         .server()
         .orphan_engine()
         .read()
+        .view()
         .file_id(&file)
         .is_some());
 
@@ -133,7 +135,12 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
     .await;
 
     let project = editor.workspace_for(&filename).unwrap();
-    assert!(project.analysis_engine.read().file_id(&file).is_some());
+    assert!(project
+        .analysis_engine
+        .read()
+        .view()
+        .file_id(&file)
+        .is_some());
 }
 
 #[tokio::test]
