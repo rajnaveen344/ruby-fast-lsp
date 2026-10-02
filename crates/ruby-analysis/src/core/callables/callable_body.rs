@@ -53,7 +53,7 @@ pub(crate) enum CallableBodyExpression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct CallableBodySummary {
+pub struct CallableBodySummary {
     pub(crate) strict_arity: bool,
     pub(crate) parameters: Vec<CallableBodyParameter>,
     pub(crate) captures: Vec<String>,

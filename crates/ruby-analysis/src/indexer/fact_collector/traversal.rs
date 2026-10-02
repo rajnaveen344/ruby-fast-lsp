@@ -118,7 +118,6 @@ impl Visit<'_> for FactCollector {
         if self.options.record_local_read_unknown_reasons {
             let mut tracker = TypeTracker::new()
                 .with_semantics(self.semantics.project.clone())
-                .with_analysis_query_cache(self.semantics.query_cache.clone())
                 .with_local_read_types();
             tracker.track_program(node);
             self.install_local_read_types(tracker.take_local_read_types());

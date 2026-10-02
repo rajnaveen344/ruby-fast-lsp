@@ -1,7 +1,6 @@
 //! Method inputs and semantic lookup context supplied before traversal.
 
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
-use crate::engine::AnalysisQueryCache;
 use crate::inference::semantics::Semantics;
 use crate::inference::type_tracker::TypeTracker;
 use std::collections::{HashMap, HashSet};
@@ -23,7 +22,6 @@ pub(in crate::inference::type_tracker) struct MethodContext {
 pub(in crate::inference::type_tracker) struct AnalysisContext {
     /// Read-only project semantics for mid-walk reads; see [`Semantics`].
     pub(in crate::inference::type_tracker) project: Option<Arc<dyn Semantics>>,
-    pub(in crate::inference::type_tracker) query_cache: Option<Arc<AnalysisQueryCache>>,
     /// Same-file method return facts already collected before this method.
     pub(in crate::inference::type_tracker) method_returns: HashMap<FullyQualifiedName, RubyType>,
     /// Same-file methods whose complete current-pass declaration set proves
@@ -44,11 +42,6 @@ pub(in crate::inference::type_tracker) struct AnalysisContext {
 impl TypeTracker {
     pub(crate) fn with_semantics(mut self, project: Arc<dyn Semantics>) -> Self {
         self.analysis.project = Some(project);
-        self
-    }
-
-    pub fn with_analysis_query_cache(mut self, cache: Arc<AnalysisQueryCache>) -> Self {
-        self.analysis.query_cache = Some(cache);
         self
     }
 

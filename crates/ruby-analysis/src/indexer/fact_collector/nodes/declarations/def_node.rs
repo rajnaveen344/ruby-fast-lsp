@@ -613,7 +613,6 @@ impl FactCollector {
     ) -> MethodReturnEquation {
         let mut tracker = TypeTracker::new();
         tracker = tracker.with_semantics(self.semantics.project.clone());
-        tracker = tracker.with_analysis_query_cache(self.semantics.query_cache.clone());
         tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
         tracker = tracker
             .with_local_public_method_candidates(self.local_public_method_candidates_for_tracker());

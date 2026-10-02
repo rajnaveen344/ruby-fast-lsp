@@ -4,8 +4,9 @@
 use crate::core::callables::callable_body::CallableBodySummary;
 use crate::core::MethodReceiver;
 use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, NamespaceKind, ResolvedMethodCallee,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject, UnknownReason,
+    ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind,
+    ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject,
+    UnknownReason,
 };
 use crate::engine::{AnalysisQueryCache, Project, View};
 use crate::inference::higher_order::PreparedCallableSet;
@@ -13,9 +14,21 @@ use crate::inference::method::constructor::ConstructorResult;
 use crate::inference::method::return_type::method_call_return_type;
 use crate::inference::semantics::{LocalType, ReceiverAccess, Semantics};
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// One consistent view of the project: every read sees the same state.
 impl Semantics for View<'_> {
+    fn for_walk<'s>(self: Arc<Self>) -> Arc<dyn Semantics + 's>
+    where
+        Self: 's,
+    {
+        self
+    }
+
+    fn memo_identity(&self) -> (u64, u64) {
+        self.query_cache_identity()
+    }
+
     fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool {
         View::has_graph_node(self, namespace)
     }
@@ -42,7 +55,6 @@ impl Semantics for View<'_> {
         method: &RubyMethod,
         current_namespace: &[RubyConstant],
         namespace_kind: NamespaceKind,
-        cache: &AnalysisQueryCache,
     ) -> Vec<ResolvedMethodCallee> {
         let namespace_fqn = match receiver {
             MethodReceiver::Constant(path) => {
@@ -59,8 +71,11 @@ impl Semantics for View<'_> {
             | MethodReceiver::MethodCall { .. }
             | MethodReceiver::Literal(_) => return Vec::new(),
         };
-        self.resolve_method_callees_cached(&namespace_fqn, method, cache)
-            .unwrap_or_default()
+        match self.memo {
+            Some(memo) => self.resolve_method_callees_cached(&namespace_fqn, method, memo),
+            None => self.resolve_method_callees(&namespace_fqn, method),
+        }
+        .unwrap_or_default()
     }
 
     fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
@@ -149,7 +164,6 @@ impl Semantics for View<'_> {
 
     fn prepare_higher_order_call(
         &self,
-        cache: Option<&AnalysisQueryCache>,
         receiver_type: Option<&RubyType>,
         implicit_namespace: &FullyQualifiedName,
         method_name: &str,
@@ -157,7 +171,6 @@ impl Semantics for View<'_> {
     ) -> Result<PreparedCallableSet, UnknownReason> {
         crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
             Some(self),
-            cache,
             receiver_type,
             Some(implicit_namespace),
             method_name,
@@ -170,9 +183,8 @@ impl Semantics for View<'_> {
         receiver: &FullyQualifiedName,
         method: &RubyMethod,
         access: ReceiverAccess<'_>,
-        cache: Option<&AnalysisQueryCache>,
     ) -> Option<RubyType> {
-        match (access, cache) {
+        match (access, self.memo) {
             (ReceiverAccess::Any, None) => self.method_return_type_for_receiver(receiver, method),
             (ReceiverAccess::Any, Some(cache)) => {
                 self.method_return_type_for_receiver_cached(receiver, method, cache)
@@ -189,6 +201,30 @@ impl Semantics for View<'_> {
                 self.method_return_type_for_public_receiver_cached(receiver, method, cache)
             }
         }
+    }
+
+    fn method_signature_facts(
+        &self,
+        namespace: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Arc<Vec<MethodFact>> {
+        match self.memo {
+            Some(memo) => self.resolve_method_signature_facts_cached_arc(namespace, method, memo),
+            None => Arc::new(self.resolve_method_signature_facts(namespace, method)),
+        }
+    }
+
+    fn method_signature_facts_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Arc<Vec<MethodFact>> {
+        Arc::new(match self.memo {
+            Some(memo) => {
+                self.resolve_method_signature_facts_for_type_cached(receiver_type, method, memo)
+            }
+            None => self.resolve_method_signature_facts_for_type(receiver_type, method),
+        })
     }
 
     fn method_call_return_type(
@@ -236,15 +272,74 @@ impl Semantics for View<'_> {
     }
 }
 
-/// The shared project engine: each read takes its own short read guard and
-/// delegates to a [`View`] of the guarded state.
-impl Semantics for RwLock<Project> {
+/// A source of project views: each read takes its own short read guard and
+/// answers through a [`View`] of the guarded state, so no guard is held
+/// across a walk.
+trait ProjectReads: Send + Sync {
+    fn with_view<R>(&self, read: impl FnOnce(&View<'_>) -> R) -> R;
+
+    fn walk<'s>(self: Arc<Self>) -> Arc<dyn Semantics + 's>
+    where
+        Self: 's;
+}
+
+/// The shared project engine. A walk over it reads through a [`ProjectWalk`]
+/// so its method lookups share one memo.
+impl ProjectReads for RwLock<Project> {
+    fn with_view<R>(&self, read: impl FnOnce(&View<'_>) -> R) -> R {
+        read(&self.read().view())
+    }
+
+    fn walk<'s>(self: Arc<Self>) -> Arc<dyn Semantics + 's>
+    where
+        Self: 's,
+    {
+        Arc::new(ProjectWalk {
+            project: self,
+            memo: AnalysisQueryCache::default(),
+        })
+    }
+}
+
+/// One file walk over the shared engine: every read takes its own short read
+/// guard, and the walk's method lookups share one memo bound to the engine
+/// identity, so a write between reads drops stale entries.
+struct ProjectWalk {
+    project: Arc<RwLock<Project>>,
+    memo: AnalysisQueryCache,
+}
+
+impl ProjectReads for ProjectWalk {
+    fn with_view<R>(&self, read: impl FnOnce(&View<'_>) -> R) -> R {
+        read(&self.project.read().view().with_memo(&self.memo))
+    }
+
+    fn walk<'s>(self: Arc<Self>) -> Arc<dyn Semantics + 's>
+    where
+        Self: 's,
+    {
+        self
+    }
+}
+
+impl<T: ProjectReads> Semantics for T {
+    fn for_walk<'s>(self: Arc<Self>) -> Arc<dyn Semantics + 's>
+    where
+        Self: 's,
+    {
+        ProjectReads::walk(self)
+    }
+
+    fn memo_identity(&self) -> (u64, u64) {
+        self.with_view(|view| Semantics::memo_identity(view))
+    }
+
     fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool {
-        Semantics::has_graph_node(&self.read().view(), namespace)
+        self.with_view(|view| Semantics::has_graph_node(view, namespace))
     }
 
     fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        Semantics::namespace_node_kind(&self.read().view(), namespace)
+        self.with_view(|view| Semantics::namespace_node_kind(view, namespace))
     }
 
     fn resolve_constant_in_context(
@@ -252,11 +347,11 @@ impl Semantics for RwLock<Project> {
         parts: &[RubyConstant],
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        Semantics::resolve_constant_in_context(&self.read().view(), parts, lexical_context)
+        self.with_view(|view| Semantics::resolve_constant_in_context(view, parts, lexical_context))
     }
 
     fn type_namespace(&self, ruby_type: &RubyType) -> Option<FullyQualifiedName> {
-        Semantics::type_namespace(&self.read().view(), ruby_type)
+        self.with_view(|view| Semantics::type_namespace(view, ruby_type))
     }
 
     fn extension_call_callees(
@@ -265,24 +360,24 @@ impl Semantics for RwLock<Project> {
         method: &RubyMethod,
         current_namespace: &[RubyConstant],
         namespace_kind: NamespaceKind,
-        cache: &AnalysisQueryCache,
     ) -> Vec<ResolvedMethodCallee> {
-        Semantics::extension_call_callees(
-            &self.read().view(),
-            receiver,
-            method,
-            current_namespace,
-            namespace_kind,
-            cache,
-        )
+        self.with_view(|view| {
+            Semantics::extension_call_callees(
+                view,
+                receiver,
+                method,
+                current_namespace,
+                namespace_kind,
+            )
+        })
     }
 
     fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        Semantics::type_facts_for(&self.read().view(), subject)
+        self.with_view(|view| Semantics::type_facts_for(view, subject))
     }
 
     fn method_fqns_in_file(&self, file_id: SourceFileId) -> Vec<FullyQualifiedName> {
-        Semantics::method_fqns_in_file(&self.read().view(), file_id)
+        self.with_view(|view| Semantics::method_fqns_in_file(view, file_id))
     }
 
     fn first_constant_value_type(
@@ -290,7 +385,7 @@ impl Semantics for RwLock<Project> {
         candidates: &[FullyQualifiedName],
         local: LocalType<'_>,
     ) -> Option<(FullyQualifiedName, RubyType)> {
-        Semantics::first_constant_value_type(&self.read().view(), candidates, local)
+        self.with_view(|view| Semantics::first_constant_value_type(view, candidates, local))
     }
 
     fn constant_value_or_reference_type(
@@ -298,11 +393,11 @@ impl Semantics for RwLock<Project> {
         constant: &FullyQualifiedName,
         path: &[RubyConstant],
     ) -> Option<RubyType> {
-        Semantics::constant_value_or_reference_type(&self.read().view(), constant, path)
+        self.with_view(|view| Semantics::constant_value_or_reference_type(view, constant, path))
     }
 
     fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
-        Semantics::constant_reference_type(&self.read().view(), path)
+        self.with_view(|view| Semantics::constant_reference_type(view, path))
     }
 
     fn resolved_constant_value_type(
@@ -310,7 +405,9 @@ impl Semantics for RwLock<Project> {
         name: &RubyConstant,
         current_namespace: &[RubyConstant],
     ) -> Option<RubyType> {
-        Semantics::resolved_constant_value_type(&self.read().view(), name, current_namespace)
+        self.with_view(|view| {
+            Semantics::resolved_constant_value_type(view, name, current_namespace)
+        })
     }
 
     fn constant_value_type_in_context(
@@ -319,19 +416,16 @@ impl Semantics for RwLock<Project> {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<RubyType> {
-        Semantics::constant_value_type_in_context(
-            &self.read().view(),
-            parts,
-            absolute,
-            lexical_context,
-        )
+        self.with_view(|view| {
+            Semantics::constant_value_type_in_context(view, parts, absolute, lexical_context)
+        })
     }
 
     fn constant_callable_body(
         &self,
         constant: &FullyQualifiedName,
     ) -> Option<Result<CallableBodySummary, UnknownReason>> {
-        Semantics::constant_callable_body(&self.read().view(), constant)
+        self.with_view(|view| Semantics::constant_callable_body(view, constant))
     }
 
     fn constant_callable_body_in_context(
@@ -340,38 +434,35 @@ impl Semantics for RwLock<Project> {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<Result<CallableBodySummary, UnknownReason>> {
-        Semantics::constant_callable_body_in_context(
-            &self.read().view(),
-            parts,
-            absolute,
-            lexical_context,
-        )
+        self.with_view(|view| {
+            Semantics::constant_callable_body_in_context(view, parts, absolute, lexical_context)
+        })
     }
 
     fn constant_dependency_type(&self, dependency: &ConstantTypeDependency) -> Option<RubyType> {
-        Semantics::constant_dependency_type(&self.read().view(), dependency)
+        self.with_view(|view| Semantics::constant_dependency_type(view, dependency))
     }
 
     fn constructor_result(&self, class: &FullyQualifiedName) -> ConstructorResult {
-        Semantics::constructor_result(&self.read().view(), class)
+        self.with_view(|view| Semantics::constructor_result(view, class))
     }
 
     fn prepare_higher_order_call(
         &self,
-        cache: Option<&AnalysisQueryCache>,
         receiver_type: Option<&RubyType>,
         implicit_namespace: &FullyQualifiedName,
         method_name: &str,
         argument_types: &[RubyType],
     ) -> Result<PreparedCallableSet, UnknownReason> {
-        Semantics::prepare_higher_order_call(
-            &self.read().view(),
-            cache,
-            receiver_type,
-            implicit_namespace,
-            method_name,
-            argument_types,
-        )
+        self.with_view(|view| {
+            Semantics::prepare_higher_order_call(
+                view,
+                receiver_type,
+                implicit_namespace,
+                method_name,
+                argument_types,
+            )
+        })
     }
 
     fn receiver_method_return_type(
@@ -379,9 +470,28 @@ impl Semantics for RwLock<Project> {
         receiver: &FullyQualifiedName,
         method: &RubyMethod,
         access: ReceiverAccess<'_>,
-        cache: Option<&AnalysisQueryCache>,
     ) -> Option<RubyType> {
-        Semantics::receiver_method_return_type(&self.read().view(), receiver, method, access, cache)
+        self.with_view(|view| {
+            Semantics::receiver_method_return_type(view, receiver, method, access)
+        })
+    }
+
+    fn method_signature_facts(
+        &self,
+        namespace: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Arc<Vec<MethodFact>> {
+        self.with_view(|view| Semantics::method_signature_facts(view, namespace, method))
+    }
+
+    fn method_signature_facts_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Arc<Vec<MethodFact>> {
+        self.with_view(|view| {
+            Semantics::method_signature_facts_for_type(view, receiver_type, method)
+        })
     }
 
     fn method_call_return_type(
@@ -389,7 +499,7 @@ impl Semantics for RwLock<Project> {
         receiver_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
-        Semantics::method_call_return_type(&self.read().view(), receiver_type, method_name)
+        self.with_view(|view| Semantics::method_call_return_type(view, receiver_type, method_name))
     }
 
     fn rbs_parameter_contract_types(
@@ -398,7 +508,9 @@ impl Semantics for RwLock<Project> {
         owner: &FullyQualifiedName,
         parameter_names: &[&str],
     ) -> Vec<Option<RubyType>> {
-        Semantics::rbs_parameter_contract_types(&self.read().view(), method, owner, parameter_names)
+        self.with_view(|view| {
+            Semantics::rbs_parameter_contract_types(view, method, owner, parameter_names)
+        })
     }
 
     fn rbs_return_contract_type(
@@ -406,7 +518,7 @@ impl Semantics for RwLock<Project> {
         method: &FullyQualifiedName,
         owner: &FullyQualifiedName,
     ) -> Option<RubyType> {
-        Semantics::rbs_return_contract_type(&self.read().view(), method, owner)
+        self.with_view(|view| Semantics::rbs_return_contract_type(view, method, owner))
     }
 
     fn super_method_return_type(
@@ -415,11 +527,11 @@ impl Semantics for RwLock<Project> {
         method: &RubyMethod,
         local: LocalType<'_>,
     ) -> Option<RubyType> {
-        Semantics::super_method_return_type(&self.read().view(), namespace, method, local)
+        self.with_view(|view| Semantics::super_method_return_type(view, namespace, method, local))
     }
 
     fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
-        Semantics::has_method_return_equation(&self.read().view(), method)
+        self.with_view(|view| Semantics::has_method_return_equation(view, method))
     }
 }
 

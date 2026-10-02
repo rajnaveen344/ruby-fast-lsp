@@ -95,7 +95,6 @@ impl FactCollector {
             method,
             &self.scope_tracker.get_ns_stack(),
             self.scope_tracker.current_method_context(),
-            self.semantics.query_cache.as_ref(),
         )
     }
 

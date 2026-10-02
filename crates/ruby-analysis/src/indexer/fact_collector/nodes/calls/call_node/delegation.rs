@@ -23,12 +23,9 @@ impl FactCollector {
             let Ok(method) = RubyMethod::new(&receiver_method) else {
                 return;
             };
-            self.semantics.project.receiver_method_return_type(
-                &owner,
-                &method,
-                ReceiverAccess::Any,
-                None,
-            )
+            self.semantics
+                .project
+                .receiver_method_return_type(&owner, &method, ReceiverAccess::Any)
         };
 
         for method_name in methods {
@@ -101,7 +98,6 @@ impl FactCollector {
                 &owner,
                 &receiver_method,
                 ReceiverAccess::Any,
-                None,
             )
         };
 

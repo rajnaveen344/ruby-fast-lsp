@@ -155,12 +155,9 @@ impl FactCollector {
                 caller: &caller_namespace,
             }
         };
-        self.semantics.project.receiver_method_return_type(
-            &namespace,
-            &method,
-            access,
-            Some(&self.semantics.query_cache),
-        )
+        self.semantics
+            .project
+            .receiver_method_return_type(&namespace, &method, access)
     }
 
     fn local_method_return_type(&self, method_fqn: &FullyQualifiedName) -> Option<RubyType> {

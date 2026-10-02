@@ -36,7 +36,7 @@ tree; splitting implementation files does not expose mutable state to callers.
 | --- | --- | --- |
 | `environment` | `flow/environment.rs` | Current locals, callable bindings, correlated shape aliases and containment, and their proof metadata |
 | `context` | `context.rs` | Parameter contracts and the current class and method |
-| `analysis` | `context.rs` | Optional `Semantics` reads, query cache, and supplied same-file lookup evidence |
+| `analysis` | `context.rs` | Optional `Semantics` reads (the walk handle carries its lookup memo) and supplied same-file lookup evidence |
 | `returns` | `returns/mod.rs` | Private return terms, dependencies, explicit returns, and recursive approximation |
 | `observations` | `observations.rs` | Offset snapshots and exact local-read evidence for publication |
 | `control_flow` | `flow/mod.rs` | Loop bounds/depth and lexical rescue-entry accumulators |

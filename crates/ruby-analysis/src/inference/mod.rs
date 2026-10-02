@@ -221,6 +221,9 @@ pub(crate) mod higher_order;
 pub mod method;
 pub mod rbs;
 pub mod semantics;
+
+/// Opaque higher-order preparation result returned through `Semantics`.
+pub use higher_order::PreparedCallableSet;
 pub mod r#type;
 pub mod type_tracker;
 

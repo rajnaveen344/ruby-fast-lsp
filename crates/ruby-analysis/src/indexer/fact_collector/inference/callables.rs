@@ -197,7 +197,6 @@ impl FactCollector {
             .unwrap_or_default();
         let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
         self.semantics.project.prepare_higher_order_call(
-            Some(self.semantics.query_cache.as_ref()),
             receiver_type.as_ref(),
             &namespace,
             &method_name,
@@ -252,9 +251,7 @@ impl FactCollector {
                     )
                 })
                 .collect::<Vec<_>>();
-            let mut tracker = TypeTracker::new()
-                .with_semantics(self.semantics.project.clone())
-                .with_analysis_query_cache(self.semantics.query_cache.clone());
+            let mut tracker = TypeTracker::new().with_semantics(self.semantics.project.clone());
             let namespace = self.scope_tracker.get_ns_stack();
             if !namespace.is_empty() {
                 tracker.set_current_class(Some(FullyQualifiedName::namespace(namespace)));

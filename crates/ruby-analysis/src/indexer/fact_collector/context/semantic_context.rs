@@ -1,5 +1,4 @@
 use crate::core::FullyQualifiedName;
-use crate::engine::AnalysisQueryCache;
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::RubyDocument;
 use crate::inference::semantics::Semantics;
@@ -8,8 +7,9 @@ use std::sync::Arc;
 
 pub(in crate::indexer::fact_collector) struct SemanticContext {
     /// Read-only project semantics for mid-walk reads; see [`Semantics`].
+    /// It is the walk handle, so every read in this walk, including the
+    /// trackers it seeds, shares one method lookup memo.
     pub(in crate::indexer::fact_collector) project: Arc<dyn Semantics>,
-    pub(in crate::indexer::fact_collector) query_cache: Arc<AnalysisQueryCache>,
     pub(in crate::indexer::fact_collector) method_candidates: Arc<HashSet<FullyQualifiedName>>,
     /// Same-pass method identities whose complete collected declaration set is
     /// currently public and available. `Arc::make_mut` keeps updates O(1) in
@@ -27,6 +27,7 @@ impl SemanticContext {
         document: &RubyDocument,
         project: Arc<dyn Semantics>,
     ) -> Self {
+        let project = project.for_walk();
         let method_candidates = Arc::new(
             project
                 .method_fqns_in_file(document.analysis_file_id())
@@ -35,7 +36,6 @@ impl SemanticContext {
         );
         Self {
             project,
-            query_cache: Arc::new(AnalysisQueryCache::default()),
             method_candidates,
             public_method_candidates: Arc::new(HashSet::new()),
             known_namespaces: HashSet::new(),
@@ -45,10 +45,6 @@ impl SemanticContext {
 }
 
 impl FactCollector {
-    pub fn analysis_query_cache(&self) -> &AnalysisQueryCache {
-        self.semantics.query_cache.as_ref()
-    }
-
     pub fn with_shared_direct_known_namespaces(
         mut self,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,

@@ -40,7 +40,7 @@ struct PreparedCallable {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PreparedCallableSet {
+pub struct PreparedCallableSet {
     candidates: Vec<PreparedCallable>,
     block_parameter_types: Vec<RubyType>,
 }

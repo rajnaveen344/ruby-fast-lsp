@@ -231,7 +231,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B8c. Move callable-literal lowering helpers into inference.
   - [x] B8d. Move `Semantics`, `ReceiverAccess`, and `LocalType` to
         `inference/semantics.rs`; the engine keeps the impls.
-  - [ ] B8e. Inference takes `&dyn Semantics` instead of `AnalysisQuery`.
+  - [x] B8e. Inference takes `&dyn Semantics` instead of `AnalysisQuery`.
         Profiler comparison; use generics if dispatch costs show.
   - [ ] B8f. The fact collector and receiver queries take `dyn Semantics`.
         Profiler comparison.

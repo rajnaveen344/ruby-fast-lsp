@@ -216,7 +216,7 @@ impl FactCollector {
             } else {
                 let syntax_outcome =
                     crate::inference::method::return_type::method_call_type_outcome(
-                        None,
+                        None::<&dyn crate::inference::semantics::Semantics>,
                         receiver_type,
                         method_name,
                     );

@@ -26,12 +26,13 @@
 use crate::core::callables::callable_body::CallableBodySummary;
 use crate::core::MethodReceiver;
 use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, NamespaceKind, ResolvedMethodCallee,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject, UnknownReason,
+    ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind,
+    ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject,
+    UnknownReason,
 };
-use crate::engine::AnalysisQueryCache;
 use crate::inference::higher_order::PreparedCallableSet;
 use crate::inference::method::constructor::ConstructorResult;
+use std::sync::Arc;
 
 /// Which receiver methods a dispatched return lookup may see.
 #[derive(Debug, Clone, Copy)]
@@ -58,10 +59,23 @@ impl<'a> ReceiverAccess<'a> {
 }
 
 /// Local evidence from the walking file, consulted before the engine.
-pub(crate) type LocalType<'a> = &'a dyn Fn(&FullyQualifiedName) -> Option<RubyType>;
+pub type LocalType<'a> = &'a dyn Fn(&FullyQualifiedName) -> Option<RubyType>;
 
 /// Project semantics readable in the middle of a file walk.
-pub(crate) trait Semantics: Send + Sync {
+pub trait Semantics: Send + Sync {
+    // Walk scope.
+
+    /// The handle one file walk reads through. Reads through one handle may
+    /// share a memo of method lookups; a handle that already reads one
+    /// consistent state, or already carries a walk memo, returns itself.
+    fn for_walk<'s>(self: Arc<Self>) -> Arc<dyn Semantics + 's>
+    where
+        Self: 's;
+
+    /// The identity of the project state these reads observe; a memo keyed by
+    /// it must be dropped when the identity changes.
+    fn memo_identity(&self) -> (u64, u64);
+
     // Reads that decide which facts get emitted.
 
     /// Whether any graph node names `namespace`; a known namespace turns a
@@ -92,7 +106,6 @@ pub(crate) trait Semantics: Send + Sync {
         method: &RubyMethod,
         current_namespace: &[RubyConstant],
         namespace_kind: NamespaceKind,
-        cache: &AnalysisQueryCache,
     ) -> Vec<ResolvedMethodCallee>;
 
     /// Installed type facts for `subject`; extensions read runtime proxy types
@@ -168,7 +181,6 @@ pub(crate) trait Semantics: Send + Sync {
     /// parameters and the call result from it.
     fn prepare_higher_order_call(
         &self,
-        cache: Option<&AnalysisQueryCache>,
         receiver_type: Option<&RubyType>,
         implicit_namespace: &FullyQualifiedName,
         method_name: &str,
@@ -182,8 +194,24 @@ pub(crate) trait Semantics: Send + Sync {
         receiver: &FullyQualifiedName,
         method: &RubyMethod,
         access: ReceiverAccess<'_>,
-        cache: Option<&AnalysisQueryCache>,
     ) -> Option<RubyType>;
+
+    /// Signature facts for `method` dispatched through `namespace`; they
+    /// supply higher-order callable signatures and forwarded or yielded block
+    /// evidence.
+    fn method_signature_facts(
+        &self,
+        namespace: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Arc<Vec<MethodFact>>;
+
+    /// Signature facts for `method` on every namespace a receiver value type
+    /// dispatches through; higher-order calls on that receiver read them.
+    fn method_signature_facts_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Arc<Vec<MethodFact>>;
 
     /// A method's return type for a receiver value type; delegated methods
     /// take it as their local return.

@@ -5,8 +5,8 @@ use std::collections::{HashMap, VecDeque};
 
 use super::higher_order::prepare_higher_order_call_with_fallbacks_uncached;
 use crate::core::{FullyQualifiedName, RubyType};
-use crate::engine::{AnalysisQueryCache, View};
 use crate::inference::higher_order::PreparedCallableSet;
+use crate::inference::semantics::Semantics;
 
 const MAX_HIGHER_ORDER_PREPARE_CACHE_ENTRIES: usize = 256;
 
@@ -22,7 +22,7 @@ struct HigherOrderPrepareKey {
 ///
 /// Parallel project collection keeps this cache on the worker thread so identical
 /// `Array#each` / `Hash#map` / implicit-self prepares reuse the same bounded
-/// result without sharing `AnalysisQueryCache` across a file batch. Identity
+/// result without sharing a walk memo across a file batch. Identity
 /// changes (fact replacement, engine clone) drop the entries. Do not raise the
 /// cap without an RSS measurement; do not key this cache only on method name.
 struct HigherOrderPrepareCache {
@@ -116,15 +116,14 @@ fn cached_higher_order_prepare(
 /// One engine signature lookup shared by callable, forwarded-block, and
 /// direct-yield preparation. Collection receivers skip the engine and use the
 /// same embedded RBS path as ordinary Array/Hash method returns.
-pub(crate) fn prepare_higher_order_call_with_fallbacks(
-    query: Option<&View<'_>>,
-    cache: Option<&AnalysisQueryCache>,
+pub(crate) fn prepare_higher_order_call_with_fallbacks<S: Semantics + ?Sized>(
+    query: Option<&S>,
     receiver_type: Option<&RubyType>,
     implicit_namespace: Option<&FullyQualifiedName>,
     method_name: &str,
     argument_types: &[RubyType],
 ) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
-    let identity = query.map(View::query_cache_identity).unwrap_or((0, 0));
+    let identity = query.map_or((0, 0), Semantics::memo_identity);
     let key = HigherOrderPrepareKey {
         receiver_type: receiver_type.cloned(),
         implicit_namespace: implicit_namespace.cloned(),
@@ -134,7 +133,6 @@ pub(crate) fn prepare_higher_order_call_with_fallbacks(
     cached_higher_order_prepare(identity, key, || {
         prepare_higher_order_call_with_fallbacks_uncached(
             query,
-            cache,
             receiver_type,
             implicit_namespace,
             method_name,

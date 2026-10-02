@@ -242,12 +242,7 @@ impl TypeTracker {
         } else {
             ReceiverAccess::Public
         };
-        project.receiver_method_return_type(
-            &namespace,
-            &method,
-            access,
-            self.analysis.query_cache.as_deref(),
-        )
+        project.receiver_method_return_type(&namespace, &method, access)
     }
 
     pub(in crate::inference::type_tracker) fn local_method_return_type_for_receiver(

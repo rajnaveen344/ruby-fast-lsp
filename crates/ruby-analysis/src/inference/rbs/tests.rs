@@ -2,6 +2,7 @@ use super::catalog::rbs_method_name_catalog;
 use super::embedded_callable::prepare_rbs_higher_order_call;
 use super::*;
 use crate::core::RubyType;
+use crate::inference::semantics::Semantics;
 use rbs_parser::RbsType;
 
 #[test]
@@ -312,12 +313,22 @@ fn enumerable_each_with_object_binds_the_accumulator_argument() {
 #[test]
 fn higher_order_prepare_cache_reuses_identical_array_each_calls() {
     let receiver = RubyType::array_of(RubyType::integer());
-    let first =
-        prepare_higher_order_call_with_fallbacks(None, None, Some(&receiver), None, "each", &[])
-            .expect("Array#each must prepare through the cached fallback path");
-    let second =
-        prepare_higher_order_call_with_fallbacks(None, None, Some(&receiver), None, "each", &[])
-            .expect("repeated Array#each must hit the same prepare cache");
+    let first = prepare_higher_order_call_with_fallbacks(
+        None::<&dyn Semantics>,
+        Some(&receiver),
+        None,
+        "each",
+        &[],
+    )
+    .expect("Array#each must prepare through the cached fallback path");
+    let second = prepare_higher_order_call_with_fallbacks(
+        None::<&dyn Semantics>,
+        Some(&receiver),
+        None,
+        "each",
+        &[],
+    )
+    .expect("repeated Array#each must hit the same prepare cache");
     assert_eq!(
         first.block_parameter_types(),
         second.block_parameter_types()
@@ -328,8 +339,7 @@ fn higher_order_prepare_cache_reuses_identical_array_each_calls() {
 #[test]
 fn higher_order_prepare_cache_does_not_reuse_a_different_element_type() {
     let integers = prepare_higher_order_call_with_fallbacks(
-        None,
-        None,
+        None::<&dyn Semantics>,
         Some(&RubyType::array_of(RubyType::integer())),
         None,
         "each",
@@ -337,8 +347,7 @@ fn higher_order_prepare_cache_does_not_reuse_a_different_element_type() {
     )
     .expect("Array[Integer]#each must prepare");
     let strings = prepare_higher_order_call_with_fallbacks(
-        None,
-        None,
+        None::<&dyn Semantics>,
         Some(&RubyType::array_of(RubyType::string())),
         None,
         "each",

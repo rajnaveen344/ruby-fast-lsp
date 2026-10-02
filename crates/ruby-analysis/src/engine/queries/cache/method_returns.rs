@@ -480,7 +480,7 @@ impl<'a> View<'a> {
         )?;
 
         RubyType::union_from_proven(
-            View::receiver_type_to_method_namespaces(&receiver_type),
+            crate::core::receiver_type_to_method_namespaces(&receiver_type),
             |namespace| {
                 self.method_return_type_for_receiver_inner(
                     &namespace,

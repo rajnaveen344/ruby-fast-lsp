@@ -53,19 +53,21 @@ find; block and parameter handlers are shared across calls and declarations.
 | `extensions` | Host, project context, enclosing calls, and pending block context | `context/extensions.rs` |
 | `facts` | Collected declarations, local type staging, candidates, diagnostics, and extension output | `collection/facts.rs` |
 | `flow` | Block parameters, pattern captures, multi-assignment elements, callable aliases, yields, and active writes | `inference/flow.rs` |
-| `semantics` | Read-only project `Semantics`, per-pass query cache, and same-pass lookup inputs | `context/semantic_context.rs` |
+| `semantics` | Read-only project `Semantics` walk handle (it carries the per-pass lookup memo) and same-pass lookup inputs | `context/semantic_context.rs` |
 | `method_returns` | Return equations, completed solves, proof outcomes, and telemetry | `inference/method_return.rs` |
 | `expressions` | Call outcomes, deferred calls, local-read evidence, and Unknown reasons | `inference/expressions.rs` |
 | `constants` | Constant equations and callable bodies | `inference/constants.rs` |
 
 These owners are private to the collector module. They organize temporary
-per-file state, not independent semantic databases. The query cache retains its
-original sharing and lifetime. Mutable flow identities end with this pass.
+per-file state, not independent semantic databases. The walk's lookup memo
+lives behind its `Semantics` handle and is shared by the collector and every
+tracker it builds for one pass. Mutable flow identities end with this pass.
 
 The collector and every `TypeTracker` it builds read other files only through
-the read-only `engine::Semantics` trait (`engine/semantics.rs`), never through
-the engine lock. The shared engine implements it with one short read guard per
-call, so no guard spans the walk. The walk never writes the engine. Its reads
+the read-only `inference::semantics::Semantics` trait, never through the engine
+lock. The collector reads through `Semantics::for_walk`, which the shared engine
+implements with one short read guard per call and one lookup memo per walk, so
+no guard spans the walk. The walk never writes the engine. Its reads
 either decide which facts get emitted or feed local flow; any new mid-walk read
 must become an equation or be added to `Semantics` with a reason. Extension
 hosts read through `FactCollector::extension_call_callees`,

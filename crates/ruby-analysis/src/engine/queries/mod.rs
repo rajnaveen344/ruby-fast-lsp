@@ -21,15 +21,26 @@ use crate::core::{
     SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
 };
 
-use crate::engine::{Project, SourceFile};
+use crate::engine::{AnalysisQueryCache, Project, SourceFile};
 
 pub struct View<'a> {
     pub(crate) engine: &'a Project,
+    /// The method lookup memo a file walk shares across its reads; a view
+    /// without one answers every lookup uncached.
+    pub(in crate::engine) memo: Option<&'a AnalysisQueryCache>,
 }
 
 impl<'a> View<'a> {
     pub fn new(engine: &'a Project) -> Self {
-        Self { engine }
+        Self { engine, memo: None }
+    }
+
+    /// This view with `memo` serving its method lookups.
+    pub(in crate::engine) fn with_memo(self, memo: &'a AnalysisQueryCache) -> Self {
+        Self {
+            memo: Some(memo),
+            ..self
+        }
     }
 
     pub(crate) fn query_cache_identity(&self) -> (u64, u64) {

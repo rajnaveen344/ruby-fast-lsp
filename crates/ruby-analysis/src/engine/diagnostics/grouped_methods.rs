@@ -136,7 +136,7 @@ impl Project {
         if !diagnostics.diagnose_unresolved {
             return;
         }
-        let namespaces = View::receiver_type_to_method_namespaces(receiver_type);
+        let namespaces = crate::core::receiver_type_to_method_namespaces(receiver_type);
         if namespaces.is_empty()
             || namespaces.iter().any(|owner| {
                 !self.method_namespace_target_exists(owner)

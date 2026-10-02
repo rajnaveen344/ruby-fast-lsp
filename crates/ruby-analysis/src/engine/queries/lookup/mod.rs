@@ -306,40 +306,6 @@ impl<'a> View<'a> {
         }
     }
 
-    pub fn receiver_type_to_method_namespaces(ruby_type: &RubyType) -> Vec<FullyQualifiedName> {
-        match ruby_type {
-            RubyType::Class(fqn) | RubyType::Module(fqn) => {
-                let mut namespaces = vec![FullyQualifiedName::namespace_with_kind(
-                    fqn.namespace_parts(),
-                    NamespaceKind::Instance,
-                )];
-                if fqn.name() == "Object" {
-                    namespaces.push(FullyQualifiedName::namespace_with_kind(
-                        Vec::new(),
-                        NamespaceKind::Instance,
-                    ));
-                }
-                namespaces
-            }
-            RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-                vec![FullyQualifiedName::namespace_with_kind(
-                    fqn.namespace_parts(),
-                    NamespaceKind::Singleton,
-                )]
-            }
-            RubyType::Union(types) => types
-                .iter()
-                .flat_map(Self::receiver_type_to_method_namespaces)
-                .collect(),
-            RubyType::Literal(value) => {
-                Self::receiver_type_to_method_namespaces(&value.widened_type())
-            }
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) | RubyType::Unknown => {
-                Vec::new()
-            }
-        }
-    }
-
     fn namespace_for_builtin(name: &str, kind: NamespaceKind) -> Vec<FullyQualifiedName> {
         let Ok(constant) = RubyConstant::new(name) else {
             return Vec::new();

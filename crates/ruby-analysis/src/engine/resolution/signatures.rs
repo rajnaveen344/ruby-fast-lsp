@@ -152,7 +152,7 @@ impl<'a> View<'a> {
         let members = receiver_type_members(receiver_type);
         let mut all_facts = Vec::new();
         for member in members {
-            let namespaces = Self::receiver_type_to_method_namespaces(member);
+            let namespaces = crate::core::receiver_type_to_method_namespaces(member);
             if namespaces.is_empty() {
                 return Vec::new();
             }

@@ -13,11 +13,14 @@ pub(crate) mod storage;
 pub(crate) mod types;
 
 // Public domain contracts.
+pub use callables::callable_body::CallableBodySummary;
 pub use equations::constant_type_equation::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
 };
 pub use equations::method_return_equation::MethodReturnEquation;
-pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
+pub use method_resolution::{
+    receiver_type_to_method_namespaces, MethodCalleeResolution, ResolvedMethodCallee,
+};
 pub use names::fully_qualified_name::{FqnParts, FullyQualifiedName, NamespaceKind};
 pub use names::method_receiver::MethodReceiver;
 pub use names::ruby_method::RubyMethod;

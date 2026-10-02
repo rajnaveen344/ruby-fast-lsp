@@ -214,7 +214,6 @@ impl TypeTracker {
                     .unwrap_or_default(),
             );
             project.prepare_higher_order_call(
-                self.analysis.query_cache.as_deref(),
                 receiver_type.as_ref(),
                 &namespace,
                 method_name,
@@ -222,8 +221,7 @@ impl TypeTracker {
             )
         } else {
             crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-                None,
-                None,
+                None::<&dyn crate::inference::semantics::Semantics>,
                 receiver_type.as_ref(),
                 None,
                 method_name,
