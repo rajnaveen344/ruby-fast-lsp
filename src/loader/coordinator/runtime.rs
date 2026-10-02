@@ -70,7 +70,7 @@ impl IndexingCoordinator {
             self.detected_ruby_version = version;
             return Ok(version);
         }
-        if let Some(version) = self.config.get_ruby_version().map(RubyVersion::from_tuple) {
+        if let Some(version) = self.legacy_compatibility {
             self.detected_ruby_version = Some(version);
             return Ok(Some(version));
         }
@@ -85,6 +85,7 @@ impl IndexingCoordinator {
 
     pub(super) async fn resolve_effective_runtime(&mut self, ctx: &LoadContext) -> Result<()> {
         let root = self.workspace_root.to_string_lossy();
+        self.legacy_compatibility = None;
         self.effective_runtime = match self
             .config
             .runtime
@@ -96,7 +97,15 @@ impl IndexingCoordinator {
                     .resolve_auto_runtime(&self.workspace_root)
                     .await?
             }
-            EffectiveRuntimeSelection::LegacyMriCompatibility { .. } => None,
+            EffectiveRuntimeSelection::LegacyMriCompatibility { major, minor } => {
+                // A family outside the bundled stub range keeps the bundled
+                // fallback rather than a truncated version.
+                self.legacy_compatibility = u8::try_from(major)
+                    .ok()
+                    .zip(u8::try_from(minor).ok())
+                    .map(RubyVersion::from_tuple);
+                None
+            }
         };
         ctx.sink
             .select_runtime(&self.workspace_root, self.effective_runtime.clone());

@@ -81,6 +81,8 @@ pub struct IndexingCoordinator {
     // Ruby version info
     detected_ruby_version: Option<RubyVersion>,
     effective_runtime: Option<SelectedRuntimeDescriptor>,
+    /// Legacy MRI compatibility from this project's effective selection.
+    legacy_compatibility: Option<RubyVersion>,
     jruby_import_provider: Option<Arc<JrubyImportProvider>>,
     jruby_runtime_archive: Option<ClasspathArtifact>,
     cache_root: Option<PathBuf>,
@@ -134,6 +136,7 @@ impl IndexingCoordinator {
             extension_registry: None,
             detected_ruby_version: None,
             effective_runtime: None,
+            legacy_compatibility: None,
             jruby_import_provider: None,
             jruby_runtime_archive: None,
             cache_root: None,

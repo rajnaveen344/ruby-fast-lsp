@@ -57,7 +57,7 @@ async fn unavailable_auto_runtime_uses_conservative_core_fallback() {
         "an unavailable automatic runtime must use the bundled Ruby 3.0 fallback, not derive compatibility from an unfulfilled marker");
     coordinator.config.ruby_version = "2.5".to_string();
     assert_eq!(
-        coordinator.detect_ruby_version_off_reactor().await.unwrap(),
+        select_ruby_version(&mut coordinator, &server).await,
         Some(RubyVersion::new(2, 5)),
         "explicit compatibility configuration must still win over automatic fallback"
     );
@@ -112,5 +112,33 @@ async fn auto_runtime_marker_becomes_the_exact_effective_runtime() {
             .as_ref()
             .map(|runtime| runtime.engine_version.as_str()),
         Some("9.2.21.0")
+    );
+}
+
+#[tokio::test]
+async fn project_auto_selection_does_not_inherit_global_legacy_compatibility() {
+    use crate::environment::config::runtime::RuntimeSelectionMode;
+
+    let fixture = TestProjectFixture::new();
+    let server = create_test_server();
+    server.set_discovered_runtimes_for_tests(Vec::new());
+    let config = RubyFastLspConfig {
+        ruby_version: "3.1".to_string(),
+        runtime: RuntimeSelectionConfig {
+            mode: RuntimeMode::Auto,
+            projects: vec![ProjectRuntimeSelection {
+                root: fixture.project_root().to_string_lossy().to_string(),
+                selection: RuntimeSelection::Mode(RuntimeSelectionMode::Auto),
+            }],
+        },
+        ..RubyFastLspConfig::default()
+    };
+    let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
+
+    assert_eq!(
+        select_ruby_version(&mut coordinator, &server).await,
+        None,
+        "a project that selects auto with no installed runtime must use the bundled fallback, \
+         not the global legacy compatibility its own selection overrides"
     );
 }

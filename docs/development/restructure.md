@@ -401,10 +401,11 @@ Delete this file when the last task is done. Git history keeps the record.
         catalog, which already classified the executable from its `-v`
         output. The probe ran only when no descriptor engine was set, and gem
         discovery cannot run without a descriptor, so it was unreachable.
-  - [ ] C7b. Bug: a project whose own runtime selection is `auto` and has no
-        installed match still picks the global legacy `rubyVersion` stubs,
-        because the version step re-reads the global setting instead of the
-        project's effective selection. Fix with a failing test first.
+  - [x] C7b. Bug: a project whose own runtime selection is `auto` and has no
+        installed match still picked the global legacy `rubyVersion` stubs,
+        because the version step re-read the global setting instead of the
+        project's effective selection. The version step now reads the legacy
+        family from the selection the runtime step resolved.
   - [ ] C7c. One parser and one version type. `RubyVersion` moves from
         `loader/version` to `environment/runtime/version.rs` and uses the
         catalog's `RuntimeImplementation` instead of a second
