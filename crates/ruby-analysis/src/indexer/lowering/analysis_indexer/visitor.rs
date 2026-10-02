@@ -223,7 +223,7 @@ impl Visit<'_> for AnalysisIndexer {
             ScopeKind::Singleton => NamespaceKind::Singleton,
         };
         if let Some(receiver) = node.receiver() {
-            if receiver.as_self_node().is_some() {
+            if receiver.as_self_node().is_some() || self.names_enclosing_namespace(&receiver) {
                 owner_kind = NamespaceKind::Singleton;
             } else {
                 visit_def_node(self, node);

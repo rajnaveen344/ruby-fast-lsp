@@ -616,7 +616,10 @@ Delete this file when the last task is done. Git history keeps the record.
       reopening is followed by everything except the cursor walk.
     - The seed turns every `initialize` into singleton `new`, including in
       modules. The collector requires a proven class.
-    - The seed accepts only `self` as a `def` receiver.
+    - [x] The seed accepted only `self` as a `def` receiver and dropped
+      `def Name.x` inside `class Name`. A constant-path receiver
+      (`def A::B.x`) is still skipped by the seed; the collector attaches it
+      to the current namespace, which is wrong unless the path names it.
     - The superclass-equals-reopen-target check exists in the collector only.
   - [ ] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. Its `lexical_stack`
         maps to `ScopeTracker` frames and its eval `owner_stack` maps to the

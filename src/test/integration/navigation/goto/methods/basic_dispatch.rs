@@ -209,3 +209,19 @@ account.gateway.capture$0
     )
     .await;
 }
+
+#[tokio::test]
+async fn goto_singleton_method_defined_with_own_constant_receiver() {
+    check(
+        r#"
+class Registry
+  <def>def Registry.lookup
+    "found"
+  end</def>
+end
+
+Registry.lookup$0
+"#,
+    )
+    .await;
+}
