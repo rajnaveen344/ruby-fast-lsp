@@ -1,7 +1,7 @@
 //! Convert identity-bearing type labels to native LSP navigation links.
 
 use super::type_display::TypeDisplay;
-use crate::lsp::query::analysis_location::location_for_range;
+use crate::features::cursor::analysis_location::location_for_range;
 use ruby_analysis::core::RubyType;
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
 use tower_lsp::lsp_types::{

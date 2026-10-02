@@ -4,7 +4,7 @@
 
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 
 /// Find all references to a symbol at the given position.

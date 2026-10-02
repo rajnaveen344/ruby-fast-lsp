@@ -11,12 +11,12 @@ use crate::invariant::ExpectInvariant;
 use crate::server::unresolved_diagnostics_from_engine;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
-use super::EngineQuery;
+use crate::features::cursor::EngineQuery;
 
 impl EngineQuery {
     /// Get diagnostics for unresolved entries from the analysis engine.
     pub fn get_unresolved_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
-        let analysis_engine = self.analysis_engine.as_ref().expect_invariant(
+        let analysis_engine = self.analysis_engine().expect_invariant(
             "unresolved diagnostics requested without analysis engine",
             "diagnostics are owned by ruby-analysis::engine",
             "construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine",

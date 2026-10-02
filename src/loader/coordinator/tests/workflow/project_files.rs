@@ -86,7 +86,7 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         .get(&usage_uri)
         .cloned()
         .expect("opened usage document must exist");
-    let query = crate::lsp::query::EngineQuery::with_doc_and_engine(
+    let query = crate::features::cursor::EngineQuery::with_doc_and_engine(
         document,
         server.orphan_engine().clone(),
     );

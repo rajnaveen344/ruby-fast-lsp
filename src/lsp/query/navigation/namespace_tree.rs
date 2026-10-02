@@ -4,7 +4,7 @@ use crate::invariant::ExpectInvariant;
 use ruby_analysis::engine::AnalysisQuery;
 use serde::{Deserialize, Serialize};
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 
 pub use ruby_analysis::engine::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,

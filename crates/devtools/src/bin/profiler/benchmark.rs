@@ -2,9 +2,9 @@
 
 use crate::invariant::ExpectInvariant;
 use devtools::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
+use ruby_fast_lsp::features::cursor::EngineQuery;
 use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
 use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing, presentation::hover};
-use ruby_fast_lsp::lsp::query::EngineQuery;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
 use std::time::{Duration, Instant};

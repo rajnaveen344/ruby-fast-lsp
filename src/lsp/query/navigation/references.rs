@@ -21,8 +21,8 @@ use std::path::Path;
 use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
+use crate::features::cursor::EngineQuery;
 use crate::utils::lsp::{lsp_text_location, source_position};
 use crate::utils::parser::position_to_offset;
 
@@ -63,7 +63,7 @@ impl EngineQuery {
         position: Position,
         content: &str,
     ) -> Option<Vec<Location>> {
-        let file_id = self.doc.as_ref()?.read().analysis_file_id();
+        let file_id = self.doc()?.read().analysis_file_id();
         if let Some(locations) = self.module_call_reference_locations(position, content, true) {
             return Some(locations);
         }
@@ -88,7 +88,7 @@ impl EngineQuery {
         content: &str,
         same_file: bool,
     ) -> Option<Vec<Location>> {
-        let file_id = self.doc.as_ref()?.read().analysis_file_id();
+        let file_id = self.doc()?.read().analysis_file_id();
         let byte_offset = u32::try_from(position_to_offset(content, position)).expect_invariant(
             "reference position exceeded u32 offsets",
             "engine ranges use u32",
@@ -214,7 +214,7 @@ impl EngineQuery {
         method: &RubyMethod,
         locations: Vec<Location>,
     ) -> Vec<Location> {
-        let Some(doc_arc) = self.doc.as_ref() else {
+        let Some(doc_arc) = self.doc() else {
             return locations;
         };
         let document = doc_arc.read();
@@ -223,7 +223,7 @@ impl EngineQuery {
         {
             return locations;
         }
-        let Some(uri) = self.uri.as_ref() else {
+        let Some(uri) = self.uri() else {
             return locations;
         };
         locations
@@ -331,7 +331,7 @@ impl EngineQuery {
         name: &str,
         position: Position,
     ) -> Option<Vec<Location>> {
-        let doc_arc = self.doc.as_ref()?;
+        let doc_arc = self.doc()?;
         let document = doc_arc.read();
 
         let byte_offset = document.position_to_analysis_offset(source_position(position));
@@ -855,7 +855,7 @@ impl EngineQuery {
     }
 
     fn rebuild_local_variable_scopes_for_open_document(&self) -> Option<()> {
-        let doc_arc = self.doc.as_ref()?;
+        let doc_arc = self.doc()?;
         let document = doc_arc.read().clone();
         let content = document.content.clone();
         let parse_result = ruby_prism::parse(content.as_bytes());

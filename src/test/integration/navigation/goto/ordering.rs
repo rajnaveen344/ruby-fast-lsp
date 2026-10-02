@@ -1,6 +1,6 @@
 //! Ruby lookup precedence ranks definitions; source order only breaks ties.
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::test::harness::FakeEditor;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{NamespaceKind, RubyConstant, RubyMethod};

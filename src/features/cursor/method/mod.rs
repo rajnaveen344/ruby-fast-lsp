@@ -16,10 +16,10 @@ mod analysis;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::core::ResolvedMethodCallee;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::RubyType;
-pub use ruby_analysis::core::{MethodCalleeResolution, ResolvedMethodCallee};
 use ruby_analysis::indexer::{
     resolve_receiver_to_namespace, resolve_receiver_type, ReceiverResolutionContext,
 };
@@ -27,19 +27,6 @@ use tower_lsp::lsp_types::{Location, Position};
 
 use super::EngineQuery;
 use crate::utils::lsp::source_position;
-
-// ============================================================================
-// Public API
-// ============================================================================
-
-/// Information about a resolved method.
-#[derive(Debug, Clone)]
-pub struct MethodInfo {
-    pub fqn: FullyQualifiedName,
-    pub return_type: Option<RubyType>,
-    pub is_class_method: bool,
-    pub documentation: Option<String>,
-}
 
 enum MethodLookupReceiver {
     Namespace(FullyQualifiedName),

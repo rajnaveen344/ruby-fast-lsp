@@ -417,7 +417,7 @@ Delete this file when the last task is done. Git history keeps the record.
         an exempt file stops violating, so the list can only shrink.
 - [ ] C3. Merge the handler, capability, and query layers into one `features/`
       module per feature.
-  - [ ] C3a. Add `src/features/` with `mod.rs` and a README. Move `lsp/query`
+  - [x] C3a. Add `src/features/` with `mod.rs` and a README. Move `lsp/query`
         shared code (`EngineQuery`, `analysis_location`, `method`) to
         `features/cursor/` with no other change.
   - [ ] C3b. Navigation: merge capability, query, and handler body for

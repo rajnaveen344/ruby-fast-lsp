@@ -1,4 +1,4 @@
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::debug;
 use std::hash::{Hash, Hasher};

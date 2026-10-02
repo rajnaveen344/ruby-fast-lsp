@@ -2,7 +2,7 @@
 
 use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, Position, Url};
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 
 pub async fn find_document_highlights(

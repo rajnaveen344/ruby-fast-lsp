@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
     WorkspaceEdit,
 };
 
-use crate::lsp::query::analysis_location::locations_for_ranges;
+use crate::features::cursor::analysis_location::locations_for_ranges;
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::{lsp_text_range, source_position};
 use ruby_analysis::core::{RubyConstant, RubyMethod};

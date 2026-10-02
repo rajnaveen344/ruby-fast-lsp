@@ -13,8 +13,8 @@ use ruby_analysis::indexer::yard::parser::YardParser;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
+use crate::features::cursor::EngineQuery;
 use crate::utils::lsp::{lsp_text_location, source_position};
 use crate::utils::parser::position_to_offset;
 
@@ -97,7 +97,7 @@ impl EngineQuery {
     /// An empty result records an engine dispatch barrier; lexical local-variable
     /// lookup remains valid even when the binding's value type is unknown.
     fn resolved_reference_definition_locations(&self, position: Position) -> Option<Vec<Location>> {
-        let document = self.doc.as_ref()?.read();
+        let document = self.doc()?.read();
         let file_id = document.analysis_file_id();
         let byte_offset = document.position_to_analysis_offset(source_position(position));
         let engine = self.analysis_engine()?.read();
@@ -119,7 +119,7 @@ impl EngineQuery {
         name: &str,
         position: Position,
     ) -> Option<Vec<Location>> {
-        let doc_arc = self.doc.as_ref()?;
+        let doc_arc = self.doc()?;
         let document = doc_arc.read();
 
         let byte_offset = document.position_to_analysis_offset(source_position(position));

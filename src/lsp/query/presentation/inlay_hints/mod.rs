@@ -37,7 +37,7 @@ pub use generators::{
     generate_variable_type_hints, HintContext, InlayHintData, InlayHintKind,
 };
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::utils::lsp::text_range;
 use ruby_analysis::indexer::{inlay_hints::InlayNodeCollector, RubyDocument};
 use tower_lsp::lsp_types::Range;

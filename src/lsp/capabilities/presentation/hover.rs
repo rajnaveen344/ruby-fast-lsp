@@ -13,11 +13,11 @@ use std::path::PathBuf;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind};
 
+use crate::features::cursor::EngineQuery;
 use crate::loader::require_paths::{
     find_require_string_at_offset, resolve_require_path, RequireKind,
 };
 use crate::lsp::capabilities::navigation::definitions::require_string_lsp_range;
-use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::source_position;
 

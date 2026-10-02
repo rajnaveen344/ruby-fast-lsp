@@ -6,7 +6,8 @@
 use log::{debug, warn};
 use tower_lsp::lsp_types::*;
 
-use crate::lsp::query::{CodeLensData, EngineQuery};
+use crate::features::cursor::EngineQuery;
+use crate::lsp::query::CodeLensData;
 use crate::server::RubyLanguageServer;
 
 /// Handle CodeLens request for a document.

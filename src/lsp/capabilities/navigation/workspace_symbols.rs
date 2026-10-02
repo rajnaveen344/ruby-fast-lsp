@@ -2,7 +2,7 @@
 //!
 //! Delegates symbol search and top-level listing to `EngineQuery`.
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::info;
 use std::time::Instant;

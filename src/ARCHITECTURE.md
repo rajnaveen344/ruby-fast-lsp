@@ -12,6 +12,7 @@ crates/
 └── devtools/       - Profilers, benchmarks, AST dump, and extension validation tools
 src/
 ├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
+├── features/       - Editor features, one module per feature, over a shared cursor context
 ├── loader/         - Workspace discovery, fact collection, scheduling, and caches
 ├── lsp/            - Editor projections: service facade, capabilities, query adapters, handlers, check
 ├── server/         - Server state: documents, project routing, products, and publication
@@ -146,12 +147,12 @@ The Query Engine provides a unified service layer for querying the `AnalysisEngi
 
 #### Key Files:
 
-- `mod.rs`: Defines `EngineQuery` struct and entry points
+- `src/features/cursor/mod.rs`: Defines the `EngineQuery` struct and entry points
 - `navigation/`: definition, reference, implementation, hierarchy, and symbol lookups
 - `editing/`: completion candidates and signature help
 - `presentation/`: hover, inlay hints, and code lenses
-- `method/`: Method resolution and dispatch logic
-- `analysis_location.rs`: shared range conversion
+- `src/features/cursor/method/`: Method resolution and dispatch logic
+- `src/features/cursor/analysis_location.rs`: shared range conversion
 - `diagnostics.rs`: `get_unresolved_diagnostics`, a query entry point over the
   server-owned engine diagnostic projection in `server/diagnostics.rs`
 

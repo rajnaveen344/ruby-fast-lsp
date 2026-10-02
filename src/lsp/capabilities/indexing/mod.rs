@@ -1,10 +1,10 @@
+use crate::features::cursor::EngineQuery;
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::project::files::ProjectFilePolicy;
 use crate::lsp::linter::lint_document;
-use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::SourceKind;

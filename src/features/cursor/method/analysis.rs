@@ -1,5 +1,5 @@
-use crate::lsp::query::analysis_location::locations_for_ranges;
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
+use crate::features::cursor::EngineQuery;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
@@ -46,5 +46,5 @@ pub(super) fn find_method_definitions(
         ),
         MethodLookupReceiver::Super(owner) => analysis.super_definition_ranges(owner, method),
     }?;
-    crate::lsp::query::analysis_location::non_empty_locations(locations_for_ranges(&engine, ranges))
+    non_empty_locations(locations_for_ranges(&engine, ranges))
 }

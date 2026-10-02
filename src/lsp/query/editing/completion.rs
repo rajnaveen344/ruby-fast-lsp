@@ -13,7 +13,7 @@ use ruby_analysis::engine::completion::rbs_method_matches_for_type;
 use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch};
 use ruby_analysis::indexer::RubyPrismAnalyzer;
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 
 impl EngineQuery {
     /// Find constant completions by locking the analysis engine.

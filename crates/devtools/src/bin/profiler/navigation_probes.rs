@@ -1,9 +1,10 @@
 //! Live and post-indexing navigation and diagnostic probes at workspace positions.
 
+use ruby_fast_lsp::features::cursor::EngineQuery;
 use ruby_fast_lsp::loader::scheduling::status;
 use ruby_fast_lsp::lsp::capabilities::indexing;
 use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
-use ruby_fast_lsp::lsp::{handlers::request, query::EngineQuery};
+use ruby_fast_lsp::lsp::handlers::request;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
 use std::path::PathBuf;

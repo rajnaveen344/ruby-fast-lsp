@@ -8,7 +8,7 @@ use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
 use ruby_analysis::inference::semantics::ReceiverAccess;
 use tower_lsp::lsp_types::{Position, Url};
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::utils::lsp::source_position;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl EngineQuery {
         position: Position,
         content: &str,
     ) -> Option<SignatureHelpData> {
-        let document = self.doc.as_ref()?.read();
+        let document = self.doc()?.read();
         let byte_offset = document.position_to_analysis_offset(source_position(position));
         let analyzer = self.analyzer_at_position(uri, content, position);
         let target = analyzer.get_signature_help_target(byte_offset)?;

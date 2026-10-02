@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::{
     SignatureHelpParams, SignatureInformation,
 };
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 
 pub async fn handle_signature_help(

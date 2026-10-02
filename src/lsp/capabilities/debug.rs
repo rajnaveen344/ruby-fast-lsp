@@ -5,7 +5,7 @@ use log::debug;
 pub use ruby_analysis::engine::{ExportGraphResponse, LookupResponse};
 use serde::{Deserialize, Serialize};
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
 use ruby_analysis::engine::AnalysisEngine;

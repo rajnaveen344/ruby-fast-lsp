@@ -11,7 +11,8 @@ use tower_lsp::lsp_types::{
     InlayHintParams, InlayHintServerCapabilities, WorkDoneProgressOptions,
 };
 
-use crate::lsp::query::{EngineQuery, InlayHintData, InlayHintKind};
+use crate::features::cursor::EngineQuery;
+use crate::lsp::query::{InlayHintData, InlayHintKind};
 use crate::server::RubyLanguageServer;
 
 /// Get the server capability for inlay hints.

@@ -10,11 +10,11 @@ use std::path::PathBuf;
 
 use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
 
+use crate::features::cursor::EngineQuery;
 use crate::loader::require_paths::{
     find_require_string_at_offset, location_for_require_target, resolve_require_path,
     RequireStringTarget,
 };
-use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::{lsp_position, source_position};
 use ruby_analysis::indexer::RubyDocument;

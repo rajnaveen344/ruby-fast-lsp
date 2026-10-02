@@ -4,6 +4,7 @@
 mod invariant;
 
 pub mod environment;
+pub mod features;
 pub mod loader;
 pub mod lsp;
 pub mod server;

@@ -10,7 +10,8 @@ server/ (LSP) -> query/ (adapter) -> ruby-analysis::engine (domain)
 
 ## Public API
 
-The `EngineQuery` struct provides position-based LSP-facing APIs:
+The `EngineQuery` struct (`src/features/cursor/`) provides position-based
+LSP-facing APIs:
 
 | Feature         | Method                                                       | Returns         |
 | :-------------- | :----------------------------------------------------------- | :-------------- |
@@ -25,7 +26,7 @@ queries to `AnalysisQuery`.
 ## Usage
 
 ```rust
-use crate::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 
 // Create query with document context and engine access
 let query = EngineQuery::with_doc_and_engine(document, analysis_engine);
@@ -40,7 +41,6 @@ let ty = query.resolve_type_at_position(&uri, pos, &content);
 ## Shared Types
 
 - **`HoverInfo`**: Content, range, and inferred type for hover requests.
-- **`MethodInfo`**: FQN, visibility, return type, and documentation for a method.
 
 ## Contract with `capabilities/`
 

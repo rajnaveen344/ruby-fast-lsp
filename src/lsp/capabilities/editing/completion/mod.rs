@@ -15,7 +15,7 @@ use ruby_analysis::engine::completion::{CompletionSemanticQuery, CompletionVaria
 use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 
-use crate::lsp::query::{analyzer_for_document, EngineQuery};
+use crate::features::cursor::{analyzer_for_document, EngineQuery};
 use crate::server::RubyLanguageServer;
 use crate::utils::ast::is_in_statement_position;
 use crate::utils::lsp::{lsp_position, source_position};

@@ -1,8 +1,8 @@
 //! Interleave the real dependency refresh with editor/source and root changes.
 //! Observe both engine facts and submitted LSP diagnostics before recovery.
 
+use crate::features::cursor::EngineQuery;
 use crate::loader::scheduling::test_schedule::Point;
-use crate::lsp::query::EngineQuery;
 use crate::test::harness::FakeEditor;
 use std::time::Duration;
 use tower_lsp::lsp_types::{Diagnostic, Url};

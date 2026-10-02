@@ -11,7 +11,7 @@ use crate::invariant::ExpectInvariant;
 use generators::HoverContext;
 pub use generators::HoverInfo;
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::EngineQuery;
 use crate::utils::parser::position_to_offset;
 use ruby_analysis::indexer::{identifier_to_hover_target, HoverTarget};
 use tower_lsp::lsp_types::{Position, Url};
@@ -56,8 +56,8 @@ impl EngineQuery {
 
         // Step 3: Create context for generators
         let context = HoverContext {
-            document: self.doc.as_ref(),
-            analysis_engine: self.analysis_engine.as_ref(),
+            document: self.doc(),
+            analysis_engine: self.analysis_engine(),
             current_namespace: &hover_namespace,
             namespace_kind,
             position,

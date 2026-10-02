@@ -293,7 +293,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         .get(&uri)
         .cloned()
         .expect("processed JRuby document must exist");
-    let query = crate::lsp::query::EngineQuery::with_doc_and_engine(
+    let query = crate::features::cursor::EngineQuery::with_doc_and_engine(
         document,
         server.analysis_engine_for_uri(&uri),
     );
