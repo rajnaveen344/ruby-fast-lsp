@@ -466,7 +466,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     let uri = Url::from_file_path(&source_path).unwrap();
     let initial = "VALUE = 1\n";
     fs::write(&source_path, initial).unwrap();
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -484,7 +484,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     );
 
     let added = "java_import fixtures.RichFixture\nRICH = RichFixture.new(nil)\n";
-    crate::lsp::capabilities::indexing::handle_did_change(
+    crate::lsp::lifecycle::indexing::handle_did_change(
         &server,
         DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
@@ -536,7 +536,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     );
     drop(engine);
 
-    crate::lsp::capabilities::indexing::handle_did_change(
+    crate::lsp::lifecycle::indexing::handle_did_change(
         &server,
         DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {

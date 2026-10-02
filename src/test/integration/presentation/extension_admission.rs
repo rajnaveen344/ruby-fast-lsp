@@ -33,7 +33,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
             ..crate::environment::config::RubyFastLspConfig::default()
         },
     );
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -143,7 +143,7 @@ async fn request_time_extension_symbols_wait_for_admission_without_blocking_reac
             ..crate::environment::config::RubyFastLspConfig::default()
         },
     );
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {

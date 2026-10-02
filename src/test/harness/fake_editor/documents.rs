@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{
 };
 
 use super::FakeEditor;
-use crate::lsp::capabilities::indexing;
+use crate::lsp::lifecycle::indexing;
 
 impl FakeEditor {
     /// Open a file in the editor with the given content.

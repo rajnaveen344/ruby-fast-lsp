@@ -169,7 +169,7 @@ async fn cold_coordinator_diagnostics_preserve_current_linter_output() {
         editor.open(filename, source).await;
         let initial = editor.diagnostics(filename).await;
         assert!(has_linter_diagnostic(&initial));
-        crate::lsp::capabilities::indexing::init_workspace_for_run(
+        crate::lsp::lifecycle::indexing::init_workspace_for_run(
             &server,
             root_uri,
             workspace.begin_indexing_run(),

@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::Url;
 
 use super::{run_fixture_checks, FixtureFile};
 use crate::loader::scheduling::status::IndexingPhase;
-use crate::lsp::capabilities::indexing::init_workspace_for_run;
+use crate::lsp::lifecycle::indexing::init_workspace_for_run;
 use crate::test::harness::fake_editor::FakeEditor;
 use crate::test::harness::fixture::parse_fixture;
 

@@ -79,7 +79,7 @@ end
 
     let server = RubyLanguageServer::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -258,7 +258,7 @@ end
 
     let server = RubyLanguageServer::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {

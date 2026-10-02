@@ -1,7 +1,7 @@
 //! Opening a file whose disk content was already indexed must give the same
 //! local-variable answers as opening it after an edit.
 
-use crate::lsp::capabilities::indexing::init_workspace_for_run;
+use crate::lsp::lifecycle::indexing::init_workspace_for_run;
 use crate::test::harness::FakeEditor;
 use std::time::Duration;
 use tower_lsp::lsp_types::{HoverContents, Url};

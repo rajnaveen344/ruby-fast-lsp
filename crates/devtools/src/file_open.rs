@@ -4,7 +4,7 @@
 use log::{info, LevelFilter};
 use ruby_analysis::engine::AnalysisStat;
 use ruby_analysis::stats;
-use ruby_fast_lsp::lsp::capabilities::indexing;
+use ruby_fast_lsp::lsp::lifecycle::indexing;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;
 use tokio::runtime::Runtime;

@@ -2,7 +2,7 @@
 //! document's current semantic commit.
 
 use crate::features::presentation::inlay_hints;
-use crate::lsp::capabilities::indexing;
+use crate::lsp::lifecycle::indexing;
 use crate::server::RubyLanguageServer;
 use std::sync::Arc;
 use std::time::Duration;

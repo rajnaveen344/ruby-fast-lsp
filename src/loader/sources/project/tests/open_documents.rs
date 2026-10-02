@@ -43,7 +43,7 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
     let server = RubyLanguageServer::default();
     let workspace = server.add_workspace(Url::from_directory_path(root).unwrap());
     let open_uri = Url::from_file_path(&open_path).unwrap();
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -103,7 +103,7 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     let server = RubyLanguageServer::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     for (path, text) in [(&utility_path, open_source), (&caller_path, caller_source)] {
-        crate::lsp::capabilities::indexing::handle_did_open(
+        crate::lsp::lifecycle::indexing::handle_did_open(
             &server,
             DidOpenTextDocumentParams {
                 text_document: TextDocumentItem {

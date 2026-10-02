@@ -1,7 +1,6 @@
-//! LSP Notification Handlers
-//!
-//! This module contains handlers for LSP notifications (events that don't require a response).
-//! All helper functions and business logic should be in `helpers.rs`.
+//! Protocol lifecycle handlers: initialize (server capabilities), initialized,
+//! shutdown, configuration, workspace folders, and watched files. Document
+//! notifications delegate to `super::indexing`.
 
 use crate::environment::config::runtime::EffectiveRuntimeSelection;
 use crate::environment::config::RubyFastLspConfig;
@@ -9,7 +8,7 @@ use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::environment::runtime::version::parse_ruby_family;
 use crate::features::presentation::semantic_tokens;
 use crate::invariant::ExpectInvariant;
-use crate::lsp::capabilities::indexing;
+use crate::lsp::lifecycle::indexing;
 use crate::server::RubyLanguageServer;
 use log::{debug, info, warn};
 use std::sync::atomic::Ordering;

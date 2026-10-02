@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::corpus::Corpus;
 use super::observe::{self, Snapshot};
 use crate::loader::scheduling::status::IndexingPhase;
-use crate::lsp::capabilities::indexing::init_workspace_for_run;
+use crate::lsp::lifecycle::indexing::init_workspace_for_run;
 use crate::test::harness::FakeEditor;
 
 /// One temporary project directory holding a copy of the corpus.

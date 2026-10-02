@@ -6,7 +6,7 @@ use ruby_fast_lsp::features::cursor::EngineQuery;
 use ruby_fast_lsp::features::editing::completion;
 use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::features::presentation::hover;
-use ruby_fast_lsp::lsp::capabilities::indexing;
+use ruby_fast_lsp::lsp::lifecycle::indexing;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
 use std::time::{Duration, Instant};

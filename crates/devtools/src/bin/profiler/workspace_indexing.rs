@@ -5,7 +5,7 @@ use log::info;
 use ruby_analysis::core::TypeSubject;
 use ruby_fast_lsp::environment::config::RubyFastLspConfig;
 use ruby_fast_lsp::loader::scheduling::{scheduler, status};
-use ruby_fast_lsp::lsp::capabilities::indexing;
+use ruby_fast_lsp::lsp::lifecycle::indexing;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

@@ -251,7 +251,7 @@ async fn a_rehomed_open_document_leaves_its_previous_project() {
         .file_id(&path)
         .is_some());
 
-    crate::lsp::handlers::notification::handle_did_change_workspace_folders(
+    crate::lsp::lifecycle::notification::handle_did_change_workspace_folders(
         editor.server(),
         tower_lsp::lsp_types::DidChangeWorkspaceFoldersParams {
             event: tower_lsp::lsp_types::WorkspaceFoldersChangeEvent {

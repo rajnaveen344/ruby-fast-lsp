@@ -432,7 +432,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C3e. Diagnostics and debug: engine projection and linter into
         `features/diagnostics/`, and debug and extension status into
         `features/debug.rs`.
-  - [ ] C3f. Move `capabilities/indexing` and `handlers/notification` to
+  - [x] C3f. Move `capabilities/indexing` and `handlers/notification` to
         `src/lsp/lifecycle/`. Delete `lsp/capabilities`, `lsp/query`, and
         `lsp/handlers`. Update devtools, the test harness, and the guides.
   - [ ] C3g. Extend the layering check: features may use `server` and

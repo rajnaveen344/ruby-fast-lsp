@@ -1,5 +1,5 @@
 //! The `tower-lsp` service facade: protocol methods and custom requests on
-//! `RubyLanguageServer`, routed to request and notification handlers. The
+//! `RubyLanguageServer`, routed to feature `handle` functions and lifecycle handlers. The
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
@@ -14,7 +14,7 @@ use crate::features::presentation::{
     code_lens, document_symbols, folding_range, hover, inlay_hints, selection_ranges,
     semantic_tokens,
 };
-use crate::lsp::handlers::notification;
+use crate::lsp::lifecycle::notification;
 use crate::server::RubyLanguageServer;
 
 use log::info;

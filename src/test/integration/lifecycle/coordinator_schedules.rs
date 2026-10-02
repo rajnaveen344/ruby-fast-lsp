@@ -3,7 +3,7 @@
 //! only bound hangs.
 
 use crate::loader::scheduling::test_schedule::Point;
-use crate::lsp::capabilities::indexing::init_workspace_for_run;
+use crate::lsp::lifecycle::indexing::init_workspace_for_run;
 use crate::test::harness::FakeEditor;
 use std::time::Duration;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};

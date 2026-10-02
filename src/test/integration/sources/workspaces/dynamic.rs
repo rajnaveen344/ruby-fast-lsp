@@ -1,6 +1,6 @@
 //! `workspace/didChangeWorkspaceFolders` add/remove tests.
 
-use crate::lsp::handlers::notification::handle_did_change_workspace_folders;
+use crate::lsp::lifecycle::notification::handle_did_change_workspace_folders;
 use crate::test::harness::FakeEditor;
 use std::fs;
 use tempfile::tempdir;

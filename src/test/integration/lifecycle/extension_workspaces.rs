@@ -113,7 +113,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
         "loaded"
     );
 
-    crate::lsp::handlers::notification::handle_did_change_watched_files(
+    crate::lsp::lifecycle::notification::handle_did_change_watched_files(
         &server,
         DidChangeWatchedFilesParams {
             changes: vec![FileEvent::new(
@@ -129,7 +129,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
         "loaded"
     );
 
-    crate::lsp::handlers::notification::handle_did_change_watched_files(
+    crate::lsp::lifecycle::notification::handle_did_change_watched_files(
         &server,
         DidChangeWatchedFilesParams {
             changes: vec![FileEvent::new(

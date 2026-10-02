@@ -28,7 +28,7 @@ async fn early_definition_request_waits_for_its_exact_project_demand_and_retries
         .indexing_status
         .transition(run.generation(), IndexingPhase::IndexingProject, None, None)
         .unwrap();
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -120,7 +120,7 @@ async fn dependency_demand_can_resolve_before_the_project_stage_completes() {
         .indexing_status
         .transition(run.generation(), IndexingPhase::IndexingProject, None, None)
         .unwrap();
-    crate::lsp::capabilities::indexing::handle_did_open(
+    crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {

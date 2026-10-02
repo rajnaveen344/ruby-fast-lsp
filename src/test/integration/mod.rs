@@ -1,5 +1,4 @@
-//! Integration tests grouped by the same feature families as
-//! `src/lsp/capabilities/` and `src/lsp/query/`.
+//! Integration tests grouped by the same feature families as `src/features/`.
 
 // Diagnostics publication and diagnostic kinds.
 mod diagnostics;
