@@ -374,13 +374,21 @@ pub fn engine_diagnostics(view: &View<'_>, uri: &Url) -> Vec<Diagnostic> {
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-    let Some(file) = view.file_id(&path).and_then(|file_id| view.file(file_id)) else {
+    let Some(file_id) = view.file_id(&path) else {
         return Vec::new();
     };
-    if Url::from_file_path(&file.path).is_err() {
+    // Most documents have no facts; skip the source lookup and URI check.
+    let facts = view.diagnostic_facts_in_file(file_id);
+    if facts.is_empty() {
         return Vec::new();
     }
-    view.diagnostic_facts_in_file(file.id)
+    let Some(file) = view
+        .file(file_id)
+        .filter(|file| Url::from_file_path(&file.path).is_ok())
+    else {
+        return Vec::new();
+    };
+    facts
         .into_iter()
         .filter_map(|fact| {
             Some(Diagnostic {
