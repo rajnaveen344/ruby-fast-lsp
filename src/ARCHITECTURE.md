@@ -153,8 +153,10 @@ to protocol values. See the [feature guide](features/README.md).
 
 ### 4. Lifecycle (`src/lsp/lifecycle/`)
 
-- `notification/`: initialize (server capabilities), initialized, shutdown,
-  configuration, workspace folders, and watched files
+- `notification/`: one module per protocol responsibility: `initialize`
+  (server capabilities, initialized), `configuration` (with extension watch
+  registration), `workspace_folders`, and `watched_files` (with project-input
+  rebuilds); `mod.rs` holds shutdown and the document delegators
 - `indexing/`: document open, change, save, and close indexing, workspace
   initialization, and diagnostic publication
 
