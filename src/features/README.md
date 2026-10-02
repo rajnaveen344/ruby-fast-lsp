@@ -41,9 +41,11 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
   `Cursor` (document plus `View`) to plain functions. Functions over a cursor
   never lock the engine or the document again, and the closure is
   synchronous, so no guard is held across an `.await`. Migrated features
-  (definition, implementation) expose that function, for example
-  `definition::definitions_at(cursor, uri, position, content)`, and share
-  receiver and method lookup through `cursor::method`.
+  (definition, implementation, references, highlights) expose that function,
+  for example `definition::definitions_at(cursor, uri, position, content)`,
+  and share receiver and method lookup through `cursor::method`. Work that
+  writes the document, such as rebuilding stale local-variable scopes for
+  references, runs after the closure returns (`references::Answer`).
 - A feature may read `server` state and `loader` products. It never names
   `lsp`; an item a feature needs from `lsp` moves to its proper owner.
 - Query adapters convert cursor positions to analysis offsets and domain

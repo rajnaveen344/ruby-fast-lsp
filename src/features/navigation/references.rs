@@ -2,18 +2,20 @@
 //! same-document locations that document highlights reuse.
 
 use crate::invariant::ExpectInvariant;
-use log::info;
+use parking_lot::RwLock;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::MethodReceiver;
+use ruby_analysis::core::MethodVisibility;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::core::TextRange;
 use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
+use ruby_analysis::engine::{AnalysisEngine, View};
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::converter::YardTypeConverter;
-use ruby_analysis::indexer::Identifier;
+use ruby_analysis::indexer::{Identifier, RubyDocument};
 use ruby_analysis::inference::semantics::ReceiverAccess;
 use ruby_prism::Visit;
 use std::path::Path;
@@ -22,9 +24,9 @@ use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{Location, Position, Range, ReferenceParams, Url};
 
 use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{method, Cursor, EngineQuery};
 use crate::server::RubyLanguageServer;
-use crate::utils::lsp::{lsp_text_location, source_position};
+use crate::utils::lsp::{deduplicate_locations, lsp_text_location, source_position};
 use crate::utils::parser::position_to_offset;
 
 /// Handle `textDocument/references`.
@@ -43,349 +45,434 @@ pub async fn find_references_at_position(
     uri: &Url,
     position: Position,
 ) -> Option<Vec<Location>> {
-    let (content, doc_arc) = {
-        let docs_guard = server.documents.read();
-        let doc_arc = docs_guard.get(uri)?.clone();
-        let doc = doc_arc.read();
-        (doc.content.clone(), doc_arc.clone())
-    };
-    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(uri));
-    query.find_references_at_position(uri, position, &content)
+    read_open_document(server, uri, |cursor| references_at(cursor, position))
 }
 
-impl EngineQuery {
-    /// Find all references to the symbol at the given position.
-    pub fn find_references_at_position(
-        &self,
-        uri: &Url,
-        position: Position,
-        content: &str,
+/// Read one cursor over the open document at `uri`, then rebuild stale local
+/// variable scopes after both guards are released when the read asks for it.
+pub(crate) fn read_open_document(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    read: impl FnOnce(Cursor<'_>) -> Answer,
+) -> Option<Vec<Location>> {
+    let document = server.documents.read().get(uri)?.clone();
+    let engine = server.analysis_engine_for_uri(uri);
+    EngineQuery::with_doc_and_engine(document.clone(), engine.clone())
+        .with_view(read)
+        .finish(&document, engine)
+}
+
+/// A cursor read's result. A local variable without reference ranges in the
+/// open document's scopes is answered after those scopes are rebuilt, which
+/// writes the document and so cannot happen under the read guards.
+pub(crate) enum Answer {
+    Locations(Option<Vec<Location>>),
+    StaleLocalScopes { name: String, byte_offset: u32 },
+}
+
+impl Answer {
+    fn finish(
+        self,
+        document: &Arc<RwLock<RubyDocument>>,
+        engine: Arc<RwLock<AnalysisEngine>>,
     ) -> Option<Vec<Location>> {
-        if let Some(locations) = self.module_call_reference_locations(position, content, false) {
-            return Some(locations);
-        }
-        let analyzer = self.analyzer_at_position(uri, content, position);
-        let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
-            analyzer.get_identifier_at_position(source_position(position));
-
-        let identifier = identifier_opt?;
-
-        self.find_references_for_identifier(
-            &identifier,
-            &ancestors,
-            namespace_kind,
-            position,
-            content,
-        )
-    }
-
-    /// Same-document highlight locations for the symbol at `position`.
-    ///
-    /// Resolves identity the same way as find-references, then collects only
-    /// ranges in the open file. Does not run project-wide
-    /// `method_reference_ranges*` (or its full-workspace private-source scan).
-    pub fn find_document_highlight_locations_at_position(
-        &self,
-        uri: &Url,
-        position: Position,
-        content: &str,
-    ) -> Option<Vec<Location>> {
-        let file_id = self.doc()?.read().analysis_file_id();
-        if let Some(locations) = self.module_call_reference_locations(position, content, true) {
-            return Some(locations);
-        }
-        let analyzer = self.analyzer_at_position(uri, content, position);
-        let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
-            analyzer.get_identifier_at_position(source_position(position));
-        let identifier = identifier_opt?;
-
-        self.find_document_highlights_for_identifier(
-            &identifier,
-            &ancestors,
-            namespace_kind,
-            position,
-            content,
-            file_id,
-        )
-    }
-
-    fn module_call_reference_locations(
-        &self,
-        position: Position,
-        content: &str,
-        same_file: bool,
-    ) -> Option<Vec<Location>> {
-        let file_id = self.doc()?.read().analysis_file_id();
-        let byte_offset = u32::try_from(position_to_offset(content, position)).expect_invariant(
-            "reference position exceeded u32 offsets",
-            "engine ranges use u32",
-            "bound source input sizes",
-        );
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let ranges = if same_file {
-            query.module_call_highlight_ranges_at(file_id, byte_offset)?
-        } else {
-            query.module_call_reference_ranges_at(file_id, byte_offset)?
+        let (name, byte_offset) = match self {
+            Answer::Locations(locations) => return locations,
+            Answer::StaleLocalScopes { name, byte_offset } => (name, byte_offset),
         };
-        Some(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine.view(), ranges),
-        ))
+        rebuild_local_variable_scopes(document, engine);
+        let document = document.read();
+        let ranges = document.local_variable_reference_ranges_at(&name, byte_offset);
+        (!ranges.is_empty()).then(|| document_locations(&document, ranges))
     }
+}
 
-    /// Find references to a constant by FQN.
-    fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        if let Some(entries) = self.reference_locations_for_fqn_from_analysis(fqn) {
-            info!("Found {} constant references to: {}", entries.len(), fqn);
-            return Some(entries);
-        }
-        None
+/// All references to the symbol at `position` in the cursor's document.
+pub(crate) fn references_at(cursor: Cursor<'_>, position: Position) -> Answer {
+    let Some(document) = cursor.document else {
+        return Answer::Locations(None);
+    };
+    let content = document.content.as_str();
+    if let Some(locations) = module_call_locations(cursor, position, content, false) {
+        return Answer::Locations(Some(locations));
     }
+    let (identifier, _, ancestors, _scope_stack, namespace_kind) = cursor
+        .analyzer(&document.uri, content, position)
+        .get_identifier_at_position(source_position(position));
+    let Some(identifier) = identifier else {
+        return Answer::Locations(None);
+    };
 
-    /// Find references to a variable (instance, class, or global).
-    fn find_variable_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        if let Some(entries) = self.variable_reference_locations_from_analysis(fqn) {
-            info!("Found {} variable references to: {}", entries.len(), fqn);
-            return Some(entries);
+    let view = cursor.view;
+    let locations = |ranges| non_empty_locations(locations_for_ranges(view, ranges));
+    Answer::Locations(match &identifier {
+        Identifier::RubyConstant { iden, .. } => {
+            locations(view.constant_reference_ranges(iden, &ancestors))
         }
-        None
+        Identifier::RubyMethod { receiver, iden, .. } => {
+            method_references(cursor, receiver, iden, &ancestors, namespace_kind, position)
+        }
+        Identifier::RubyInstanceVariable { name, .. } => {
+            FullyQualifiedName::instance_variable(name.clone())
+                .ok()
+                .and_then(|fqn| locations(view.variable_reference_ranges(&fqn)))
+        }
+        Identifier::RubyClassVariable { name, .. } => {
+            FullyQualifiedName::class_variable(name.clone())
+                .ok()
+                .and_then(|fqn| locations(view.variable_reference_ranges(&fqn)))
+        }
+        Identifier::RubyGlobalVariable { name, .. } => {
+            FullyQualifiedName::global_variable(name.clone())
+                .ok()
+                .and_then(|fqn| locations(view.variable_reference_ranges(&fqn)))
+        }
+        Identifier::RubyLocalVariable { name, .. } => {
+            return local_variable_references(document, name, position);
+        }
+        Identifier::YardType { type_name, .. } => {
+            YardTypeConverter::parse_type_name_to_fqn_public(type_name)
+                .and_then(|fqn| locations(view.reference_ranges_for_fqn(&fqn)))
+        }
+    })
+}
+
+/// Same-document highlight locations for the symbol at `position`.
+///
+/// Resolves identity the same way as find-references, then collects only
+/// ranges in the open file. Does not run project-wide
+/// `method_reference_ranges*` (or its full-workspace private-source scan).
+pub(crate) fn highlights_at(cursor: Cursor<'_>, position: Position) -> Answer {
+    let (Some(document), Some(file_id)) = (cursor.document, cursor.file_id()) else {
+        return Answer::Locations(None);
+    };
+    let content = document.content.as_str();
+    if let Some(locations) = module_call_locations(cursor, position, content, true) {
+        return Answer::Locations(Some(locations));
     }
+    let (identifier, _, ancestors, _scope_stack, namespace_kind) = cursor
+        .analyzer(&document.uri, content, position)
+        .get_identifier_at_position(source_position(position));
+    let Some(identifier) = identifier else {
+        return Answer::Locations(None);
+    };
 
-    /// Find references to a method.
-    ///
-    /// Uses the same type-inference-based receiver resolution as go-to-definition
-    /// to correctly resolve expression receivers. If the receiver type cannot be
-    /// inferred, returns None rather than guessing (correctness over completeness).
-    fn find_method_references(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        ancestors: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        content: &str,
-    ) -> Option<Vec<Location>> {
-        // `def initialize` is indexed as `new` (singleton) — map accordingly
-        if method.as_str() == "initialize" {
-            if let Ok(new_method) = RubyMethod::new("new") {
-                let namespace_fqn = FullyQualifiedName::namespace_with_kind(
-                    ancestors.to_vec(),
-                    NamespaceKind::Singleton,
-                );
-                return self.method_reference_locations_for_namespace_from_analysis(
-                    &namespace_fqn,
-                    &new_method,
-                );
-            }
-        }
-
-        let locations = match receiver {
-            MethodReceiver::Constant(receiver_ns) => self
-                .method_reference_locations_for_constant_receiver_from_analysis(
-                    receiver_ns,
-                    ancestors,
-                    method,
-                ),
-            MethodReceiver::Super => self.method_reference_locations_for_super_from_analysis(
-                ancestors,
-                namespace_kind,
-                method,
-            ),
-            MethodReceiver::None => self
-                .method_reference_locations_for_current_scope_from_analysis(
-                    ancestors,
-                    namespace_kind,
-                    method,
-                ),
-            MethodReceiver::SelfReceiver => {
-                let namespace_fqn =
-                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-                self.method_reference_locations_for_protected_receiver_from_analysis(
-                    &namespace_fqn,
-                    method,
-                    &namespace_fqn,
-                )
-            }
-            // For expression receivers, use type inference to resolve the actual type.
-            // This mirrors go-to-definition's `resolve_receiver_to_namespace`.
-            _ => {
-                let resolved_ns = self.resolve_receiver_to_namespace(
-                    receiver,
-                    ancestors,
-                    namespace_kind,
-                    position,
-                )?;
-                if static_send_symbol_at_position(content, position) {
-                    self.method_reference_locations_for_namespace_from_analysis(
-                        &resolved_ns,
-                        method,
-                    )
-                } else {
-                    let caller_namespace_fqn =
-                        FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-                    self.method_reference_locations_for_protected_receiver_from_analysis(
-                        &resolved_ns,
-                        method,
-                        &caller_namespace_fqn,
-                    )
-                }
-            }
-        }?;
-
-        Some(self.filter_invalid_private_method_reference_locations(method, locations))
-    }
-
-    fn filter_invalid_private_method_reference_locations(
-        &self,
-        method: &RubyMethod,
-        locations: Vec<Location>,
-    ) -> Vec<Location> {
-        let Some(doc_arc) = self.doc() else {
-            return locations;
-        };
-        let document = doc_arc.read();
-        if !document_declares_private_method(&document.content, method.as_str())
-            && !self.analysis_engine_has_private_method(method)
-        {
-            return locations;
-        }
-        let Some(uri) = self.uri() else {
-            return locations;
-        };
-        locations
-            .into_iter()
-            .filter(|location| {
-                let Some(content) = self.location_content(location, uri, document.content.as_str())
-                else {
-                    return true;
-                };
-                !range_uses_invalid_private_receiver(&content, location.range)
-                    || explicit_receiver_constant_parts(&content, location.range).is_none()
-                    || self.private_receiver_allowed_by_visibility_override(
-                        method,
-                        &content,
-                        location.range,
-                    )
-            })
-            .collect()
-    }
-
-    fn private_receiver_allowed_by_visibility_override(
-        &self,
-        method: &RubyMethod,
-        content: &str,
-        range: Range,
-    ) -> bool {
-        let Some(receiver_parts) = explicit_receiver_constant_parts(content, range) else {
-            return false;
-        };
-        let Some(engine) = self.analysis_engine() else {
-            return false;
-        };
-        let engine = engine.read();
-        let receiver_fqn =
-            FullyQualifiedName::namespace_with_kind(receiver_parts, NamespaceKind::Instance);
-        let request = MethodRequest::new(
-            LookupReceiver::Namespace(&receiver_fqn),
-            *method,
-            MethodWant::Callees,
-        )
-        .with_access(ReceiverAccess::Public);
-        lookup::method(&engine.view(), request)
-            .into_callees()
-            .is_some_and(|callees| {
-                callees
-                    .iter()
-                    .any(|callee| !callee.definition_ranges.is_empty())
-            })
-    }
-
-    fn analysis_engine_has_private_method(&self, method: &RubyMethod) -> bool {
-        let Some(engine) = self.analysis_engine() else {
-            return false;
-        };
-        let engine = engine.read();
-        engine.view().all_method_facts().iter().any(|fact| {
-            let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
-                return false;
-            };
-            *fact_method == *method
-                && fact.visibility == ruby_analysis::core::MethodVisibility::Private
-        }) || engine
-            .view()
-            .all_method_visibility_overrides()
-            .iter()
-            .any(|fact| {
-                fact.method == *method
-                    && fact.visibility == ruby_analysis::core::MethodVisibility::Private
-            })
-    }
-
-    fn location_content(
-        &self,
-        location: &Location,
-        current_uri: &Url,
-        current_content: &str,
-    ) -> Option<String> {
-        if &location.uri == current_uri {
-            return Some(current_content.to_string());
-        }
-
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let path = location.uri.to_file_path().ok()?;
-        if let Some(file_id) = query.file_id(&path) {
-            return query.file(file_id)?.source.clone();
-        }
-        if let Ok(relative) = path.strip_prefix(Path::new("/")) {
-            if let Some(file_id) = query.file_id(relative) {
-                return query.file(file_id)?.source.clone();
-            }
-            return engine
-                .view()
-                .files()
-                .find(|file| file.path.ends_with(relative))
-                .and_then(|file| file.source.clone());
-        }
-        None
-    }
-
-    /// Find references to a local variable using VariableScopes.
-    fn find_local_variable_references(
-        &self,
-        name: &str,
-        position: Position,
-    ) -> Option<Vec<Location>> {
-        let doc_arc = self.doc()?;
-        let document = doc_arc.read();
-
-        let byte_offset = document.position_to_analysis_offset(source_position(position));
-        let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
-        if !ranges.is_empty() {
-            return Some(
-                ranges
-                    .into_iter()
-                    .map(|range| lsp_text_location(&document, range))
-                    .collect(),
-            );
-        }
-        drop(document);
-
-        self.rebuild_local_variable_scopes_for_open_document()?;
-        let document = doc_arc.read();
-        let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
-        if ranges.is_empty() {
-            return None;
-        }
-        Some(
-            ranges
+    let view = cursor.view;
+    let same_file =
+        |fqn: FullyQualifiedName| unique_locations(view, same_file_ranges(view, &fqn, file_id));
+    Answer::Locations(match &identifier {
+        Identifier::RubyConstant { iden, .. } => unique_locations(
+            view,
+            view.constant_reference_ranges(iden, &ancestors)
                 .into_iter()
-                .map(|range| lsp_text_location(&document, range))
+                .filter(|range| range.file_id == file_id)
                 .collect(),
-        )
+        ),
+        Identifier::RubyMethod { receiver, iden, .. } => method_highlights(
+            cursor,
+            receiver,
+            iden,
+            &ancestors,
+            namespace_kind,
+            position,
+            file_id,
+        ),
+        Identifier::RubyInstanceVariable { name, .. } => {
+            FullyQualifiedName::instance_variable(name.clone())
+                .ok()
+                .and_then(same_file)
+        }
+        Identifier::RubyClassVariable { name, .. } => {
+            FullyQualifiedName::class_variable(name.clone())
+                .ok()
+                .and_then(same_file)
+        }
+        Identifier::RubyGlobalVariable { name, .. } => {
+            FullyQualifiedName::global_variable(name.clone())
+                .ok()
+                .and_then(same_file)
+        }
+        // Locals are already document-scoped via VariableScopes.
+        Identifier::RubyLocalVariable { name, .. } => {
+            return local_variable_references(document, name, position);
+        }
+        Identifier::YardType { type_name, .. } => {
+            YardTypeConverter::parse_type_name_to_fqn_public(type_name).and_then(same_file)
+        }
+    })
+}
+
+fn module_call_locations(
+    cursor: Cursor<'_>,
+    position: Position,
+    content: &str,
+    same_file: bool,
+) -> Option<Vec<Location>> {
+    let file_id = cursor.file_id()?;
+    let byte_offset = u32::try_from(position_to_offset(content, position)).expect_invariant(
+        "reference position exceeded u32 offsets",
+        "engine ranges use u32",
+        "bound source input sizes",
+    );
+    let ranges = if same_file {
+        cursor
+            .view
+            .module_call_highlight_ranges_at(file_id, byte_offset)?
+    } else {
+        cursor
+            .view
+            .module_call_reference_ranges_at(file_id, byte_offset)?
+    };
+    Some(deduplicate_locations(locations_for_ranges(
+        cursor.view,
+        ranges,
+    )))
+}
+
+/// References to a method. Expression receivers resolve through the same
+/// type inference as go-to-definition; an uninferred receiver returns `None`
+/// rather than a guess.
+fn method_references(
+    cursor: Cursor<'_>,
+    receiver: &MethodReceiver,
+    method: &RubyMethod,
+    ancestors: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+) -> Option<Vec<Location>> {
+    let view = cursor.view;
+    // `def initialize` is indexed as `new` (singleton).
+    if method.as_str() == "initialize" {
+        if let Ok(new_method) = RubyMethod::new("new") {
+            let singleton = FullyQualifiedName::namespace_with_kind(
+                ancestors.to_vec(),
+                NamespaceKind::Singleton,
+            );
+            return unique_locations(view, view.method_reference_ranges(&singleton, &new_method));
+        }
     }
+
+    let scope = FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
+    let ranges = match receiver {
+        MethodReceiver::Constant(receiver_path) => view
+            .method_reference_ranges_for_constant_receiver_public(receiver_path, ancestors, method),
+        MethodReceiver::Super => view.super_method_reference_ranges(&scope, method),
+        MethodReceiver::None => view.method_reference_ranges(&scope, method),
+        MethodReceiver::SelfReceiver => {
+            view.method_reference_ranges_protected_receiver(&scope, method, &scope)
+        }
+        _ => {
+            let owner =
+                method::receiver_namespace(cursor, receiver, ancestors, namespace_kind, position)?;
+            let content = cursor.document.map_or("", |document| &document.content);
+            if static_send_symbol_at_position(content, position) {
+                view.method_reference_ranges(&owner, method)
+            } else {
+                view.method_reference_ranges_protected_receiver(&owner, method, &scope)
+            }
+        }
+    };
+    let locations = unique_locations(view, ranges)?;
+    Some(without_invalid_private_receivers(cursor, method, locations))
+}
+
+fn method_highlights(
+    cursor: Cursor<'_>,
+    receiver: &MethodReceiver,
+    method: &RubyMethod,
+    ancestors: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+    file_id: SourceFileId,
+) -> Option<Vec<Location>> {
+    let view = cursor.view;
+    // `def initialize` is indexed as `new` (singleton).
+    if method.as_str() == "initialize" {
+        if let Ok(new_method) = RubyMethod::new("new") {
+            let singleton = FullyQualifiedName::namespace_with_kind(
+                ancestors.to_vec(),
+                NamespaceKind::Singleton,
+            );
+            return method_target_highlights(view, &singleton, &new_method, file_id, false);
+        }
+    }
+
+    let scope = FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
+    let (owner, super_only) = match receiver {
+        MethodReceiver::Constant(receiver_path) => (
+            view.resolve_constant_receiver(receiver_path, ancestors),
+            false,
+        ),
+        MethodReceiver::Super => (scope, true),
+        MethodReceiver::None | MethodReceiver::SelfReceiver => (scope, false),
+        _ => (
+            method::receiver_namespace(cursor, receiver, ancestors, namespace_kind, position)?,
+            false,
+        ),
+    };
+    method_target_highlights(view, &owner, method, file_id, super_only)
+}
+
+fn method_target_highlights(
+    view: &View<'_>,
+    owner: &FullyQualifiedName,
+    method: &RubyMethod,
+    file_id: SourceFileId,
+    super_only: bool,
+) -> Option<Vec<Location>> {
+    let targets = if super_only {
+        view.super_method_reference_target(owner, method)
+            .into_iter()
+            .collect()
+    } else {
+        view.method_reference_targets(owner, method)
+    };
+    let ranges = targets
+        .iter()
+        .flat_map(|target| same_file_ranges(view, target, file_id))
+        .collect();
+    unique_locations(view, ranges)
+}
+
+fn local_variable_references(document: &RubyDocument, name: &str, position: Position) -> Answer {
+    let byte_offset = document.position_to_analysis_offset(source_position(position));
+    let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
+    if ranges.is_empty() {
+        return Answer::StaleLocalScopes {
+            name: name.to_string(),
+            byte_offset,
+        };
+    }
+    Answer::Locations(Some(document_locations(document, ranges)))
+}
+
+fn document_locations(document: &RubyDocument, ranges: Vec<TextRange>) -> Vec<Location> {
+    ranges
+        .into_iter()
+        .map(|range| lsp_text_location(document, range))
+        .collect()
+}
+
+fn rebuild_local_variable_scopes(
+    document: &Arc<RwLock<RubyDocument>>,
+    engine: Arc<RwLock<AnalysisEngine>>,
+) {
+    let snapshot = document.read().clone();
+    let content = snapshot.content.clone();
+    let parse_result = ruby_prism::parse(content.as_bytes());
+    let mut collector =
+        FactCollector::analysis_only(snapshot, Arc::new(NullFactCollectorExtensionHost), engine)
+            .without_analysis_method_return_resolution()
+            .without_expression_receiver_inference()
+            .without_diagnostics();
+    collector.visit(&parse_result.node());
+    document.write().variable_scopes = collector.into_document().variable_scopes;
+}
+
+fn unique_locations(view: &View<'_>, ranges: Vec<TextRange>) -> Option<Vec<Location>> {
+    non_empty_locations(deduplicate_locations(locations_for_ranges(view, ranges)))
+}
+
+fn same_file_ranges(
+    view: &View<'_>,
+    fqn: &FullyQualifiedName,
+    file_id: SourceFileId,
+) -> Vec<TextRange> {
+    view.reference_facts_for(fqn)
+        .iter()
+        .map(|fact| fact.range)
+        .filter(|range| range.file_id == file_id)
+        .collect()
+}
+
+/// Drop explicit-receiver calls of a private method unless a public
+/// visibility override makes the receiver's target callable.
+fn without_invalid_private_receivers(
+    cursor: Cursor<'_>,
+    method: &RubyMethod,
+    locations: Vec<Location>,
+) -> Vec<Location> {
+    let Some(document) = cursor.document else {
+        return locations;
+    };
+    if !document_declares_private_method(&document.content, method.as_str())
+        && !has_private_method(cursor.view, method)
+    {
+        return locations;
+    }
+    locations
+        .into_iter()
+        .filter(|location| {
+            let Some(content) =
+                location_content(cursor.view, location, &document.uri, &document.content)
+            else {
+                return true;
+            };
+            !range_uses_invalid_private_receiver(content, location.range)
+                || explicit_receiver_constant_parts(content, location.range).is_none()
+                || public_receiver_target_exists(cursor.view, method, content, location.range)
+        })
+        .collect()
+}
+
+fn public_receiver_target_exists(
+    view: &View<'_>,
+    method: &RubyMethod,
+    content: &str,
+    range: Range,
+) -> bool {
+    let Some(receiver_parts) = explicit_receiver_constant_parts(content, range) else {
+        return false;
+    };
+    let receiver_fqn =
+        FullyQualifiedName::namespace_with_kind(receiver_parts, NamespaceKind::Instance);
+    let request = MethodRequest::new(
+        LookupReceiver::Namespace(&receiver_fqn),
+        *method,
+        MethodWant::Callees,
+    )
+    .with_access(ReceiverAccess::Public);
+    lookup::method(view, request)
+        .into_callees()
+        .is_some_and(|callees| {
+            callees
+                .iter()
+                .any(|callee| !callee.definition_ranges.is_empty())
+        })
+}
+
+fn has_private_method(view: &View<'_>, method: &RubyMethod) -> bool {
+    view.all_method_facts().iter().any(|fact| {
+        let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
+            return false;
+        };
+        *fact_method == *method && fact.visibility == MethodVisibility::Private
+    }) || view
+        .all_method_visibility_overrides()
+        .iter()
+        .any(|fact| fact.method == *method && fact.visibility == MethodVisibility::Private)
+}
+
+fn location_content<'a>(
+    view: &View<'a>,
+    location: &Location,
+    current_uri: &Url,
+    current_content: &'a str,
+) -> Option<&'a str> {
+    if &location.uri == current_uri {
+        return Some(current_content);
+    }
+    let path = location.uri.to_file_path().ok()?;
+    if let Some(file_id) = view.file_id(&path) {
+        return view.file(file_id)?.source.as_deref();
+    }
+    let relative = path.strip_prefix(Path::new("/")).ok()?;
+    if let Some(file_id) = view.file_id(relative) {
+        return view.file(file_id)?.source.as_deref();
+    }
+    view.files()
+        .find(|file| file.path.ends_with(relative))
+        .and_then(|file| file.source.as_deref())
 }
 
 fn document_declares_private_method(content: &str, method: &str) -> bool {
@@ -472,449 +559,4 @@ fn static_send_symbol_at_position(content: &str, position: Position) -> bool {
         || line.contains(".__send__(:")
         || line.contains(".send(\"")
         || line.contains(".__send__(\"")
-}
-
-// Private helpers
-impl EngineQuery {
-    /// Find references for a given identifier.
-    fn find_references_for_identifier(
-        &self,
-        identifier: &Identifier,
-        ancestors: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        content: &str,
-    ) -> Option<Vec<Location>> {
-        match identifier {
-            Identifier::RubyConstant { namespace: _, iden } => {
-                self.constant_reference_locations_from_analysis(iden, ancestors)
-            }
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver,
-                iden,
-            } => self.find_method_references(
-                receiver,
-                iden,
-                ancestors,
-                namespace_kind,
-                position,
-                content,
-            ),
-            Identifier::RubyInstanceVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
-                    self.find_variable_references(&fqn)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyClassVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::class_variable(name.clone()) {
-                    self.find_variable_references(&fqn)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyGlobalVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::global_variable(name.clone()) {
-                    self.find_variable_references(&fqn)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyLocalVariable { name, .. } => {
-                self.find_local_variable_references(name, position)
-            }
-            Identifier::YardType { type_name, .. } => {
-                if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
-                    self.find_constant_references(&fqn)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    fn find_document_highlights_for_identifier(
-        &self,
-        identifier: &Identifier,
-        ancestors: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        content: &str,
-        file_id: SourceFileId,
-    ) -> Option<Vec<Location>> {
-        match identifier {
-            Identifier::RubyConstant { namespace: _, iden } => {
-                self.same_file_constant_highlight_locations(iden, ancestors, file_id)
-            }
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver,
-                iden,
-            } => self.same_file_method_highlight_locations(
-                receiver,
-                iden,
-                ancestors,
-                namespace_kind,
-                position,
-                content,
-                file_id,
-            ),
-            Identifier::RubyInstanceVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
-                    self.same_file_fqn_highlight_locations(&fqn, file_id)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyClassVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::class_variable(name.clone()) {
-                    self.same_file_fqn_highlight_locations(&fqn, file_id)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyGlobalVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::global_variable(name.clone()) {
-                    self.same_file_fqn_highlight_locations(&fqn, file_id)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyLocalVariable { name, .. } => {
-                // Locals are already document-scoped via VariableScopes.
-                self.find_local_variable_references(name, position)
-            }
-            Identifier::YardType { type_name, .. } => {
-                if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
-                    self.same_file_fqn_highlight_locations(&fqn, file_id)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    fn same_file_constant_highlight_locations(
-        &self,
-        constant_path: &[RubyConstant],
-        ancestors: &[RubyConstant],
-        file_id: SourceFileId,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let ranges = query
-            .constant_reference_ranges(constant_path, ancestors)
-            .into_iter()
-            .filter(|range| range.file_id == file_id)
-            .collect::<Vec<_>>();
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine.view(), ranges),
-        ))
-    }
-
-    fn same_file_fqn_highlight_locations(
-        &self,
-        fqn: &FullyQualifiedName,
-        file_id: SourceFileId,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let ranges = same_file_reference_ranges(&query, fqn, file_id);
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine.view(), ranges),
-        ))
-    }
-
-    fn same_file_method_highlight_locations(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        ancestors: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        content: &str,
-        file_id: SourceFileId,
-    ) -> Option<Vec<Location>> {
-        // `def initialize` is indexed as `new` (singleton) — map accordingly
-        if method.as_str() == "initialize" {
-            if let Ok(new_method) = RubyMethod::new("new") {
-                let namespace_fqn = FullyQualifiedName::namespace_with_kind(
-                    ancestors.to_vec(),
-                    NamespaceKind::Singleton,
-                );
-                return self.same_file_method_target_highlight_locations(
-                    &namespace_fqn,
-                    &new_method,
-                    file_id,
-                    MethodHighlightMode::AllTargets,
-                );
-            }
-        }
-
-        match receiver {
-            MethodReceiver::Constant(receiver_ns) => {
-                let namespace_fqn = {
-                    let engine = self.analysis_engine()?.read();
-                    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-                    query.resolve_constant_receiver(receiver_ns, ancestors)
-                };
-                self.same_file_method_target_highlight_locations(
-                    &namespace_fqn,
-                    method,
-                    file_id,
-                    MethodHighlightMode::AllTargets,
-                )
-            }
-            MethodReceiver::Super => {
-                let namespace_fqn =
-                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-                self.same_file_method_target_highlight_locations(
-                    &namespace_fqn,
-                    method,
-                    file_id,
-                    MethodHighlightMode::SuperOnly,
-                )
-            }
-            MethodReceiver::None => {
-                let namespace_fqn =
-                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-                self.same_file_method_target_highlight_locations(
-                    &namespace_fqn,
-                    method,
-                    file_id,
-                    MethodHighlightMode::AllTargets,
-                )
-            }
-            MethodReceiver::SelfReceiver => {
-                let namespace_fqn =
-                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-                self.same_file_method_target_highlight_locations(
-                    &namespace_fqn,
-                    method,
-                    file_id,
-                    MethodHighlightMode::AllTargets,
-                )
-            }
-            _ => {
-                let resolved_ns = self.resolve_receiver_to_namespace(
-                    receiver,
-                    ancestors,
-                    namespace_kind,
-                    position,
-                )?;
-                let _ = content;
-                self.same_file_method_target_highlight_locations(
-                    &resolved_ns,
-                    method,
-                    file_id,
-                    MethodHighlightMode::AllTargets,
-                )
-            }
-        }
-    }
-
-    fn same_file_method_target_highlight_locations(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        file_id: SourceFileId,
-        mode: MethodHighlightMode,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let targets = match mode {
-            MethodHighlightMode::AllTargets => {
-                query.method_reference_targets(namespace_fqn, method)
-            }
-            MethodHighlightMode::SuperOnly => query
-                .super_method_reference_target(namespace_fqn, method)
-                .into_iter()
-                .collect(),
-        };
-        let mut ranges = Vec::new();
-        for target in targets {
-            ranges.extend(same_file_reference_ranges(&query, &target, file_id));
-        }
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine.view(), ranges),
-        ))
-    }
-
-    fn method_reference_locations_for_namespace_from_analysis(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(
-                &engine.view(),
-                query.method_reference_ranges(namespace_fqn, method),
-            ),
-        ))
-    }
-
-    fn method_reference_locations_for_protected_receiver_from_analysis(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(
-                &engine.view(),
-                query.method_reference_ranges_protected_receiver(
-                    namespace_fqn,
-                    method,
-                    caller_namespace_fqn,
-                ),
-            ),
-        ))
-    }
-
-    fn method_reference_locations_for_constant_receiver_from_analysis(
-        &self,
-        receiver_path: &[RubyConstant],
-        ancestors: &[RubyConstant],
-        method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(
-                &engine.view(),
-                query.method_reference_ranges_for_constant_receiver_public(
-                    receiver_path,
-                    ancestors,
-                    method,
-                ),
-            ),
-        ))
-    }
-
-    fn method_reference_locations_for_current_scope_from_analysis(
-        &self,
-        ancestors: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let namespace_fqn =
-            FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(
-                &engine.view(),
-                query.method_reference_ranges(&namespace_fqn, method),
-            ),
-        ))
-    }
-
-    fn method_reference_locations_for_super_from_analysis(
-        &self,
-        ancestors: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let namespace_fqn =
-            FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-        non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(
-                &engine.view(),
-                query.super_method_reference_ranges(&namespace_fqn, method),
-            ),
-        ))
-    }
-
-    fn constant_reference_locations_from_analysis(
-        &self,
-        constant_path: &[RubyConstant],
-        ancestors: &[RubyConstant],
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(locations_for_ranges(
-            &engine.view(),
-            query.constant_reference_ranges(constant_path, ancestors),
-        ))
-    }
-
-    fn variable_reference_locations_from_analysis(
-        &self,
-        fqn: &FullyQualifiedName,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(locations_for_ranges(
-            &engine.view(),
-            query.variable_reference_ranges(fqn),
-        ))
-    }
-
-    fn reference_locations_for_fqn_from_analysis(
-        &self,
-        fqn: &FullyQualifiedName,
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(locations_for_ranges(
-            &engine.view(),
-            query.reference_ranges_for_fqn(fqn),
-        ))
-    }
-
-    fn rebuild_local_variable_scopes_for_open_document(&self) -> Option<()> {
-        let doc_arc = self.doc()?;
-        let document = doc_arc.read().clone();
-        let content = document.content.clone();
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let node = parse_result.node();
-        let mut collector = FactCollector::analysis_only(
-            document,
-            Arc::new(NullFactCollectorExtensionHost),
-            self.analysis_engine()?.clone(),
-        )
-        .without_analysis_method_return_resolution()
-        .without_expression_receiver_inference()
-        .without_diagnostics();
-        collector.visit(&node);
-        doc_arc.write().variable_scopes = collector.into_document().variable_scopes;
-        Some(())
-    }
-}
-
-enum MethodHighlightMode {
-    AllTargets,
-    SuperOnly,
-}
-
-fn same_file_reference_ranges(
-    query: &ruby_analysis::engine::AnalysisQuery<'_>,
-    fqn: &FullyQualifiedName,
-    file_id: SourceFileId,
-) -> Vec<TextRange> {
-    query
-        .reference_facts_for(fqn)
-        .iter()
-        .map(|fact| fact.range)
-        .filter(|range| range.file_id == file_id)
-        .collect()
 }
