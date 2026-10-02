@@ -8,7 +8,7 @@ use ruby_prism::{DefNode, Node};
 
 use super::syntax::{constant_parts, constant_parts_and_absolute, constant_path_parts};
 use super::AnalysisIndexer;
-use crate::indexer::documents::scope_rules::{declaration_candidates, lexical_candidates};
+use crate::indexer::documents::scope_rules::lexical_candidates;
 use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::{infer_array_literal_type, infer_hash_literal_type};
 
@@ -23,15 +23,13 @@ impl AnalysisIndexer {
             .find_map(|candidate| self.constant_value_type(candidate))
     }
 
-    pub(super) fn resolve_declaration_constant_value_type_from(
+    pub(super) fn first_constant_value_type(
         &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-        lexical_context: &[RubyConstant],
+        candidates: &[Vec<RubyConstant>],
     ) -> Option<RubyType> {
-        declaration_candidates(parts, absolute, lexical_context)
-            .into_iter()
-            .find_map(|candidate| self.constant_value_type(candidate))
+        candidates
+            .iter()
+            .find_map(|candidate| self.constant_value_type(candidate.clone()))
     }
 
     fn constant_value_type(&self, parts: Vec<RubyConstant>) -> Option<RubyType> {

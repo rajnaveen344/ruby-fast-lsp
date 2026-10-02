@@ -4,8 +4,7 @@
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind,
     MethodAvailability, MethodFact, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod,
-    RubyType, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
-    UnresolvedGraphEdgeFact,
+    SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{
@@ -38,44 +37,31 @@ use super::syntax::{
 };
 use super::types::{literal_type, method_body_literal_type};
 use super::{AnalysisIndexer, ScopeKind};
+use crate::indexer::documents::scope_rules::alias_reopen_target;
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
 
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
         let lexical_context = self.lexical_stack.clone();
-        let syntactic_fqn = syntactic_namespace(&node.constant_path(), &lexical_context);
-        let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
-            .and_then(|(parts, absolute)| {
-                self.resolve_declaration_constant_value_type_from(
-                    &parts,
-                    absolute,
-                    &lexical_context,
-                )
-            })
-            .and_then(|ruby_type| match ruby_type {
-                RubyType::ClassReference(target) => target.to_instance_namespace(),
-                RubyType::Class(_)
-                | RubyType::Module(_)
-                | RubyType::ModuleReference(_)
-                | RubyType::Literal(_)
-                | RubyType::Array(_)
-                | RubyType::Hash(_, _)
-                | RubyType::Shape(_)
-                | RubyType::Union(_)
-                | RubyType::Unknown => None,
-            });
-        if syntactic_fqn.as_ref() == reopened_target.as_ref() {
-            reopened_target = None;
-        }
+        let has_explicit_superclass = node.superclass().is_some();
+        let superclass = node.superclass().and_then(|superclass| {
+            let (parts, absolute) = constant_parts_and_absolute(&superclass)?;
+            let super_range = self.range(&superclass.location());
+            let target = self.resolve_namespace_from(&parts, absolute, &lexical_context);
+            Some((parts, absolute, super_range, target))
+        });
+        let reopened_target = alias_reopen_target(
+            &node.constant_path(),
+            GraphNodeKind::Class,
+            superclass
+                .as_ref()
+                .and_then(|(_, _, _, target)| target.as_ref()),
+            &lexical_context,
+            |candidates| self.first_constant_value_type(candidates),
+        );
         if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
-            invariant!(
-                !parts.is_empty(),
-                what = "a resolved class alias target has an empty namespace",
-                why = "a Ruby class object must have a constant identity",
-                fix = "reject root namespace values before class alias reopening",
-            );
             self.enter_namespace_frame(parts.clone(), parts);
         } else if !self.enter_namespace_from_node(&node.constant_path()) {
             return;
@@ -88,13 +74,6 @@ impl Visit<'_> for AnalysisIndexer {
             &node.constant_path().location(),
             node.name().as_slice(),
         );
-        let has_explicit_superclass = node.superclass().is_some();
-        let superclass = node.superclass().and_then(|superclass| {
-            let (parts, absolute) = constant_parts_and_absolute(&superclass)?;
-            let super_range = self.range(&superclass.location());
-            let target = self.resolve_namespace_from(&parts, absolute, &lexical_context);
-            Some((parts, absolute, super_range, target))
-        });
         if reopened_target.is_none() {
             self.push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
         }
@@ -156,39 +135,15 @@ impl Visit<'_> for AnalysisIndexer {
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
-        let lexical_context = self.lexical_stack.clone();
-        let syntactic_fqn = syntactic_namespace(&node.constant_path(), &lexical_context);
-        let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
-            .and_then(|(parts, absolute)| {
-                self.resolve_declaration_constant_value_type_from(
-                    &parts,
-                    absolute,
-                    &lexical_context,
-                )
-            })
-            .and_then(|ruby_type| match ruby_type {
-                RubyType::ModuleReference(target) => target.to_instance_namespace(),
-                RubyType::Class(_)
-                | RubyType::ClassReference(_)
-                | RubyType::Module(_)
-                | RubyType::Literal(_)
-                | RubyType::Array(_)
-                | RubyType::Hash(_, _)
-                | RubyType::Shape(_)
-                | RubyType::Union(_)
-                | RubyType::Unknown => None,
-            });
-        if syntactic_fqn.as_ref() == reopened_target.as_ref() {
-            reopened_target = None;
-        }
+        let reopened_target = alias_reopen_target(
+            &node.constant_path(),
+            GraphNodeKind::Module,
+            None,
+            &self.lexical_stack,
+            |candidates| self.first_constant_value_type(candidates),
+        );
         if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
-            invariant!(
-                !parts.is_empty(),
-                what = "a resolved module alias target has an empty namespace",
-                why = "a Ruby module object must have a constant identity",
-                fix = "reject root namespace values before module alias reopening",
-            );
             self.enter_namespace_frame(parts.clone(), parts);
         } else if !self.enter_namespace_from_node(&node.constant_path()) {
             return;
@@ -724,22 +679,4 @@ impl Visit<'_> for AnalysisIndexer {
         self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
         visit_global_variable_operator_write_node(self, node);
     }
-}
-
-/// The namespace a class or module declaration names before any alias is
-/// followed. A constant whose value is this same namespace is an ordinary
-/// reopening, not an alias, so the declaration still owns its facts.
-fn syntactic_namespace(
-    path: &ruby_prism::Node<'_>,
-    lexical_context: &[RubyConstant],
-) -> Option<FullyQualifiedName> {
-    constant_parts_and_absolute(path).map(|(parts, absolute)| {
-        if absolute {
-            FullyQualifiedName::namespace(parts)
-        } else {
-            let mut probe = lexical_context.to_vec();
-            probe.extend(parts);
-            FullyQualifiedName::namespace(probe)
-        }
-    })
 }

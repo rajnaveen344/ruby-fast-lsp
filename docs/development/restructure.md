@@ -629,7 +629,10 @@ Delete this file when the last task is done. Git history keeps the record.
       `def Name.x` inside `class Name`. A constant-path receiver
       (`def A::B.x`) is still skipped by the seed; the collector attaches it
       to the current namespace, which is wrong unless the path names it.
-    - The superclass-equals-reopen-target check exists in the collector only.
+    - [x] The superclass-equals-reopen-target check existed in the collector
+      only, so the seed reopened `X = Y; class X < Y` as `Y` with a
+      self-superclass edge. Both walks now share
+      `scope_rules::alias_reopen_target`.
   - [ ] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. Its `lexical_stack`
         maps to `ScopeTracker` frames and its eval `owner_stack` maps to the
         block execution context's method-definition owner.

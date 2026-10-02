@@ -1,6 +1,7 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant, RubyType,
+    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant,
 };
+use crate::indexer::documents::scope_rules::alias_reopen_target;
 use crate::indexer::mixin_ref_from_node;
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
@@ -36,40 +37,18 @@ impl FactCollector {
             );
             Some((reference, super_range, target))
         });
-        let mut reopened_target = mixin_ref_from_node(&node.constant_path())
-            .and_then(|reference| {
-                self.resolve_declaration_constant_value_type_from(
-                    &reference.parts,
-                    reference.absolute,
-                    &lexical_context,
-                )
-            })
-            .and_then(|(_constant, ruby_type)| match ruby_type {
-                RubyType::ClassReference(target) => target.to_instance_namespace(),
-                RubyType::Class(_)
-                | RubyType::Module(_)
-                | RubyType::ModuleReference(_)
-                | RubyType::Literal(_)
-                | RubyType::Array(_)
-                | RubyType::Hash(_, _)
-                | RubyType::Shape(_)
-                | RubyType::Union(_)
-                | RubyType::Unknown => None,
-            });
-        if has_explicit_superclass
-            && superclass
+        let reopened_target = alias_reopen_target(
+            &node.constant_path(),
+            GraphNodeKind::Class,
+            superclass
                 .as_ref()
-                .and_then(|(_, _, target)| target.as_ref())
-                == reopened_target.as_ref()
-        {
-            reopened_target = None;
-        }
-        // A prior index of this same `class Name` leaves a ClassReference for
-        // `Name`. That must not be treated as an alias reopen: skipping the
-        // graph node would let update delete the only class identity.
-        if reopened_target.as_ref() == Some(&syntactic_fqn) {
-            reopened_target = None;
-        }
+                .and_then(|(_, _, target)| target.as_ref()),
+            &lexical_context,
+            |candidates| {
+                self.first_constant_value_type(candidates.iter().cloned())
+                    .map(|(_, ruby_type)| ruby_type)
+            },
+        );
 
         // Handle namespace setup
         if let Some(target) = &reopened_target {

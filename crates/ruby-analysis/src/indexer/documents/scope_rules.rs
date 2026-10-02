@@ -3,7 +3,7 @@
 //! opens. Walks differ only in which namespaces they know, so each rule takes
 //! that knowledge as a predicate or receiver resolver.
 
-use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant};
+use crate::core::{FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant, RubyType};
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
@@ -42,6 +42,50 @@ pub fn declaration_candidates(
         candidates.push(parts.to_vec());
     }
     candidates
+}
+
+/// The class or module a declaration reopens through a constant alias, when
+/// its name holds another namespace object of the declared kind.
+/// `constant_type` returns the value type of the first candidate constant
+/// that has one. A name holding its own declaration is an ordinary reopening,
+/// and a class whose explicit superclass is the alias target declares a new
+/// class: reopening would make the target inherit itself.
+pub fn alias_reopen_target(
+    name: &Node<'_>,
+    kind: GraphNodeKind,
+    superclass: Option<&FullyQualifiedName>,
+    lexical_context: &[RubyConstant],
+    constant_type: impl FnOnce(&[Vec<RubyConstant>]) -> Option<RubyType>,
+) -> Option<FullyQualifiedName> {
+    let reference = mixin_ref_from_node(name)?;
+    let candidates = declaration_candidates(&reference.parts, reference.absolute, lexical_context);
+    let syntactic = FullyQualifiedName::namespace(candidates[0].clone());
+    let target = match (kind, constant_type(&candidates)?) {
+        (GraphNodeKind::Class, RubyType::ClassReference(target))
+        | (GraphNodeKind::Module, RubyType::ModuleReference(target)) => {
+            target.to_instance_namespace()?
+        }
+        (
+            GraphNodeKind::Class | GraphNodeKind::Module,
+            RubyType::Class(_)
+            | RubyType::ClassReference(_)
+            | RubyType::Module(_)
+            | RubyType::ModuleReference(_)
+            | RubyType::Literal(_)
+            | RubyType::Array(_)
+            | RubyType::Hash(_, _)
+            | RubyType::Shape(_)
+            | RubyType::Union(_)
+            | RubyType::Unknown,
+        ) => return None,
+    };
+    invariant!(
+        !target.namespace_parts().is_empty(),
+        what = "a class or module alias names the root namespace",
+        why = "a Ruby class or module object has a constant identity",
+        fix = "reject root namespace values before alias reopening",
+    );
+    (target != syntactic && superclass != Some(&target)).then_some(target)
 }
 
 /// The first known namespace that `parts` names from `lexical_context`.

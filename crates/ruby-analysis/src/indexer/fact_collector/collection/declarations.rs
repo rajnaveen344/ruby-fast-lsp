@@ -5,9 +5,7 @@ use crate::core::{
     RubyMethod, RubyType, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use crate::indexer::documents::scope_rules::{
-    declaration_candidates, lexical_candidates, resolve_lexical_namespace,
-};
+use crate::indexer::documents::scope_rules::{lexical_candidates, resolve_lexical_namespace};
 use crate::indexer::fact_collector::context::source::u32_offset;
 use crate::indexer::fact_collector::FactCollector;
 use crate::invariant::ExpectInvariant;
@@ -124,16 +122,7 @@ impl FactCollector {
         self.first_constant_value_type(lexical_candidates(parts, absolute, lexical_context))
     }
 
-    pub fn resolve_declaration_constant_value_type_from(
-        &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-        lexical_context: &[RubyConstant],
-    ) -> Option<(FullyQualifiedName, RubyType)> {
-        self.first_constant_value_type(declaration_candidates(parts, absolute, lexical_context))
-    }
-
-    fn first_constant_value_type(
+    pub fn first_constant_value_type(
         &self,
         candidates: impl IntoIterator<Item = Vec<RubyConstant>>,
     ) -> Option<(FullyQualifiedName, RubyType)> {

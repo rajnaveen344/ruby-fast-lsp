@@ -27,7 +27,7 @@ state only through `inference::semantics::Semantics`; outside tests the indexer
 names no engine type, and callers pass a `View` or the shared engine.
 
 Scope rules shared by every walk (lexical constant lookup, declaration reopen
-candidates, the namespace a static receiver names, and the execution context
+candidates, the class or module a constant alias reopens, the namespace a static receiver names, and the execution context
 an eval, `define_method`, or Concern `class_methods` block opens) live in
 `documents/scope_rules.rs`, beside `ScopeTracker`. A walk passes in only which
 namespaces it knows or how it resolves a receiver; do not copy a rule into a
