@@ -200,6 +200,25 @@ result = obj.bar$0
     .await;
 }
 
+/// A class whose superclass is not indexed still constructs its own
+/// instances; the unresolved ancestor must not erase the constructor type.
+#[tokio::test]
+async fn constructor_with_unindexed_superclass_returns_instance() {
+    check(
+        r#"
+class Foo < UnindexedBase
+end
+
+class Factory
+  def bui<type label="Foo" kind="return">ld
+    Foo.new
+  end
+end
+"#,
+    )
+    .await;
+}
+
 /// Goto definition for deeply nested method chain.
 /// Tests three levels: `a.foo.bar.baz`
 #[tokio::test]

@@ -10,8 +10,8 @@ use crate::core::{
 use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::queries::View;
 use crate::engine::resolution::{
-    chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
-    method_lookup_chain, method_missing_method, module_instance_receivers, namespace_target_exists,
+    chain_has_custom_method_missing, execution_context_application_targets, method_lookup_chain,
+    method_missing_method, module_instance_receivers, namespace_target_exists,
 };
 use crate::inference::semantics::ReceiverAccess;
 
@@ -320,14 +320,11 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         access: ReceiverAccess<'_>,
     ) -> Option<RubyType> {
-        let (allow_private, protected_caller) = access.visibility();
-        let mut seen = HashSet::new();
         self.method_return_type_for_receiver_inner(
             namespace_fqn,
             method,
-            allow_private,
-            protected_caller,
-            &mut seen,
+            access,
+            &mut HashSet::new(),
         )
     }
 
@@ -375,9 +372,9 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> bool {
-        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-        let private_facts = method_facts_in_chain(self.engine, &ancestor_chain, method, true, None);
-        let public_facts = method_facts_in_chain(self.engine, &ancestor_chain, method, false, None);
+        let private_facts = self.own_chain_method_facts(namespace_fqn, method, ReceiverAccess::Any);
+        let public_facts =
+            self.own_chain_method_facts(namespace_fqn, method, ReceiverAccess::Public);
         match (private_facts, public_facts) {
             (None, None) => false,
             (Some((private_owner, private_facts)), Some((public_owner, public_facts))) => {
@@ -391,12 +388,31 @@ impl<'a> View<'a> {
         }
     }
 
+    /// The winning facts on `namespace_fqn`'s own ancestor chain. Reflection
+    /// is the right receiver: callers dispatch to module includers first.
+    fn own_chain_method_facts(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        access: ReceiverAccess<'_>,
+    ) -> Option<(FullyQualifiedName, Vec<MethodFact>)> {
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Reflection(namespace_fqn),
+                method: *method,
+                access,
+                want: MethodWant::Facts,
+            },
+        )
+        .into_facts()
+    }
+
     fn method_return_type_for_receiver_inner(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        allow_private: bool,
-        protected_caller: Option<&FullyQualifiedName>,
+        access: ReceiverAccess<'_>,
         seen: &mut HashSet<MethodVisitKey>,
     ) -> Option<crate::core::RubyType> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
@@ -411,21 +427,13 @@ impl<'a> View<'a> {
                 self.method_return_type_for_receiver_inner(
                     &receiver,
                     method,
-                    allow_private,
-                    protected_caller,
+                    access,
                     &mut seen.clone(),
                 )
             });
         }
 
-        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-        if let Some((_owner, facts)) = method_facts_in_chain(
-            self.engine,
-            &ancestor_chain,
-            method,
-            allow_private,
-            protected_caller,
-        ) {
+        if let Some((_owner, facts)) = self.own_chain_method_facts(namespace_fqn, method, access) {
             return RubyType::union_from_proven(facts, |fact| {
                 self.method_return_type_inner(&fact, seen)
             });
@@ -434,13 +442,7 @@ impl<'a> View<'a> {
         let applications = execution_context_application_targets(self.engine, namespace_fqn);
         if !applications.is_empty() {
             return RubyType::union_from_proven(applications, |application| {
-                self.method_return_type_for_receiver_inner(
-                    &application,
-                    method,
-                    allow_private,
-                    protected_caller,
-                    seen,
-                )
+                self.method_return_type_for_receiver_inner(&application, method, access, seen)
             });
         }
 
@@ -448,13 +450,15 @@ impl<'a> View<'a> {
         // return. Navigation already treats that stub as Missing; walking it
         // here redoes MRO on every unresolved call.
         if *method != method_missing_method()
-            && chain_has_custom_method_missing(self.engine, &ancestor_chain)
+            && chain_has_custom_method_missing(
+                self.engine,
+                &method_lookup_chain(self.engine, namespace_fqn),
+            )
         {
             return self.method_return_type_for_receiver_inner(
                 namespace_fqn,
                 &method_missing_method(),
-                allow_private,
-                protected_caller,
+                access,
                 seen,
             );
         }
@@ -474,8 +478,7 @@ impl<'a> View<'a> {
         let receiver_type = self.method_return_type_for_receiver_inner(
             &fact.owner,
             &receiver_method,
-            true,
-            None,
+            ReceiverAccess::Any,
             seen,
         )?;
 
@@ -485,8 +488,7 @@ impl<'a> View<'a> {
                 self.method_return_type_for_receiver_inner(
                     &namespace,
                     delegated_method,
-                    true,
-                    None,
+                    ReceiverAccess::Any,
                     seen,
                 )
             },

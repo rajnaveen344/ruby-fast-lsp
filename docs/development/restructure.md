@@ -180,7 +180,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `MethodAnswer`.
   - [x] B5c. Make the public/protected/`_for_type`/`_cached` wrappers
         one-liners over `lookup::method`; delete those with no callers.
-  - [ ] B5d. Make the return-type walk consume `MethodAnswer` instead of
+  - [x] B5d. Make the return-type walk consume `MethodAnswer` instead of
         `method_facts_in_chain`. Profiler comparison.
   - [ ] B5e. Replace the three method memo maps with one keyed on
         `MethodRequest`. Profiler comparison.
@@ -190,8 +190,20 @@ Delete this file when the last task is done. Git history keeps the record.
 
   Notes: once B5f deletes the legacy wrappers, turn the B5a equality tests
   in `engine/lookup/tests.rs` into expected-value assertions (several now
-  compare the lookup with itself). Open question for B5d: the builtin
-  constructor check in `call_outcomes.rs` treats `Unknown` like `Missing`.
+  compare the lookup with itself). B5d decision on the builtin constructor
+  check in `call_outcomes.rs`, which treats `Unknown` like `Missing`: keep
+  it for now. The fallback also requires the instance namespace to be an
+  indexed class, so `Unknown(Receiver)` never yields a type there. With
+  `Unknown` mapped to "no fallback", the full suite still passes, and
+  `Foo.new` for `class Foo < UnindexedBase` keeps its `Foo` return
+  (pinned in `method_chaining.rs`); no fixture reached the arm with an
+  incomplete chain. Options: (a) keep;
+  (b) map `Unknown` to no fallback, the strict reading of "never replace
+  uncertainty with a guessed type", since an unindexed ancestor may define
+  `self.new`; (c) keep the fallback but record that the type is a language
+  default rather than a proven `Class#new`. Recommendation: (b) as its own
+  bug-fix commit once a fixture shows the arm producing a type, because
+  today no observable output distinguishes (a) from (b).
   `MethodAnswer::Unknown` carries the rule that unknown lookup edges
   suppress missing-method claims (file pass, grouped methods, workspace pass,
   rename). Answers are derived data and never enter fingerprints.
