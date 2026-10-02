@@ -1,5 +1,6 @@
 use super::classpath::{ArtifactKind, ClasspathArtifact, ProjectClasspath};
 use crate::invariant::ExpectInvariant;
+use crate::loader::cache::persistent::{PersistentProduct, PersistentProductKind};
 use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightStat};
 use anyhow::{anyhow, Context, Result as AnyResult};
 use ruby_analysis::stats::StatsSnapshot;
@@ -9,6 +10,7 @@ use ruby_fast_lsp_jvm_metadata::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
 use std::mem::size_of;
@@ -208,8 +210,22 @@ impl JavaArtifactProduct {
     pub fn estimated_weight_bytes(&self) -> u64 {
         self.estimated_weight_bytes
     }
+}
 
-    pub fn encode_persistent_payload(&self) -> AnyResult<Vec<u8>> {
+impl PersistentProduct for JavaArtifactProduct {
+    type Key = JavaArtifactProductKey;
+
+    const KIND: PersistentProductKind = PersistentProductKind::JavaArtifact;
+
+    fn key_cache_id(key: &JavaArtifactProductKey) -> Cow<'_, str> {
+        Cow::Borrowed(key.cache_id())
+    }
+
+    fn product_cache_id(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.cache_id())
+    }
+
+    fn encode(&self) -> AnyResult<Vec<u8>> {
         postcard::to_allocvec(&PersistentJavaArtifactProduct {
             schema: JAVA_ARTIFACT_PRODUCT_SCHEMA,
             cache_id: self.key.cache_id.clone(),
@@ -222,10 +238,7 @@ impl JavaArtifactProduct {
         .context("serializing persistent Java artifact metadata")
     }
 
-    pub fn decode_persistent_payload(
-        key: &JavaArtifactProductKey,
-        payload: &[u8],
-    ) -> AnyResult<Self> {
+    fn decode(key: &JavaArtifactProductKey, payload: &[u8]) -> AnyResult<Self> {
         let persisted: PersistentJavaArtifactProduct = postcard::from_bytes(payload)
             .context("deserializing persistent Java artifact metadata")?;
         if persisted.schema != JAVA_ARTIFACT_PRODUCT_SCHEMA {
@@ -683,9 +696,7 @@ mod tests {
         let first_key = JavaArtifactProductKey::new(&first, 17, limits);
         let product = JavaArtifactProduct::build(&first, &first_key, limits)
             .expect("producer artifact product must build");
-        let payload = product
-            .encode_persistent_payload()
-            .expect("artifact product must encode");
+        let payload = product.encode().expect("artifact product must encode");
 
         let second = artifact(
             fixture.path().join("consumer.jar"),
@@ -698,7 +709,7 @@ mod tests {
             second_key.cache_id(),
             "artifact product identity must be independent of the consumer path and origin"
         );
-        let decoded = JavaArtifactProduct::decode_persistent_payload(&second_key, &payload)
+        let decoded = JavaArtifactProduct::decode(&second_key, &payload)
             .expect("consumer must decode the immutable artifact product");
         let catalog = build_project_java_catalog_from_products(
             &classpath(fixture.path().to_path_buf(), vec![second.clone()]),

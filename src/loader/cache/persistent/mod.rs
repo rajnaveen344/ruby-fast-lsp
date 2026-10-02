@@ -1,7 +1,9 @@
 //! Bounded, process-shared on-disk cache of derived gem, Java artifact, and compiled Wasm products.
+//!
+//! The cache owns layout, envelope, locks, and bounds. Product owners implement
+//! [`PersistentProduct`] for their key and payload codec; compiled Wasm keeps
+//! its specialized byte-artifact API.
 
-use crate::environment::runtime::jruby::java_catalog::JavaArtifactProduct;
-use crate::loader::cache::dependency_product::GemDependencyProduct;
 use parking_lot::Mutex;
 use ruby_analysis::stats::StatsRegistry;
 use std::fs::File;
@@ -16,9 +18,11 @@ mod layout;
 mod locks;
 mod lookup;
 mod maintenance;
+mod product;
 mod publication;
 
 pub use compiled_wasm::CompiledWasmProductKey;
+pub use product::{PersistentProduct, PersistentProductLookup, PersistentProductReservation};
 
 const CACHE_NAMESPACE: &str = "derived-products";
 const GEM_PRODUCT_NAMESPACE: &str = "gem-products-v1";
@@ -39,7 +43,7 @@ const MAX_LOGICAL_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_COMPILED_WASM_LOGICAL_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 const LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(20);
-const RESCAN_PUBLICATION_INTERVAL: u64 = 64;
+pub(crate) const RESCAN_PUBLICATION_INTERVAL: u64 = 64;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -93,24 +97,6 @@ pub struct PersistentCacheSummary {
     pub bytes: u64,
 }
 
-pub enum PersistentGemProductLookup {
-    Hit(Arc<GemDependencyProduct>),
-    Reservation(PersistentGemProductReservation),
-}
-
-pub struct PersistentGemProductReservation {
-    inner: PersistentDerivedProductReservation,
-}
-
-pub enum PersistentJavaArtifactLookup {
-    Hit(Arc<JavaArtifactProduct>),
-    Reservation(PersistentJavaArtifactReservation),
-}
-
-pub struct PersistentJavaArtifactReservation {
-    inner: PersistentDerivedProductReservation,
-}
-
 pub enum PersistentCompiledWasmLookup {
     Hit(Arc<Vec<u8>>),
     Reservation(PersistentCompiledWasmReservation),
@@ -120,8 +106,11 @@ pub struct PersistentCompiledWasmReservation {
     inner: PersistentDerivedProductReservation,
 }
 
+/// The closed set of product namespaces under one cache root. Each kind keeps
+/// its namespace and envelope magic so caches written by earlier builds stay
+/// readable, and cleanup assigns every scanned entry to exactly one kind.
 #[derive(Debug, Clone, Copy)]
-enum PersistentProductKind {
+pub enum PersistentProductKind {
     Gem,
     JavaArtifact,
     CompiledWasm,

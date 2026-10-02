@@ -23,9 +23,7 @@ use crate::environment::runtime::jruby::source_navigation::{
     JavaSourceResolutionLimits, JavaSourceResolver,
 };
 use crate::invariant::ExpectInvariant;
-use crate::loader::cache::persistent::{
-    PersistentDerivedProductCache, PersistentJavaArtifactLookup,
-};
+use crate::loader::cache::persistent::{PersistentDerivedProductCache, PersistentProductLookup};
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::discover_locked_java_gem_roots;
@@ -159,15 +157,15 @@ pub(super) fn build_cached_project_java_catalog(
             let product = process_cache
                 .get_or_try_init(key.clone(), || {
                     match persistent_cache
-                        .lookup_java_artifact_or_reserve(&key)
+                        .lookup_or_reserve::<JavaArtifactProduct>(&key)
                         .map_err(|error| {
                             format!(
                                 "persistent Java artifact lookup failed for {}: {error:#}",
                                 artifact.path.display()
                             )
                         })? {
-                        PersistentJavaArtifactLookup::Hit(product) => Ok((*product).clone()),
-                        PersistentJavaArtifactLookup::Reservation(reservation) => {
+                        PersistentProductLookup::Hit(product) => Ok((*product).clone()),
+                        PersistentProductLookup::Reservation(reservation) => {
                             let product =
                                 JavaArtifactProduct::build(artifact, &key, archive_limits)
                                     .map_err(|error| {

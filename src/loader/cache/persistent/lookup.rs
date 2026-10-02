@@ -1,9 +1,5 @@
 //! Product lookup, reservation under ownership locks, and per-kind counters.
 
-use crate::environment::runtime::jruby::java_catalog::{
-    JavaArtifactProduct, JavaArtifactProductKey,
-};
-use crate::loader::cache::dependency_product::{GemDependencyManifest, GemDependencyProduct};
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use ruby_analysis::stats::StatsSnapshot;
@@ -19,50 +15,11 @@ use super::locks::{acquire_lock, open_private_lock_file};
 use super::{
     CacheAccounting, DiskLookup, PersistentCompiledWasmLookup, PersistentCompiledWasmReservation,
     PersistentDerivedProductCache, PersistentDerivedProductLookup,
-    PersistentDerivedProductReservation, PersistentGemProductLookup,
-    PersistentGemProductReservation, PersistentJavaArtifactLookup,
-    PersistentJavaArtifactReservation, PersistentProductCounters, PersistentProductKind,
+    PersistentDerivedProductReservation, PersistentProductCounters, PersistentProductKind,
     PersistentProductStat, MAX_COMPRESSED_ENTRY_BYTES,
 };
 
 impl PersistentDerivedProductCache {
-    pub fn lookup_or_reserve(
-        &self,
-        manifest: &GemDependencyManifest,
-    ) -> Result<PersistentGemProductLookup> {
-        let cache_id = manifest.cache_id();
-        match self.lookup_derived_product(PersistentProductKind::Gem, &cache_id, |payload| {
-            GemDependencyProduct::decode_persistent_payload(manifest, &payload)
-        })? {
-            PersistentDerivedProductLookup::Hit(product) => {
-                Ok(PersistentGemProductLookup::Hit(Arc::new(product)))
-            }
-            PersistentDerivedProductLookup::Reservation(inner) => Ok(
-                PersistentGemProductLookup::Reservation(PersistentGemProductReservation { inner }),
-            ),
-        }
-    }
-
-    pub fn lookup_java_artifact_or_reserve(
-        &self,
-        key: &JavaArtifactProductKey,
-    ) -> Result<PersistentJavaArtifactLookup> {
-        match self.lookup_derived_product(
-            PersistentProductKind::JavaArtifact,
-            key.cache_id(),
-            |payload| JavaArtifactProduct::decode_persistent_payload(key, &payload),
-        )? {
-            PersistentDerivedProductLookup::Hit(product) => {
-                Ok(PersistentJavaArtifactLookup::Hit(Arc::new(product)))
-            }
-            PersistentDerivedProductLookup::Reservation(inner) => {
-                Ok(PersistentJavaArtifactLookup::Reservation(
-                    PersistentJavaArtifactReservation { inner },
-                ))
-            }
-        }
-    }
-
     pub fn gem_product_snapshot(&self) -> StatsSnapshot<PersistentProductStat> {
         self.inner.counters.snapshot()
     }
@@ -134,7 +91,7 @@ impl PersistentDerivedProductCache {
         }
     }
 
-    fn lookup_derived_product<T>(
+    pub(super) fn lookup_derived_product<T>(
         &self,
         kind: PersistentProductKind,
         cache_id: &str,

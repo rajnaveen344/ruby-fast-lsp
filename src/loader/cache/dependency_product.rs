@@ -1,4 +1,5 @@
 use crate::invariant::ExpectInvariant;
+use crate::loader::cache::persistent::{PersistentProduct, PersistentProductKind};
 use anyhow::{anyhow, Result};
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{
@@ -8,6 +9,7 @@ use ruby_analysis::engine::{
 use ruby_analysis::stats::{self, StatsRegistry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -374,77 +376,8 @@ impl GemDependencyProduct {
         self.key.cache_id()
     }
 
-    pub(crate) fn encode_persistent_payload(&self) -> Result<Vec<u8>> {
-        let files = self
-            .files
-            .iter()
-            .map(|file| {
-                Ok(PersistentGemDependencyFile {
-                    logical_path: file.logical_path.clone(),
-                    content_sha256: file.content_sha256,
-                    facts: file
-                        .facts
-                        .to_persistent_snapshot()
-                        .map_err(anyhow::Error::msg)?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        postcard::to_allocvec(&PersistentGemDependencyProduct {
-            schema: PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA,
-            cache_id: self.key.cache_id(),
-            key: self.key.persistent_identity(),
-            files,
-        })
-        .map_err(|error| anyhow!("failed to encode persistent dependency product: {error}"))
-    }
-
-    pub(crate) fn decode_persistent_payload(
-        manifest: &GemDependencyManifest,
-        payload: &[u8],
-    ) -> Result<Self> {
-        let persisted: PersistentGemDependencyProduct = postcard::from_bytes(payload)
-            .map_err(|error| anyhow!("failed to decode persistent dependency product: {error}"))?;
-        if persisted.schema != PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA {
-            return Err(anyhow!(
-                "persistent dependency product schema {} does not match {}",
-                persisted.schema,
-                PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA
-            ));
-        }
-        let expected_cache_id = manifest.cache_id();
-        if persisted.cache_id != expected_cache_id {
-            return Err(anyhow!(
-                "persistent dependency product identity does not match requesting manifest"
-            ));
-        }
-        if persisted.key != manifest.key.persistent_identity() {
-            return Err(anyhow!(
-                "persistent dependency product key components do not match requesting manifest"
-            ));
-        }
-        if persisted.files.len() != manifest.sources.len() {
-            return Err(anyhow!(
-                "persistent dependency product contains {} files; manifest requires {}",
-                persisted.files.len(),
-                manifest.sources.len()
-            ));
-        }
-        let files = persisted
-            .files
-            .into_iter()
-            .map(|file| {
-                Ok(GemDependencyFileTemplate::new(
-                    file.logical_path,
-                    file.content_sha256,
-                    ProjectNeutralFileFactsTemplate::try_from_persistent_snapshot(file.facts)
-                        .map_err(anyhow::Error::msg)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Self::new(manifest, files)
-    }
-
-    pub fn bind_into(
+    #[cfg(test)]
+    pub(crate) fn bind_into(
         &self,
         manifest: &GemDependencyManifest,
         engine: &mut AnalysisEngine,
@@ -452,7 +385,8 @@ impl GemDependencyProduct {
         Ok(self.bind_into_measured(manifest, engine)?.uris)
     }
 
-    pub fn bind_into_measured(
+    #[cfg(test)]
+    fn bind_into_measured(
         &self,
         manifest: &GemDependencyManifest,
         engine: &mut AnalysisEngine,
@@ -613,6 +547,87 @@ impl GemDependencyProduct {
             validation_wall,
             insertion_wall: insertion_started.elapsed(),
         })
+    }
+}
+
+impl PersistentProduct for GemDependencyProduct {
+    type Key = GemDependencyManifest;
+
+    const KIND: PersistentProductKind = PersistentProductKind::Gem;
+
+    fn key_cache_id(manifest: &GemDependencyManifest) -> Cow<'_, str> {
+        Cow::Owned(manifest.cache_id())
+    }
+
+    fn product_cache_id(&self) -> Cow<'_, str> {
+        Cow::Owned(self.cache_id())
+    }
+
+    fn encode(&self) -> Result<Vec<u8>> {
+        let files = self
+            .files
+            .iter()
+            .map(|file| {
+                Ok(PersistentGemDependencyFile {
+                    logical_path: file.logical_path.clone(),
+                    content_sha256: file.content_sha256,
+                    facts: file
+                        .facts
+                        .to_persistent_snapshot()
+                        .map_err(anyhow::Error::msg)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        postcard::to_allocvec(&PersistentGemDependencyProduct {
+            schema: PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA,
+            cache_id: self.key.cache_id(),
+            key: self.key.persistent_identity(),
+            files,
+        })
+        .map_err(|error| anyhow!("failed to encode persistent dependency product: {error}"))
+    }
+
+    fn decode(manifest: &GemDependencyManifest, payload: &[u8]) -> Result<Self> {
+        let persisted: PersistentGemDependencyProduct = postcard::from_bytes(payload)
+            .map_err(|error| anyhow!("failed to decode persistent dependency product: {error}"))?;
+        if persisted.schema != PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA {
+            return Err(anyhow!(
+                "persistent dependency product schema {} does not match {}",
+                persisted.schema,
+                PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA
+            ));
+        }
+        let expected_cache_id = manifest.cache_id();
+        if persisted.cache_id != expected_cache_id {
+            return Err(anyhow!(
+                "persistent dependency product identity does not match requesting manifest"
+            ));
+        }
+        if persisted.key != manifest.key.persistent_identity() {
+            return Err(anyhow!(
+                "persistent dependency product key components do not match requesting manifest"
+            ));
+        }
+        if persisted.files.len() != manifest.sources.len() {
+            return Err(anyhow!(
+                "persistent dependency product contains {} files; manifest requires {}",
+                persisted.files.len(),
+                manifest.sources.len()
+            ));
+        }
+        let files = persisted
+            .files
+            .into_iter()
+            .map(|file| {
+                Ok(GemDependencyFileTemplate::new(
+                    file.logical_path,
+                    file.content_sha256,
+                    ProjectNeutralFileFactsTemplate::try_from_persistent_snapshot(file.facts)
+                        .map_err(anyhow::Error::msg)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Self::new(manifest, files)
     }
 }
 
@@ -828,10 +843,9 @@ mod tests {
             )],
         )
         .unwrap();
-        let payload = product.encode_persistent_payload().unwrap();
+        let payload = product.encode().unwrap();
         let error =
-            GemDependencyProduct::decode_persistent_payload(&changed_producer, payload.as_slice())
-                .unwrap_err();
+            GemDependencyProduct::decode(&changed_producer, payload.as_slice()).unwrap_err();
         assert!(error
             .to_string()
             .contains("identity does not match requesting manifest"));

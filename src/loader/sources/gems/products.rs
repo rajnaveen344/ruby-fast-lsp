@@ -200,24 +200,27 @@ impl IndexerGem {
                         "persistent gem dependency product lookup",
                         lookup_spec,
                         None,
-                        move || persistent_cache.lookup_or_reserve(&lookup_manifest),
+                        move || {
+                            persistent_cache
+                                .lookup_or_reserve::<GemDependencyProduct>(&lookup_manifest)
+                        },
                     )
                     .await
                     .map_err(|error| {
                         format!("persistent gem-product lookup worker failed: {error}")
                     })?
                     .map_err(|error| format!("persistent gem-product lookup failed: {error:#}"))?;
-                let crate::loader::cache::persistent::PersistentGemProductLookup::Reservation(
+                let crate::loader::cache::persistent::PersistentProductLookup::Reservation(
                     reservation,
                 ) = lookup
                 else {
-                    let crate::loader::cache::persistent::PersistentGemProductLookup::Hit(product) =
+                    let crate::loader::cache::persistent::PersistentProductLookup::Hit(product) =
                         lookup
                     else {
                         unreachable_invariant!(
                             what = "persistent gem-product lookup returned an unhandled state",
                             why = "lookup has exactly hit and reservation outcomes",
-                            fix = "handle every PersistentGemProductLookup variant explicitly",
+                            fix = "handle every PersistentProductLookup variant explicitly",
                         );
                     };
                     return Ok(

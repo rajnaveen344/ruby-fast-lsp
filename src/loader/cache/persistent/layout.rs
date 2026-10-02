@@ -1,7 +1,5 @@
 //! On-disk namespace layout: product paths, lock paths, identity validation, and entry scans.
 
-#[cfg(test)]
-use crate::loader::cache::dependency_product::GemDependencyManifest;
 use anyhow::{anyhow, Context, Result};
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -15,11 +13,6 @@ use super::{
 };
 
 impl PersistentDerivedProductCache {
-    #[cfg(test)]
-    pub fn product_path_for_tests(&self, manifest: &GemDependencyManifest) -> PathBuf {
-        self.product_path(PersistentProductKind::Gem, &manifest.cache_id())
-    }
-
     pub(crate) fn cache_root(&self) -> PathBuf {
         self.inner.root.clone()
     }

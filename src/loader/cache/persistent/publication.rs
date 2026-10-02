@@ -1,7 +1,5 @@
 //! Atomic publication and lock release for reserved persistent products.
 
-use crate::environment::runtime::jruby::java_catalog::JavaArtifactProduct;
-use crate::loader::cache::dependency_product::GemDependencyProduct;
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
@@ -12,24 +10,9 @@ use std::sync::atomic::Ordering;
 use super::compiled_wasm::{encode_compiled_wasm_payload, CompiledWasmProductKey};
 use super::envelope::encode_envelope;
 use super::{
-    PersistentCompiledWasmReservation, PersistentDerivedProductReservation,
-    PersistentGemProductReservation, PersistentJavaArtifactReservation, PersistentProductStat,
+    PersistentCompiledWasmReservation, PersistentDerivedProductReservation, PersistentProductStat,
     MAX_COMPRESSED_ENTRY_BYTES, TEMP_SEQUENCE,
 };
-
-impl PersistentGemProductReservation {
-    pub fn publish(self, product: &GemDependencyProduct) -> Result<()> {
-        self.inner
-            .publish_payload(&product.cache_id(), product.encode_persistent_payload()?)
-    }
-}
-
-impl PersistentJavaArtifactReservation {
-    pub fn publish(self, product: &JavaArtifactProduct) -> Result<()> {
-        self.inner
-            .publish_payload(product.cache_id(), product.encode_persistent_payload()?)
-    }
-}
 
 impl PersistentCompiledWasmReservation {
     pub fn publish(self, key: &CompiledWasmProductKey, artifact: &[u8]) -> Result<()> {
@@ -39,7 +22,11 @@ impl PersistentCompiledWasmReservation {
 }
 
 impl PersistentDerivedProductReservation {
-    fn publish_payload(mut self, product_cache_id: &str, payload: Vec<u8>) -> Result<()> {
+    pub(super) fn publish_payload(
+        mut self,
+        product_cache_id: &str,
+        payload: Vec<u8>,
+    ) -> Result<()> {
         if product_cache_id != self.cache_id {
             self.cache
                 .counters(self.kind)

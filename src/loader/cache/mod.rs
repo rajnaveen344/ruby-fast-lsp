@@ -3,3 +3,6 @@
 
 pub(crate) mod dependency_product;
 pub mod persistent;
+
+#[cfg(test)]
+mod persistence_tests;

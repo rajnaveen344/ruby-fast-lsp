@@ -290,10 +290,15 @@ Delete this file when the last task is done. Git history keeps the record.
         `server/products.rs`.
   - [x] C2b. Move `loader/scheduling/resources` to `src/utils/admission/` with
         no other change. The inner `admission.rs` keeps its name.
-  - [ ] C2c. Make the persistent cache generic over a `PersistentProduct`
+  - [x] C2c. Make the persistent cache generic over a `PersistentProduct`
         trait (kind, key, encode, decode). Keep the namespace and magic
         constants so existing caches stay valid. `GemDependencyProduct` and
-        `JavaArtifactProduct` implement it in their own modules.
+        `JavaArtifactProduct` implement it in their own modules. Done: the
+        kind stays a closed `PersistentProductKind` enum because namespace
+        scans, eviction, and per-kind counters enumerate it; compiled Wasm
+        keeps its byte-artifact API. Gem and Java cache tests moved next to
+        their products, with schema-1 compatibility tests that write the
+        envelope from literal constants.
   - [ ] C2d. Move `loader/cache/persistent` to `src/utils/persistent_cache/`
         with no other change. Environment then no longer imports the loader.
   - [ ] C2e. Move `collect_project_files` from `utils/file_ops.rs` to
