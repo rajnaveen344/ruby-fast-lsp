@@ -173,7 +173,7 @@ impl Project {
             vec![ruby_const],
             crate::core::NamespaceKind::Instance,
         );
-        if !self.has_graph_node(&ns_fqn) && !self.has_symbol_facts(&ns_fqn) {
+        if !self.has_graph_node(&ns_fqn) && !self.view().has_symbol_facts(&ns_fqn) {
             return true;
         }
 

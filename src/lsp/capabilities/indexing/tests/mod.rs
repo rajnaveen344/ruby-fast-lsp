@@ -19,7 +19,7 @@ fn has_namespace(server: &RubyLanguageServer, uri: &Url, name: &str) -> bool {
     let analysis_engine = server.analysis_engine_for_uri(uri);
     let engine = analysis_engine.read();
     !AnalysisQuery::new(&engine)
-        .symbols_for_fqn(&namespace(name))
+        .symbol_facts_for(&namespace(name))
         .is_empty()
 }
 

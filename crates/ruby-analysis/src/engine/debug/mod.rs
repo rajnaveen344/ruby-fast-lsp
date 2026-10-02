@@ -53,8 +53,7 @@ impl<'a> View<'a> {
         let mut entries = Vec::new();
         if let FullyQualifiedName::Method(_, _) = &fqn {
             entries.extend(
-                self.engine
-                    .method_facts_for(&fqn)
+                self.method_facts_for(&fqn)
                     .iter()
                     .map(|fact| lookup_entry_from_method_fact(self.engine, fact)),
             );
@@ -63,8 +62,7 @@ impl<'a> View<'a> {
         if entries.is_empty() {
             for candidate in lookup_candidates(&fqn) {
                 entries.extend(
-                    self.engine
-                        .symbol_facts_for(&candidate)
+                    self.symbol_facts_for(&candidate)
                         .iter()
                         .map(|fact| lookup_entry_from_symbol_fact(self.engine, fact)),
                 );

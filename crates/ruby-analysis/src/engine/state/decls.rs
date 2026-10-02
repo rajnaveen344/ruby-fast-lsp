@@ -20,6 +20,7 @@ use crate::core::{
 use super::names::Names;
 use super::Project;
 use crate::engine::lookup::MethodAnswer;
+use crate::engine::View;
 
 /// The effective declaration of one method on one owner. A single owner has
 /// no unresolved lookup edges, so absence here is proven, never unknown.
@@ -309,60 +310,6 @@ impl DeclIndex {
 }
 
 impl Project {
-    pub fn execution_context_at(
-        &self,
-        file_id: SourceFileId,
-        byte_offset: u32,
-    ) -> Option<&ExecutionContextFact> {
-        self.decls.execution_context_at(file_id, byte_offset)
-    }
-
-    pub fn symbol_facts_for(&self, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
-        self.decls.symbol_facts_for(&self.names, fqn)
-    }
-
-    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
-        expand_symbol_facts(&self.names, self.decls.symbols.all_facts())
-    }
-
-    pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
-        expand_symbol_facts(&self.names, self.decls.symbols.facts_in_file(file_id))
-    }
-
-    pub fn has_symbol_facts(&self, fqn: &FullyQualifiedName) -> bool {
-        self.decls.has_symbol_facts(&self.names, fqn)
-    }
-
-    pub fn method_facts_for(&self, fqn: &FullyQualifiedName) -> Vec<MethodFact> {
-        self.decls.method_facts_for(&self.names, fqn)
-    }
-
-    pub fn all_method_facts(&self) -> Vec<MethodFact> {
-        expand_method_facts(&self.names, self.decls.methods.all_facts())
-    }
-
-    pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
-        expand_method_facts(&self.names, self.decls.methods.facts_in_file(file_id))
-    }
-
-    pub fn method_facts_matching_owner(
-        &self,
-        owner: &FullyQualifiedName,
-        partial: &str,
-    ) -> Vec<MethodFact> {
-        self.decls
-            .method_facts_matching_owner(&self.names, owner, partial)
-    }
-
-    pub fn method_facts_matching_owner_name(
-        &self,
-        owner: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Vec<MethodFact> {
-        self.decls
-            .method_facts_matching_owner_name(&self.names, owner, method)
-    }
-
     pub(in crate::engine) fn method_absence_contract_matches_owner_name(
         &self,
         owner: &FullyQualifiedName,
@@ -392,12 +339,84 @@ impl Project {
             .effective_method_fact_matching_owner_id(&self.names, owner_id, method)
     }
 
+    pub(in crate::engine) fn ruby_method_names_for_owner_id(
+        &self,
+        owner: FqnId,
+    ) -> Vec<RubyMethod> {
+        self.decls.methods.ruby_method_names_for_owner(owner)
+    }
+}
+
+impl<'a> View<'a> {
+    pub fn execution_context_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&'a ExecutionContextFact> {
+        self.engine.decls.execution_context_at(file_id, byte_offset)
+    }
+
+    pub fn symbol_facts_for(&self, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
+        self.engine.decls.symbol_facts_for(&self.engine.names, fqn)
+    }
+
+    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
+        expand_symbol_facts(&self.engine.names, self.engine.decls.symbols.all_facts())
+    }
+
+    pub fn has_symbols(&self) -> bool {
+        !self.all_symbol_facts().is_empty()
+    }
+
+    pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
+        let facts = self.engine.decls.symbols.facts_in_file(file_id);
+        expand_symbol_facts(&self.engine.names, facts)
+    }
+
+    pub fn has_symbol_facts(&self, fqn: &FullyQualifiedName) -> bool {
+        self.engine.decls.has_symbol_facts(&self.engine.names, fqn)
+    }
+
+    pub fn method_facts_for(&self, fqn: &FullyQualifiedName) -> Vec<MethodFact> {
+        self.engine.decls.method_facts_for(&self.engine.names, fqn)
+    }
+
+    pub fn all_method_facts(&self) -> Vec<MethodFact> {
+        expand_method_facts(&self.engine.names, self.engine.decls.methods.all_facts())
+    }
+
+    pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
+        let facts = self.engine.decls.methods.facts_in_file(file_id);
+        expand_method_facts(&self.engine.names, facts)
+    }
+
+    pub fn method_facts_matching_owner(
+        &self,
+        owner: &FullyQualifiedName,
+        partial: &str,
+    ) -> Vec<MethodFact> {
+        self.engine
+            .decls
+            .method_facts_matching_owner(&self.engine.names, owner, partial)
+    }
+
+    pub fn method_facts_matching_owner_name(
+        &self,
+        owner: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<MethodFact> {
+        self.engine
+            .decls
+            .method_facts_matching_owner_name(&self.engine.names, owner, method)
+    }
+
     pub fn method_visibility_overrides_matching_owner_name(
         &self,
         owner: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<MethodVisibilityOverrideFact> {
-        self.decls
+        self.engine
+            .decls
             .method_visibility_overrides
             .iter()
             .filter(|fact| {
@@ -413,7 +432,8 @@ impl Project {
         &self,
         file_id: SourceFileId,
     ) -> Vec<MethodVisibilityOverrideFact> {
-        self.decls
+        self.engine
+            .decls
             .method_visibility_overrides
             .iter()
             .filter(|fact| fact.range.file_id == file_id)
@@ -422,7 +442,7 @@ impl Project {
     }
 
     pub fn all_method_visibility_overrides(&self) -> Vec<MethodVisibilityOverrideFact> {
-        self.decls.method_visibility_overrides.clone()
+        self.engine.decls.method_visibility_overrides.clone()
     }
 
     pub fn method_names_for_owner(&self, owner: &FullyQualifiedName) -> Vec<&'static str> {
@@ -434,13 +454,6 @@ impl Project {
         names.sort_unstable();
         names.dedup();
         names
-    }
-
-    pub(in crate::engine) fn ruby_method_names_for_owner_id(
-        &self,
-        owner: FqnId,
-    ) -> Vec<RubyMethod> {
-        self.decls.methods.ruby_method_names_for_owner(owner)
     }
 }
 

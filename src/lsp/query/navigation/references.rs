@@ -279,16 +279,20 @@ impl EngineQuery {
             return false;
         };
         let engine = engine.read();
-        engine.all_method_facts().iter().any(|fact| {
+        engine.view().all_method_facts().iter().any(|fact| {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 return false;
             };
             *fact_method == *method
                 && fact.visibility == ruby_analysis::core::MethodVisibility::Private
-        }) || engine.all_method_visibility_overrides().iter().any(|fact| {
-            fact.method == *method
-                && fact.visibility == ruby_analysis::core::MethodVisibility::Private
-        })
+        }) || engine
+            .view()
+            .all_method_visibility_overrides()
+            .iter()
+            .any(|fact| {
+                fact.method == *method
+                    && fact.visibility == ruby_analysis::core::MethodVisibility::Private
+            })
     }
 
     fn location_content(

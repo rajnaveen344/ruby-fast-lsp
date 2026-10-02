@@ -13,11 +13,10 @@ mod type_at_tests;
 use crate::invariant::ExpectInvariant;
 
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
-use crate::core::MethodVisibilityOverrideFact;
 use crate::core::{
-    DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
-    SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
+    DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphNodeKind,
+    MethodCalleeResolution, ReferenceFact, RubyType, SourceFileId, TextRange, TypeFact,
+    TypeResolution, TypeSubject, UnknownReason,
 };
 
 use crate::engine::{AnalysisQueryCache, Project};
@@ -44,14 +43,6 @@ impl<'a> View<'a> {
 
     pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
         self.engine.query_cache_identity()
-    }
-
-    pub fn execution_context_at(
-        &self,
-        file_id: SourceFileId,
-        byte_offset: u32,
-    ) -> Option<&'a ExecutionContextFact> {
-        self.engine.execution_context_at(file_id, byte_offset)
     }
 
     pub(crate) fn constant_callable_body(
@@ -84,43 +75,8 @@ impl<'a> View<'a> {
         self.engine.type_store().facts_in_file(file_id)
     }
 
-    pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
-        self.engine.symbol_facts_in_file(file_id)
-    }
-
-    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
-        self.engine.all_symbol_facts()
-    }
-
-    pub fn has_symbols(&self) -> bool {
-        !self.engine.all_symbol_facts().is_empty()
-    }
-
-    pub fn symbols_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
-        self.engine.symbol_facts_for(fqn)
-    }
-
     pub fn references_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [ReferenceFact] {
         self.engine.reference_facts_for(fqn)
-    }
-
-    pub fn methods_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<MethodFact> {
-        self.engine.method_facts_for(fqn)
-    }
-
-    pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
-        self.engine.method_facts_in_file(file_id)
-    }
-
-    pub fn method_visibility_overrides_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Vec<MethodVisibilityOverrideFact> {
-        self.engine.method_visibility_overrides_in_file(file_id)
-    }
-
-    pub fn all_method_facts(&self) -> Vec<MethodFact> {
-        self.engine.all_method_facts()
     }
 
     pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {

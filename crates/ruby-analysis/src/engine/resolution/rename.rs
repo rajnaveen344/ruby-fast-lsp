@@ -58,7 +58,6 @@ impl<'a> View<'a> {
         byte_offset: u32,
     ) -> Option<MethodRenameIdentity> {
         let mut identities = self
-            .engine
             .method_facts_in_file(file_id)
             .into_iter()
             .filter(|fact| fact.name_range.contains_offset(file_id, byte_offset))
@@ -143,14 +142,13 @@ impl<'a> View<'a> {
         if let Some(new_name) = new_name {
             let target_chain = method_lookup_chain(self.engine, &identity.owner);
             let collision = target_chain.iter().any(|owner| {
-                self.engine
-                    .method_facts_matching_owner_name(&owner, &new_name)
+                self.method_facts_matching_owner_name(&owner, &new_name)
                     .into_iter()
                     .any(|fact| {
                         self.file(fact.range.file_id)
                             .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     })
-            }) || self.engine.all_method_facts().into_iter().any(|fact| {
+            }) || self.all_method_facts().into_iter().any(|fact| {
                 let FullyQualifiedName::Method(_, fact_method) = fact.fqn else {
                     return false;
                 };
@@ -168,7 +166,7 @@ impl<'a> View<'a> {
 
         let method_fqn =
             FullyQualifiedName::method(identity.owner.namespace_parts(), identity.method);
-        let all_method_facts = self.engine.method_facts_for(&method_fqn);
+        let all_method_facts = self.method_facts_for(&method_fqn);
         let declaration_facts = all_method_facts
             .iter()
             .filter(|fact| fact.owner == identity.owner)
@@ -196,7 +194,7 @@ impl<'a> View<'a> {
         // One Ruby declaration can materialize multiple semantic owners (for
         // example `module_function`). Renaming only one of those identities
         // would lie about the resulting program, so reject the coupled token.
-        let every_method_fact = self.engine.all_method_facts();
+        let every_method_fact = self.all_method_facts();
         if declaration_facts.iter().any(|declaration| {
             every_method_fact.iter().any(|other| {
                 other.owner != identity.owner
@@ -212,8 +210,7 @@ impl<'a> View<'a> {
             .map(|fact| fact.name_range)
             .collect::<Vec<_>>();
         ranges.extend(
-            self.engine
-                .method_visibility_overrides_matching_owner_name(&identity.owner, &identity.method)
+            self.method_visibility_overrides_matching_owner_name(&identity.owner, &identity.method)
                 .into_iter()
                 .filter(|fact| {
                     self.file(fact.range.file_id)
@@ -372,7 +369,6 @@ impl<'a> View<'a> {
         }
         let current_name = *fqn.namespace_parts_slice().last()?;
         let symbol_facts = self
-            .engine
             .symbol_facts_for(&fqn)
             .into_iter()
             .filter(|fact| {
@@ -513,7 +509,7 @@ fn constant_name_collides(
 
     let namespace = FullyQualifiedName::namespace(parts.clone());
     let constant = FullyQualifiedName::constant(parts);
-    engine.has_symbol_facts(&namespace)
+    engine.view().has_symbol_facts(&namespace)
         || engine.has_graph_node(&namespace)
-        || engine.has_symbol_facts(&constant)
+        || engine.view().has_symbol_facts(&constant)
 }

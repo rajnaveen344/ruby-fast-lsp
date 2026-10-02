@@ -169,7 +169,6 @@ impl<'a> View<'a> {
         allowed_kinds: &[SymbolKind],
     ) -> Vec<TextRange> {
         let ranges = self
-            .engine
             .symbol_facts_for(fqn)
             .into_iter()
             .filter(|fact| allowed_kinds.contains(&fact.kind))

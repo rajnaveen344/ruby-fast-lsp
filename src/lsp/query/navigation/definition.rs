@@ -462,6 +462,7 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.read();
         let range = engine
+            .view()
             .symbol_facts_for(&fqn)
             .into_iter()
             .filter(|fact| fact.kind == SymbolKind::LocalVariable)

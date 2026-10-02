@@ -447,7 +447,7 @@ fn method_fact_in_path(
         .into_iter()
         .any(|analysis_engine| {
             let engine = analysis_engine.read();
-            engine.all_method_facts().into_iter().any(|fact| {
+            engine.view().all_method_facts().into_iter().any(|fact| {
                 let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
                     return false;
                 };

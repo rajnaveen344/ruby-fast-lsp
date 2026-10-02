@@ -75,9 +75,7 @@ impl<'a> View<'a> {
                         .caller
                         .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
-                            let mut owners = self
-                                .engine
-                                .method_facts_for(caller)
+                            let mut owners = self.method_facts_for(caller)
                                 .into_iter()
                                 .map(|fact| fact.owner)
                                 .collect::<Vec<_>>();
@@ -131,9 +129,7 @@ impl<'a> View<'a> {
                         .caller
                         .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
-                            let mut owners = self
-                                .engine
-                                .method_facts_for(caller)
+                            let mut owners = self.method_facts_for(caller)
                                 .into_iter()
                                 .map(|fact| fact.owner)
                                 .collect::<Vec<_>>();

@@ -271,7 +271,7 @@ end
         RubyMethod::new("fork").expect("fork must be a valid Ruby method"),
     );
     let engine = editor.server().orphan_engine().read();
-    let facts = AnalysisQuery::new(&engine).methods_for_fqn(&fork);
+    let facts = AnalysisQuery::new(&engine).method_facts_for(&fork);
     assert!(
         facts.iter().any(|fact| {
             fact.owner

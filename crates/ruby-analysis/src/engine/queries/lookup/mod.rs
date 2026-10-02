@@ -33,7 +33,7 @@ impl<'a> View<'a> {
         ));
         for root in lookup_roots {
             for ancestor in method_lookup_chain(self.engine, &root) {
-                for fact in self.engine.method_facts_matching_owner(&ancestor, partial) {
+                for fact in self.method_facts_matching_owner(&ancestor, partial) {
                     let FullyQualifiedName::Method(_, method) = &fact.fqn else {
                         continue;
                     };
@@ -51,7 +51,6 @@ impl<'a> View<'a> {
     pub fn constant_matches(&self, request: &ConstantLookupRequest) -> Vec<ConstantMatch> {
         let mut seen = HashSet::new();
         let mut candidates = self
-            .engine
             .all_symbol_facts()
             .into_iter()
             .filter(|fact| {
@@ -214,7 +213,7 @@ impl<'a> View<'a> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        for fact in self.engine.all_method_facts() {
+        for fact in self.all_method_facts() {
             if !fact.owner.namespace_parts().is_empty() {
                 continue;
             }

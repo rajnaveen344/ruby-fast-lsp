@@ -80,7 +80,6 @@ impl<'a> View<'a> {
             .filter(|callee| callee.resolution == MethodCalleeResolution::Exact)
             .flat_map(|callee| {
                 let matching = self
-                    .engine
                     .method_facts_matching_owner_name(&callee.owner, method)
                     .into_iter()
                     .collect::<Vec<_>>();

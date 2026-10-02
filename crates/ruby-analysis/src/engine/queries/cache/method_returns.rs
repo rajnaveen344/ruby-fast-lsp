@@ -52,7 +52,6 @@ impl<'a> View<'a> {
         byte_offset: u32,
     ) -> Option<RubyType> {
         let method_fact = self
-            .engine
             .method_facts_in_file(file_id)
             .into_iter()
             .find(|fact| {
@@ -114,7 +113,6 @@ impl<'a> View<'a> {
         }
 
         let mut facts = self
-            .engine
             .method_facts_matching_owner_name(&callee.owner, &callee.method)
             .into_iter()
             .filter(|fact| callee.definition_ranges.contains(&fact.range))
@@ -167,7 +165,6 @@ impl<'a> View<'a> {
             );
         };
         let signatures = self
-            .engine
             .method_facts_matching_owner_name(&fact.owner, method)
             .into_iter()
             .filter(|signature| {

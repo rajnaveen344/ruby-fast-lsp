@@ -62,6 +62,7 @@ fn main() -> anyhow::Result<()> {
                     server
                         .analysis_engine_for_uri(&workspace_uri)
                         .read()
+                        .view()
                         .all_method_facts()
                         .len()
                 );

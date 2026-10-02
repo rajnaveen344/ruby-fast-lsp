@@ -125,7 +125,7 @@ fn semantic_seed_facts_are_produced_for_every_applicable_isolated_project_engine
     );
     for engine in [&first, &second, &ineligible] {
         assert!(
-            engine.read().all_method_facts().is_empty(),
+            engine.read().view().all_method_facts().is_empty(),
             "the registry produces seed facts and never writes the engine itself"
         );
     }

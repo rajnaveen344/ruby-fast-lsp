@@ -154,7 +154,9 @@ pub(in crate::engine) fn namespace_target_exists(
             return true;
         }
     }
-    engine.has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
+    engine
+        .view()
+        .has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
 }
 
 fn is_module_instance_namespace(engine: &crate::engine::Project, fqn: &FullyQualifiedName) -> bool {

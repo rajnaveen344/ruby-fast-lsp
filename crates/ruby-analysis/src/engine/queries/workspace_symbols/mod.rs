@@ -8,7 +8,7 @@ impl<'a> View<'a> {
     pub fn top_level_symbols(&self, limit: usize) -> Vec<WorkspaceSymbolMatch> {
         let mut symbols = Vec::new();
 
-        for fact in self.engine.all_symbol_facts() {
+        for fact in self.all_symbol_facts() {
             if !fact_is_project(self, &fact) {
                 continue;
             }
@@ -38,7 +38,7 @@ impl<'a> View<'a> {
         let matcher = SymbolMatcher::new();
         let mut results = Vec::new();
 
-        for fact in self.engine.all_symbol_facts() {
+        for fact in self.all_symbol_facts() {
             if !fact_is_project(self, &fact) {
                 continue;
             }

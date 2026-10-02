@@ -57,7 +57,7 @@ fn method_fact_in_path(
     path_suffix: &str,
 ) -> bool {
     let engine = server.orphan_engine().read();
-    engine.all_method_facts().into_iter().any(|fact| {
+    engine.view().all_method_facts().into_iter().any(|fact| {
         let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
             return false;
         };

@@ -21,7 +21,7 @@ impl<'a> View<'a> {
         &self,
         method_fqn: &FullyQualifiedName,
     ) -> Option<CallHierarchyMethod> {
-        let facts = self.engine.method_facts_for(method_fqn);
+        let facts = self.method_facts_for(method_fqn);
         let fact = facts.first()?;
         Some(CallHierarchyMethod {
             fqn: method_fqn.clone(),
@@ -223,7 +223,7 @@ impl<'a> View<'a> {
 
         for ns_fqn in &namespaces_to_check {
             let method_fqn = FullyQualifiedName::method(ns_fqn.namespace_parts(), *method);
-            for fact in self.engine.method_facts_for(&method_fqn) {
+            for fact in self.method_facts_for(&method_fqn) {
                 if fact.owner.namespace_parts() == ns_fqn.namespace_parts()
                     && fact.owner.namespace_kind() == ns_fqn.namespace_kind()
                 {

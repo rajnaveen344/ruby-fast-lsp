@@ -62,7 +62,7 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
             .expect("test class name must be valid")],
         ruby_analysis::core::RubyMethod::new("encode").expect("test method name must be valid"),
     );
-    let facts = query.methods_for_fqn(&method);
+    let facts = query.method_facts_for(&method);
     assert_eq!(facts.len(), 1, "RBS method must become one engine fact");
     assert_eq!(facts[0].return_type_label.as_deref(), Some("String"));
     drop(engine);

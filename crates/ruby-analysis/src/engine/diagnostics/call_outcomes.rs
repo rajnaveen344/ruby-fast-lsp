@@ -159,6 +159,7 @@ impl Project {
         let mut return_types = Vec::new();
         for callee in callees {
             let mut matching = self
+                .view()
                 .method_facts_matching_owner_name(&callee.owner, &method)
                 .into_iter()
                 .filter(|fact| callee.definition_ranges.contains(&fact.range))
@@ -473,6 +474,7 @@ impl Project {
     ) -> Option<FullyQualifiedName> {
         let caller = self.names.fqn(caller)?;
         let mut owners = self
+            .view()
             .method_facts_for(caller)
             .into_iter()
             .map(|fact| fact.owner)

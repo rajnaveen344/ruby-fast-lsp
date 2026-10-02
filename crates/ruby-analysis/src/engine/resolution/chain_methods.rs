@@ -56,6 +56,7 @@ pub(in crate::engine) fn method_facts_in_chain(
 ) -> Option<(FullyQualifiedName, Vec<MethodFact>)> {
     for ancestor in ancestor_chain {
         let mut facts = engine
+            .view()
             .method_facts_matching_owner_name(ancestor, method)
             .into_iter()
             .filter(|fact| {
@@ -126,6 +127,7 @@ pub(super) fn private_method_in_chain(
 ) -> bool {
     ancestor_chain.iter().any(|ancestor| {
         engine
+            .view()
             .method_facts_matching_owner_name(ancestor, method)
             .iter()
             .any(|fact| {
@@ -159,8 +161,9 @@ fn method_visibility_override_for_chain(
     method: &RubyMethod,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     for ancestor in ancestor_chain {
-        let mut overrides =
-            engine.method_visibility_overrides_matching_owner_name(ancestor, method);
+        let mut overrides = engine
+            .view()
+            .method_visibility_overrides_matching_owner_name(ancestor, method);
         overrides.sort_by_key(|fact| {
             (
                 fact.range.file_id,
@@ -187,7 +190,7 @@ pub(super) fn global_visibility_override_for_method_owner(
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut public_overrides = Vec::new();
     let mut non_public_overrides = Vec::new();
-    for override_fact in engine.all_method_visibility_overrides() {
+    for override_fact in engine.view().all_method_visibility_overrides() {
         if override_fact.method != *method {
             continue;
         }
@@ -227,6 +230,7 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
     visibility: MethodVisibility,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut overrides = engine
+        .view()
         .all_method_visibility_overrides()
         .into_iter()
         .filter(|override_fact| {

@@ -417,7 +417,6 @@ impl<'a> View<'a> {
         for ancestor_chain in &lookup_chains {
             for ancestor in ancestor_chain {
                 let has_method_fact = !self
-                    .engine
                     .method_facts_matching_owner_name(ancestor, method)
                     .is_empty();
                 if ancestor != namespace_fqn
@@ -433,7 +432,7 @@ impl<'a> View<'a> {
                 }
             }
         }
-        for override_fact in self.engine.all_method_visibility_overrides() {
+        for override_fact in self.all_method_visibility_overrides() {
             if override_fact.method != *method {
                 continue;
             }

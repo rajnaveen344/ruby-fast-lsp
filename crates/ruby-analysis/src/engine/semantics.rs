@@ -86,8 +86,7 @@ impl Semantics for View<'_> {
     }
 
     fn method_fqns_in_file(&self, file_id: SourceFileId) -> Vec<FullyQualifiedName> {
-        self.engine
-            .method_facts_in_file(file_id)
+        self.method_facts_in_file(file_id)
             .into_iter()
             .map(|fact| fact.fqn)
             .collect()

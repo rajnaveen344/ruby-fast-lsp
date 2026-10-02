@@ -101,8 +101,8 @@ async fn watcher_storm_processes_only_the_newest_complete_batch() {
     let current = FullyQualifiedName::namespace(vec![RubyConstant::new("CurrentService").unwrap()]);
     let engine = workspace.analysis_engine.read();
     let query = AnalysisQuery::new(&engine);
-    assert!(query.symbols_for_fqn(&stale).is_empty());
-    assert_eq!(query.symbols_for_fqn(&current).len(), 1);
+    assert!(query.symbol_facts_for(&stale).is_empty());
+    assert_eq!(query.symbol_facts_for(&current).len(), 1);
 }
 
 fn write_jar(path: &std::path::Path, entry: &str, contents: &[u8]) {

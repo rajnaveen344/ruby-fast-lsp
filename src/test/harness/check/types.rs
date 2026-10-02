@@ -99,7 +99,7 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                     method.and_then(|method| {
                         let fqn = FullyQualifiedName::method(namespace.clone(), method);
                         let returns: Vec<RubyType> = query
-                            .methods_for_fqn(&fqn)
+                            .method_facts_for(&fqn)
                             .iter()
                             .filter_map(|fact| query.method_return_type(fact))
                             .collect();

@@ -16,7 +16,6 @@ impl<'a> View<'a> {
         byte_offset: u32,
     ) -> Option<RubyType> {
         let method_fact = self
-            .engine
             .method_facts_in_file(file_id)
             .into_iter()
             .find(|fact| {
@@ -66,7 +65,6 @@ impl<'a> View<'a> {
         parameter_name: &str,
     ) -> Option<RubyType> {
         let signature_methods = self
-            .engine
             .method_facts_for(method)
             .into_iter()
             .filter(|fact| {
@@ -122,7 +120,6 @@ impl<'a> View<'a> {
         owner: &FullyQualifiedName,
     ) -> Option<RubyType> {
         let signature_methods = self
-            .engine
             .method_facts_for(method)
             .into_iter()
             .filter(|fact| {

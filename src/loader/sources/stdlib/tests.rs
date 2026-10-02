@@ -91,7 +91,7 @@ async fn bundled_ruby_25_signatures_match_observed_runtime_arities() {
         RubyMethod::new("concat").expect("concat must be a valid method"),
     );
     assert!(
-        query.methods_for_fqn(&concat).iter().any(|fact| {
+        query.method_facts_for(&concat).iter().any(|fact| {
             fact.owner.namespace_kind() == Some(NamespaceKind::Instance)
                 && fact
                     .param_facts
@@ -108,7 +108,7 @@ async fn bundled_ruby_25_signatures_match_observed_runtime_arities() {
         RubyMethod::new("new").expect("new must be a valid method"),
     );
     assert!(
-        query.methods_for_fqn(&constructor).iter().any(|fact| {
+        query.method_facts_for(&constructor).iter().any(|fact| {
             fact.owner.namespace_kind() == Some(NamespaceKind::Singleton)
                 && fact
                     .param_facts
@@ -215,14 +215,14 @@ async fn every_supported_jruby_series_composes_its_exact_runtime_overlay() {
         let engine = engine.read();
         assert!(
             !AnalysisQuery::new(&engine)
-                .methods_for_fqn(&java_import)
+                .method_facts_for(&java_import)
                 .is_empty(),
             "{} must compose the shared JRuby java_import contract",
             series.label()
         );
         assert!(
             !AnalysisQuery::new(&engine)
-                .symbols_for_fqn(&jruby_version)
+                .symbol_facts_for(&jruby_version)
                 .is_empty(),
             "{} must compose JRUBY_VERSION",
             series.label()
@@ -312,7 +312,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
     ]);
     assert!(
         !AnalysisQuery::new(&engine.read())
-            .symbols_for_fqn(&thread)
+            .symbol_facts_for(&thread)
             .is_empty(),
         "Thread must resolve from default bundled core stubs when runtime detection fails"
     );
@@ -324,7 +324,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
         let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         assert!(
-            !query.symbols_for_fqn(&argv).is_empty(),
+            !query.symbol_facts_for(&argv).is_empty(),
             "ARGV must resolve from embedded core RBS when runtime detection fails"
         );
         assert_eq!(
@@ -579,7 +579,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         .expect("JRuby core and overlay stubs must index");
     assert!(
         !AnalysisQuery::new(&jruby_engine.read())
-            .methods_for_fqn(&method)
+            .method_facts_for(&method)
             .is_empty(),
         "JRuby 9.2 must expose Object#java_import from its implementation overlay"
     );
@@ -611,7 +611,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
             RubyMethod::new(method_name).expect("test method must be a valid Ruby method"),
         );
         assert!(
-            query.methods_for_fqn(&method_fqn).iter().any(|fact| {
+            query.method_facts_for(&method_fqn).iter().any(|fact| {
                 fact.owner == owner && fact.visibility == visibility
             }),
             "JRuby 9.2 overlay must declare {owner_name}#{method_name} with {visibility:?} visibility"
@@ -632,14 +632,14 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         let namespace = FullyQualifiedName::namespace(vec![constant]);
         let value = FullyQualifiedName::constant(vec![constant]);
         assert!(
-            !query.symbols_for_fqn(&namespace).is_empty()
-                || !query.symbols_for_fqn(&value).is_empty(),
+            !query.symbol_facts_for(&namespace).is_empty()
+                || !query.symbol_facts_for(&value).is_empty(),
             "JRuby 9.2 overlay must declare runtime constant {constant_name}"
         );
     }
     let process = RubyConstant::new("Process").expect("Process must be a valid Ruby constant");
     let fork = RubyMethod::new("fork").expect("fork must be a valid Ruby method");
-    let effective_fork_facts = jruby_engine_guard.method_facts_matching_owner_name(
+    let effective_fork_facts = jruby_engine_guard.view().method_facts_matching_owner_name(
         &FullyQualifiedName::singleton_namespace(vec![process]),
         &fork,
     );
@@ -660,6 +660,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
     let dump = RubyMethod::new("dump").expect("dump must be a valid Ruby method");
     assert!(
         jruby_engine_guard
+            .view()
             .method_facts_matching_owner_name(
                 &FullyQualifiedName::singleton_namespace(vec![object_space]),
                 &dump,
@@ -678,7 +679,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         .expect("MRI core stubs must index");
     assert!(
         AnalysisQuery::new(&mri_engine.read())
-            .methods_for_fqn(&method)
+            .method_facts_for(&method)
             .is_empty(),
         "MRI must not receive JRuby-only methods"
     );

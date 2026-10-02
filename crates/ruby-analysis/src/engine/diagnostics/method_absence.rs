@@ -174,6 +174,7 @@ impl Project {
                 )
             });
             !self
+                .view()
                 .method_facts_matching_owner_name(&singleton, &method)
                 .is_empty()
         })
@@ -191,7 +192,7 @@ impl Project {
 
         let target_len = target.len();
         let mut best: Option<(String, usize)> = None;
-        for candidate in self.method_names_for_owner(owner_fqn) {
+        for candidate in self.view().method_names_for_owner(owner_fqn) {
             if candidate == target {
                 continue;
             }
@@ -225,7 +226,9 @@ impl Project {
         );
         self.has_graph_node(&instance_fqn)
             || self.has_graph_node(&singleton_fqn)
-            || self.has_symbol_facts(&FullyQualifiedName::constant(parts))
-            || !self.method_facts_matching_owner(fqn, "").is_empty()
+            || self
+                .view()
+                .has_symbol_facts(&FullyQualifiedName::constant(parts))
+            || !self.view().method_facts_matching_owner(fqn, "").is_empty()
     }
 }

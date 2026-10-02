@@ -415,7 +415,7 @@ async fn opening_default_external_workspace_file_does_not_make_it_project_owned(
     );
     assert!(
         !AnalysisQuery::new(&engine)
-            .symbols_for_fqn(&namespace("OpenedVendor"))
+            .symbol_facts_for(&namespace("OpenedVendor"))
             .is_empty(),
         "opened excluded files must still receive interactive semantic analysis"
     );

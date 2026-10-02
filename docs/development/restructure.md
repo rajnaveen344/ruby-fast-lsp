@@ -156,7 +156,7 @@ Delete this file when the last task is done. Git history keeps the record.
         block in the component's own module.
     - [x] B4e1. Files: `file_id`, `file`, `files`, `file_count`,
           `file_content_matches`, `text_range`, `source_snapshot_for_path`.
-    - [ ] B4e2. Decls: `execution_context_at`, `symbol_facts_for`,
+    - [x] B4e2. Decls: `execution_context_at`, `symbol_facts_for`,
           `symbol_facts_in_file`, `all_symbol_facts`, `has_symbol_facts`,
           `method_facts_for`, `method_facts_in_file`, `all_method_facts`,
           `method_facts_matching_owner`, `method_facts_matching_owner_name`,

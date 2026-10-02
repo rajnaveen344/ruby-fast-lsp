@@ -313,13 +313,13 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
         .expect("registered file must exist");
     assert_eq!(file.kind, SourceKind::Stub);
     let query = AnalysisQuery::new(&engine);
-    assert_eq!(query.methods_for_fqn(&puts_fqn).len(), 1);
+    assert_eq!(query.method_facts_for(&puts_fqn).len(), 1);
     let generated_fqn = FullyQualifiedName::method(
         vec![kernel],
         RubyMethod::new("generated_after_open").expect("test method must be valid"),
     );
     assert!(
-        query.methods_for_fqn(&generated_fqn).is_empty(),
+        query.method_facts_for(&generated_fqn).is_empty(),
         "known external didOpen must not reprocess and replace indexed stub facts"
     );
 }
@@ -393,10 +393,10 @@ async fn did_change_replaces_analysis_engine_symbol_facts() {
     let account_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
     let engine = server.orphan_engine().read();
     assert!(
-        engine.symbol_facts_for(&user_fqn).is_empty(),
+        engine.view().symbol_facts_for(&user_fqn).is_empty(),
         "stale User symbol facts must be removed after reindex"
     );
-    let account_facts = engine.symbol_facts_for(&account_fqn);
+    let account_facts = engine.view().symbol_facts_for(&account_fqn);
     assert_eq!(account_facts.len(), 1);
     assert_eq!(account_facts[0].kind, SymbolKind::Class);
 }
@@ -711,14 +711,14 @@ async fn did_open_mirrors_method_facts_into_analysis_engine() {
 
     let engine = server.orphan_engine().read();
     let query = AnalysisQuery::new(&engine);
-    let name_facts = query.methods_for_fqn(&name_fqn);
+    let name_facts = query.method_facts_for(&name_fqn);
     assert_eq!(name_facts.len(), 1);
     assert_eq!(
         name_facts[0].owner.namespace_kind(),
         Some(NamespaceKind::Instance)
     );
 
-    let find_facts = query.methods_for_fqn(&find_fqn);
+    let find_facts = query.method_facts_for(&find_fqn);
     assert_eq!(find_facts.len(), 1);
     assert_eq!(
         find_facts[0].owner.namespace_kind(),

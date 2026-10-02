@@ -215,7 +215,7 @@ fn replace_facts_removes_stale_symbol_facts() {
         ResolveMode::Immediate,
     );
 
-    let facts = engine.symbol_facts_for(&fqn);
+    let facts = engine.view().symbol_facts_for(&fqn);
     assert_eq!(facts.len(), 1);
     assert_eq!(facts[0].range.start_byte, 20);
 }

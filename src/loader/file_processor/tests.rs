@@ -450,8 +450,8 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
         RubyMethod::new("from_other_file").unwrap(),
     );
     let engine = server.orphan_engine().read();
-    assert_eq!(engine.method_facts_for(&expected).len(), 1);
-    assert!(engine.method_facts_for(&shadow).is_empty());
+    assert_eq!(engine.view().method_facts_for(&expected).len(), 1);
+    assert!(engine.view().method_facts_for(&shadow).is_empty());
 }
 
 #[test]

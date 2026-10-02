@@ -24,8 +24,7 @@ impl View<'_> {
             return Vec::new();
         };
         self.preferred_definition_ranges(
-            self.engine
-                .symbol_facts_for(&namespace)
+            self.symbol_facts_for(&namespace)
                 .into_iter()
                 .filter(|fact| matches!(fact.kind, SymbolKind::Class | SymbolKind::Module))
                 .map(|fact| fact.name_range)
@@ -139,7 +138,7 @@ impl View<'_> {
         for target in targets {
             let mut ranges = match &target {
                 FullyQualifiedName::Method(_, _) => {
-                    let facts = self.engine.method_facts_for(&target);
+                    let facts = self.method_facts_for(&target);
                     facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
                 }
                 FullyQualifiedName::Namespace(_, _)
@@ -148,7 +147,6 @@ impl View<'_> {
                 | FullyQualifiedName::InstanceVariable(_)
                 | FullyQualifiedName::ClassVariable(_)
                 | FullyQualifiedName::GlobalVariable(_) => self
-                    .engine
                     .symbol_facts_for(&target)
                     .into_iter()
                     .map(|fact| fact.range)

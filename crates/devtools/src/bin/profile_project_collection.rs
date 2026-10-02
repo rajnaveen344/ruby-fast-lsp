@@ -161,7 +161,7 @@ fn print_summary(
 ) {
     let method_count = {
         let engine = analysis_engine.read();
-        engine.all_method_facts().len()
+        engine.view().all_method_facts().len()
     };
     info!(
         "[PERF][sync project collection] files={} wall={:?} read={:?} \

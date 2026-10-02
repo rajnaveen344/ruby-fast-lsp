@@ -197,7 +197,7 @@ impl<'a> View<'a> {
         let FullyQualifiedName::Method(parts, method) = method_fqn else {
             return None;
         };
-        self.engine.all_method_facts().iter().find_map(|fact| {
+        self.all_method_facts().iter().find_map(|fact| {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 return None;
             };
@@ -260,8 +260,7 @@ impl<'a> View<'a> {
     ) -> bool {
         let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
         ancestor_chain.iter().any(|owner| {
-            self.engine
-                .method_facts_matching_owner_name(owner, method)
+            self.method_facts_matching_owner_name(owner, method)
                 .iter()
                 .any(|fact| {
                     effective_method_visibility_for_chain(
@@ -280,7 +279,7 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         visibility: MethodVisibility,
     ) -> bool {
-        self.engine.all_method_facts().iter().any(|fact| {
+        self.all_method_facts().iter().any(|fact| {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 return false;
             };

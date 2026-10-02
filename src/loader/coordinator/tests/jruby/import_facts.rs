@@ -154,7 +154,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     let engine = server.analysis_engine_for_uri(&uri);
     let engine = engine.read();
     assert_eq!(
-        AnalysisQuery::new(&engine).symbols_for_fqn(&alias).len(),
+        AnalysisQuery::new(&engine).symbol_facts_for(&alias).len(),
         1,
         "the selected project's Java catalog must flow through ordinary engine facts"
     );
@@ -365,7 +365,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     let engine = engine.read();
     assert!(
         AnalysisQuery::new(&engine)
-            .symbols_for_fqn(&alias)
+            .symbol_facts_for(&alias)
             .is_empty(),
         "removing java_import must remove its file-owned alias through ordinary replacement"
     );
@@ -378,7 +378,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     );
     assert!(
         AnalysisQuery::new(&engine)
-            .methods_for_fqn(&java_alias)
+            .method_facts_for(&java_alias)
             .is_empty(),
         "removing java_alias must remove its proxy-owned method through ordinary replacement"
     );

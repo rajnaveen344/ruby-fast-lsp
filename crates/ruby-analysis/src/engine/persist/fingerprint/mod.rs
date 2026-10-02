@@ -287,7 +287,7 @@ impl Project {
             .map(|file_id| (file_id, Vec::new()))
             .collect::<HashMap<_, _>>();
 
-        for fact in self.all_symbol_facts() {
+        for fact in self.view().all_symbol_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -300,7 +300,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.all_method_facts() {
+        for fact in self.view().all_method_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
