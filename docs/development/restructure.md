@@ -679,15 +679,16 @@ Delete this file when the last task is done. Git history keeps the record.
         declaration sink in the same walk. Delete the collector's declaration
         recording (`collection/declarations.rs`, the `nodes/declarations`
         emission) and the replace step in `compose_file_analysis`.
-        Not started; no clean prefix exists. What blocks it:
-    - Both file processor paths (`file_processor/mod.rs` and
-      `collection.rs`) commit the seed to the engine before the collector
-      walks. Body inference then sees declarations later in the same file
-      through `Semantics`. If the seed comes from a sink in the same walk,
-      those forward declarations are not visible yet. First decide how the
-      body sink sees them: either keep a declaration-only pre-pass, or defer
-      the queries that need forward declarations to equations the engine
-      solves. Write a forward-reference test before choosing.
+        What blocks it, and what was decided:
+    - Decided: the seed walk (`lowering::AnalysisIndexer`) stays a
+      declaration-only pre-pass. It runs before the collector and is
+      committed to the engine first, so body inference sees declarations
+      later in the same file through `Semantics` with no new solver work.
+      Deferring forward queries to engine-solved equations is D2-scale and
+      is not part of D1. Both walks already share `ScopeTracker` and
+      `scope_rules`, so "one `Walk`" means one scope implementation and one
+      set of rules, not one traversal. The forward-reference test is
+      `forward_declared_method_and_class_types` (inlay hints).
     - `collection/declarations.rs` is also the write API for extension and
       runtime hosts: generated-owner methods and runtime-provenance types.
       It also holds collector-local lookup state (`public_method_candidates`,

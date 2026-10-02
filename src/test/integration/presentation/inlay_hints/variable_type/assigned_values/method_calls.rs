@@ -690,3 +690,31 @@ result<hint label="Symbol"> = dog.sound
     )
     .await;
 }
+
+/// A method body sees methods and classes declared later in the same file.
+#[tokio::test]
+async fn forward_declared_method_and_class_types() {
+    check(
+        r#"
+class Inventory
+  def process<hint label=" -> Hash<Symbol, String>">
+    result<hint label=": Hash<Symbol, String>"> = later_details
+    result
+  end
+
+  def build<hint label=" -> Widget">
+    widget<hint label=": Widget"> = Widget.new
+    widget
+  end
+
+  def later_details<hint label=" -> Hash<Symbol, String>">
+    { status: "active" }
+  end
+end
+
+class Widget
+end
+"#,
+    )
+    .await;
+}
