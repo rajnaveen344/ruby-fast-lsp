@@ -13,11 +13,8 @@ use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, ResolvedMethodCallee,
     RubyMethod, RubyType,
 };
-use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use crate::engine::queries::cache::AnalysisQueryCache;
 use crate::engine::queries::definitions::DefinitionLookupChains;
 use crate::engine::queries::View;
-use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 
 impl<'a> View<'a> {
@@ -191,42 +188,6 @@ impl<'a> View<'a> {
 }
 
 impl<'a> View<'a> {
-    pub fn resolve_method_callees(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Callees,
-            },
-        )
-        .into_callees()
-    }
-
-    pub fn resolve_method_callees_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Callees,
-            },
-            cache,
-        )
-        .into_callees()
-    }
-
     pub(in crate::engine) fn resolve_method_callees_for_type_inner(
         &self,
         receiver_type: &RubyType,

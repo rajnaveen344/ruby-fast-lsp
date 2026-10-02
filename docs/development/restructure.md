@@ -170,7 +170,7 @@ Delete this file when the last task is done. Git history keeps the record.
         same files by path, and no file leaves the project there. Unreadable
         or unparsable files that still exist also stay registered and empty.
   - [ ] B4h. Remove the aliases; update the engine and crate READMEs.
-- [ ] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
+- [x] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
       the method-lookup variants with it.
   - [x] B5a. Add `engine/lookup/` with `MethodRequest { receiver, method,
         access, want }` and `MethodAnswer { Found, Ambiguous, Missing,
@@ -185,13 +185,16 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B5e. Replace the three method memo maps with one keyed on
         `MethodRequest`. Profiler comparison.
   - [x] B5f. Migrate server callers; delete the remaining legacy wrappers.
-  - [ ] B5g. Make `Semantics` method reads call `lookup::method`. Profiler
+  - [x] B5g. Make `Semantics` method reads call `lookup::method`. Profiler
         comparison.
 
   Notes: B5f turned the B5a equality tests in `engine/lookup/tests.rs` into
   an expected-answer table (`lookup/expected_answers.txt`, one line per
   receiver, method, and want over the four accesses; regenerate with
-  `LOOKUP_EXPECTED_BLESS=1` and review the diff). B5d decision on the builtin constructor
+  `LOOKUP_EXPECTED_BLESS=1` and review the diff). After B5g no
+  access-flavoured `View` wrapper remains: `Semantics` states its request
+  and the view's walk memo serves it, so `method_cached` is gone too
+  (`View::with_memo` attaches a cache). B5d decision on the builtin constructor
   check in `call_outcomes.rs`, which treats `Unknown` like `Missing`: keep
   it for now. The fallback also requires the instance namespace to be an
   indexed class, so `Unknown(Receiver)` never yields a type there. With

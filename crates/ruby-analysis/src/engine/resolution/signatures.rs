@@ -3,85 +3,11 @@
 use super::receiver_type_members;
 use crate::core::{FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, RubyType};
 use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use crate::engine::queries::cache::AnalysisQueryCache;
 use crate::engine::queries::View;
 use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
-use std::sync::Arc;
 
 impl<'a> View<'a> {
-    pub fn resolve_method_signature_facts(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Vec<MethodFact> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Signatures,
-            },
-        )
-        .into_signature_vec()
-    }
-
-    pub(crate) fn resolve_method_signature_facts_cached_arc(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Arc<Vec<MethodFact>> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Signatures,
-            },
-            cache,
-        )
-        .into_signatures()
-    }
-
-    pub fn resolve_method_signature_facts_for_type(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-    ) -> Vec<MethodFact> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Type(receiver_type),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Signatures,
-            },
-        )
-        .into_signature_vec()
-    }
-
-    pub fn resolve_method_signature_facts_for_type_cached(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Vec<MethodFact> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Type(receiver_type),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Signatures,
-            },
-            cache,
-        )
-        .into_signature_vec()
-    }
-
     /// Signature facts every member of `receiver_type` proves; empty when a
     /// member proves none. Each namespace is read through the lookup, so a
     /// memoized view serves it.

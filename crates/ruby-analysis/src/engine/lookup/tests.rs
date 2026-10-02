@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 use ruby_prism::Visit;
 use url::Url;
 
-use super::{method, method_cached, LookupReceiver, LookupUnknown, MethodAnswer, MethodFound};
+use super::{method, LookupReceiver, LookupUnknown, MethodAnswer, MethodFound};
 use super::{MethodRequest, MethodWant};
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceKind,
@@ -558,6 +558,7 @@ fn memoized_answers_equal_direct_answers() {
     let engine = project();
     let view = engine.view();
     let cache = AnalysisQueryCache::default();
+    let memoized = engine.view().with_memo(&cache);
     let (child, other) = (namespace("Child"), namespace("Other"));
     let types = receiver_types();
     let owners = namespaces();
@@ -580,7 +581,7 @@ fn memoized_answers_equal_direct_answers() {
                     let direct = method(&view, request);
                     // Twice: the first call fills the memo, the second reads it.
                     for _ in 0..2 {
-                        assert_eq!(method_cached(&view, request, &cache), direct, "{request:?}");
+                        assert_eq!(method(&memoized, request), direct, "{request:?}");
                     }
                 }
             }

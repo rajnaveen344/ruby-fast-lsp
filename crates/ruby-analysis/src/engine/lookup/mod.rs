@@ -17,7 +17,7 @@
 //! Requests delegate to the engine's resolution functions. A `View` that
 //! carries an `AnalysisQueryCache` memoizes namespace callee, return-type,
 //! and signature answers in it, keyed on the request and the engine
-//! identity; [`method_cached`] attaches a cache to a view. The tests pin
+//! identity; `View::with_memo` attaches a cache to a view. The tests pin
 //! every answer for one fixture in an expected table per receiver, method,
 //! access, and want.
 
@@ -25,7 +25,7 @@ mod method;
 #[cfg(test)]
 mod tests;
 
-pub use method::{method, method_cached, LookupReceiver, MethodFound, MethodRequest, MethodWant};
+pub use method::{method, LookupReceiver, MethodFound, MethodRequest, MethodWant};
 
 use crate::core::{FullyQualifiedName, RubyMethod};
 

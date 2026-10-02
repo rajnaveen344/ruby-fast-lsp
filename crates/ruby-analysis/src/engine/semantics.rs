@@ -8,6 +8,7 @@ use crate::core::{
     ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject,
     UnknownReason, VariableTypeKind,
 };
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::{AnalysisQueryCache, Project, View};
 use crate::inference::higher_order::PreparedCallableSet;
 use crate::inference::method::constructor::ConstructorResult;
@@ -71,10 +72,12 @@ impl Semantics for View<'_> {
             | MethodReceiver::MethodCall { .. }
             | MethodReceiver::Literal(_) => return Vec::new(),
         };
-        match self.memo {
-            Some(memo) => self.resolve_method_callees_cached(&namespace_fqn, method, memo),
-            None => self.resolve_method_callees(&namespace_fqn, method),
-        }
+        let receiver = LookupReceiver::Namespace(&namespace_fqn);
+        lookup::method(
+            self,
+            MethodRequest::new(receiver, *method, MethodWant::Callees),
+        )
+        .into_callees()
         .unwrap_or_default()
     }
 
@@ -184,23 +187,9 @@ impl Semantics for View<'_> {
         method: &RubyMethod,
         access: ReceiverAccess<'_>,
     ) -> Option<RubyType> {
-        match (access, self.memo) {
-            (ReceiverAccess::Any, None) => self.method_return_type_for_receiver(receiver, method),
-            (ReceiverAccess::Any, Some(cache)) => {
-                self.method_return_type_for_receiver_cached(receiver, method, cache)
-            }
-            (ReceiverAccess::Protected { caller }, None) => {
-                self.method_return_type_for_protected_receiver(receiver, method, caller)
-            }
-            (ReceiverAccess::Protected { caller }, Some(cache)) => self
-                .method_return_type_for_protected_receiver_cached(receiver, method, caller, cache),
-            (ReceiverAccess::Public, None) => {
-                self.method_return_type_for_public_receiver(receiver, method)
-            }
-            (ReceiverAccess::Public, Some(cache)) => {
-                self.method_return_type_for_public_receiver_cached(receiver, method, cache)
-            }
-        }
+        let receiver = LookupReceiver::Namespace(receiver);
+        let request = MethodRequest::new(receiver, *method, MethodWant::Return).with_access(access);
+        lookup::method(self, request).into_return_type()
     }
 
     fn method_signature_facts(
@@ -208,10 +197,12 @@ impl Semantics for View<'_> {
         namespace: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Arc<Vec<MethodFact>> {
-        match self.memo {
-            Some(memo) => self.resolve_method_signature_facts_cached_arc(namespace, method, memo),
-            None => Arc::new(self.resolve_method_signature_facts(namespace, method)),
-        }
+        let receiver = LookupReceiver::Namespace(namespace);
+        lookup::method(
+            self,
+            MethodRequest::new(receiver, *method, MethodWant::Signatures),
+        )
+        .into_signatures()
     }
 
     fn method_signature_facts_for_type(
@@ -219,12 +210,12 @@ impl Semantics for View<'_> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Arc<Vec<MethodFact>> {
-        Arc::new(match self.memo {
-            Some(memo) => {
-                self.resolve_method_signature_facts_for_type_cached(receiver_type, method, memo)
-            }
-            None => self.resolve_method_signature_facts_for_type(receiver_type, method),
-        })
+        let receiver = LookupReceiver::Type(receiver_type);
+        lookup::method(
+            self,
+            MethodRequest::new(receiver, *method, MethodWant::Signatures),
+        )
+        .into_signatures()
     }
 
     fn method_call_return_type(

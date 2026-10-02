@@ -15,7 +15,6 @@ use crate::engine::resolution::{
 };
 use crate::inference::semantics::ReceiverAccess;
 
-use super::memo::AnalysisQueryCache;
 use super::thread_memo::thread_protected_return_may_differ;
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
@@ -197,120 +196,6 @@ impl<'a> View<'a> {
         }
 
         self.delegate_method_return_type(fact, seen)
-    }
-
-    pub fn method_return_type_for_receiver(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<RubyType> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Return,
-            },
-        )
-        .into_return_type()
-    }
-
-    pub fn method_return_type_for_receiver_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<RubyType> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Return,
-            },
-            cache,
-        )
-        .into_return_type()
-    }
-
-    pub fn method_return_type_for_public_receiver(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<RubyType> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Public,
-                want: MethodWant::Return,
-            },
-        )
-        .into_return_type()
-    }
-
-    pub fn method_return_type_for_public_receiver_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<RubyType> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Public,
-                want: MethodWant::Return,
-            },
-            cache,
-        )
-        .into_return_type()
-    }
-
-    pub fn method_return_type_for_protected_receiver(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<RubyType> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Protected {
-                    caller: caller_namespace_fqn,
-                },
-                want: MethodWant::Return,
-            },
-        )
-        .into_return_type()
-    }
-
-    pub fn method_return_type_for_protected_receiver_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-        cache: &AnalysisQueryCache,
-    ) -> Option<RubyType> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Protected {
-                    caller: caller_namespace_fqn,
-                },
-                want: MethodWant::Return,
-            },
-            cache,
-        )
-        .into_return_type()
     }
 
     /// A return type through receiver dispatch with the given visibility.

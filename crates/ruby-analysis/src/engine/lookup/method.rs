@@ -6,7 +6,7 @@ use super::{LookupUnknown, MethodAnswer};
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, ResolvedMethodCallee, RubyMethod, RubyType,
 };
-use crate::engine::queries::cache::{memoizes, AnalysisQueryCache, MethodMemoKey};
+use crate::engine::queries::cache::{memoizes, MethodMemoKey};
 use crate::engine::resolution::{
     method_facts_in_chain, method_lookup_chain,
     method_lookup_chain_has_unresolved_dependency_from_graph, module_instance_receivers,
@@ -130,20 +130,6 @@ pub fn method(view: &View<'_>, request: MethodRequest<'_>) -> MethodAnswer {
         }
         _ => answer(view, target, method, request.access, want),
     }
-}
-
-/// Answer `request` against `view`, memoized in `cache`. The cache binds
-/// itself to one engine identity.
-pub fn method_cached(
-    view: &View<'_>,
-    request: MethodRequest<'_>,
-    cache: &AnalysisQueryCache,
-) -> MethodAnswer {
-    let view = View {
-        engine: view.engine,
-        memo: Some(cache),
-    };
-    method(&view, request)
 }
 
 /// A receiver with top level resolved to its namespace.
