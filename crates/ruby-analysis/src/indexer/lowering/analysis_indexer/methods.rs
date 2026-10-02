@@ -183,9 +183,12 @@ impl AnalysisIndexer {
                 self.owner_namespace(),
                 crate::core::NamespaceKind::Singleton,
             );
-            self.facts.methods.push(
-                MethodFact::new(fqn, owner, range).with_visibility(self.scope.current_visibility()),
-            );
+            // Ruby copies the method as a public singleton method and makes
+            // the instance method private.
+            self.facts
+                .methods
+                .push(MethodFact::new(fqn, owner, range).with_visibility(MethodVisibility::Public));
+            self.set_method_visibility(method, MethodVisibility::Private, fallback_range);
         }
     }
 

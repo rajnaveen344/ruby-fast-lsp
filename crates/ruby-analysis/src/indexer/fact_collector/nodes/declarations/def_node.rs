@@ -1,9 +1,11 @@
 use crate::core::{
     ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind,
-    MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, NamespaceKind,
-    RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
+    MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, MethodVisibility,
+    NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
-use crate::indexer::documents::scope_rules::{method_declaration, namespace_is_proven_class};
+use crate::indexer::documents::scope_rules::{
+    method_declaration, namespace_is_proven_class, DefinitionVisibility, MethodDeclaration,
+};
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
 use log::warn;
@@ -86,12 +88,20 @@ impl FactCollector {
                 .map(|fact| fact.kind),
             || self.semantics.project.namespace_node_kind(&definition_fqn),
         );
-        let (method, actual_namespace_kind, visibility) = method_declaration(
+        let MethodDeclaration {
+            method,
+            kind: actual_namespace_kind,
+            visibility,
+            module_function_copy,
+        } = method_declaration(
             source_method,
             node.receiver().is_none(),
             namespace_kind,
             definition_is_proven_class,
-            self.scope_tracker.current_visibility(),
+            DefinitionVisibility {
+                default: self.scope_tracker.current_visibility(),
+                module_function_mode: self.scope_tracker.module_function_mode_enabled(),
+            },
         );
         let is_constructor = method != source_method;
 
@@ -179,10 +189,7 @@ impl FactCollector {
             availability.clone(),
             visibility,
         );
-        if node.receiver().is_none()
-            && actual_namespace_kind == NamespaceKind::Instance
-            && self.scope_tracker.module_function_mode_enabled()
-        {
+        if module_function_copy {
             self.direct_push_method_fact_with_signature_name_range_and_availability(
                 namespace_parts.clone(),
                 NamespaceKind::Singleton,
@@ -207,7 +214,7 @@ impl FactCollector {
                     .as_ref()
                     .and_then(YardMethodDoc::format_return_type),
                 availability,
-                self.scope_tracker.current_visibility(),
+                MethodVisibility::Public,
             );
         }
 

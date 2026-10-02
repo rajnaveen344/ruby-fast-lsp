@@ -70,3 +70,70 @@ Shapes::Box.new.initialize$0<def none>(1)
     )
     .await;
 }
+
+/// `module_function :name` copies the method to the module as a public
+/// singleton method, even when the original is private.
+#[tokio::test]
+async fn module_function_copy_of_private_method_is_public() {
+    check(
+        r#"
+module Tools
+  private
+
+  <def>def clamp(value)
+    value
+  end</def>
+  module_function :clamp
+end
+
+Tools.clamp$0(1)
+"#,
+    )
+    .await;
+}
+
+/// `module_function :name` makes the instance method private.
+#[tokio::test]
+async fn module_function_makes_named_instance_method_private() {
+    check(
+        r#"
+module Tools
+  def clamp(value)
+    value
+  end
+  module_function :clamp
+end
+
+class Gauge
+  include Tools
+end
+
+Gauge.new.clamp$0<def none>(1)
+"#,
+    )
+    .await;
+}
+
+/// After a bare `module_function`, each `def` is a private instance method
+/// and a public singleton method.
+#[tokio::test]
+async fn module_function_mode_makes_instance_methods_private() {
+    check(
+        r#"
+module Tools
+  module_function
+
+  def clamp(value)
+    value
+  end
+end
+
+class Gauge
+  include Tools
+end
+
+Gauge.new.clamp$0<def none>(1)
+"#,
+    )
+    .await;
+}

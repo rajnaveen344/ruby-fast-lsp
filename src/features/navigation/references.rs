@@ -421,11 +421,11 @@ fn public_receiver_target_exists(
     content: &str,
     range: Range,
 ) -> bool {
-    let Some(receiver_parts) = explicit_receiver_constant_parts(content, range) else {
+    let Some((receiver_parts, receiver_kind)) = explicit_receiver_constant_parts(content, range)
+    else {
         return false;
     };
-    let receiver_fqn =
-        FullyQualifiedName::namespace_with_kind(receiver_parts, NamespaceKind::Instance);
+    let receiver_fqn = FullyQualifiedName::namespace_with_kind(receiver_parts, receiver_kind);
     let request = MethodRequest::new(
         LookupReceiver::Namespace(&receiver_fqn),
         *method,
@@ -535,20 +535,28 @@ fn range_uses_invalid_private_receiver(content: &str, range: Range) -> bool {
         || trimmed.ends_with("public_send(\"")
 }
 
-fn explicit_receiver_constant_parts(content: &str, range: Range) -> Option<Vec<RubyConstant>> {
+/// The constant an explicit receiver names, and which side of it receives the
+/// call: `Shapes.call` reaches the module object, `Shapes.new.call` an instance.
+fn explicit_receiver_constant_parts(
+    content: &str,
+    range: Range,
+) -> Option<(Vec<RubyConstant>, NamespaceKind)> {
     let line = content.lines().nth(range.start.line as usize)?;
     let before = line
         .chars()
         .take(range.start.character as usize)
         .collect::<String>();
     let receiver = before.trim_end().strip_suffix('.')?.trim_end();
-    let receiver = receiver.strip_suffix(".new").unwrap_or(receiver);
+    let (receiver, kind) = match receiver.strip_suffix(".new") {
+        Some(instance) => (instance, NamespaceKind::Instance),
+        None => (receiver, NamespaceKind::Singleton),
+    };
     let token = receiver.split_whitespace().last()?;
     let mut parts = Vec::new();
     for part in token.split("::") {
         parts.push(RubyConstant::new(part).ok()?);
     }
-    (!parts.is_empty()).then_some(parts)
+    (!parts.is_empty()).then_some((parts, kind))
 }
 
 fn static_send_symbol_at_position(content: &str, position: Position) -> bool {

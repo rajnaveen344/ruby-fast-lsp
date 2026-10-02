@@ -286,7 +286,12 @@ impl FactCollector {
                 .unwrap_or(fallback_range);
             let owner =
                 FullyQualifiedName::namespace_with_kind(namespace, NamespaceKind::Singleton);
-            self.push_direct_method_fact(MethodFact::new(fqn, owner, range));
+            // Ruby copies the method as a public singleton method and makes
+            // the instance method private.
+            self.push_direct_method_fact(
+                MethodFact::new(fqn, owner, range).with_visibility(MethodVisibility::Public),
+            );
+            self.direct_set_method_visibility(method, MethodVisibility::Private, fallback_range);
         }
     }
 

@@ -297,6 +297,24 @@ pub fn class_methods_block(
     })
 }
 
+/// What one `def` declares on its owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodDeclaration {
+    pub method: RubyMethod,
+    pub kind: NamespaceKind,
+    pub visibility: MethodVisibility,
+    /// The `def` follows a bare `module_function`, so the module also gets a
+    /// public singleton copy.
+    pub module_function_copy: bool,
+}
+
+/// The current visibility state a `def` sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DefinitionVisibility {
+    pub default: MethodVisibility,
+    pub module_function_mode: bool,
+}
+
 /// What a `def` of `method` declares on the `kind` side of its owner.
 ///
 /// A receiverless `initialize` on the instance side of a proven class is the
@@ -304,16 +322,23 @@ pub fn class_methods_block(
 /// `new`, so its `initialize` stays an instance method. Ruby makes
 /// `initialize`, `initialize_copy`, `initialize_clone`, `initialize_dup`, and
 /// `respond_to_missing?` private on any non-singleton owner, whatever the
-/// current default visibility.
+/// current default visibility. After a bare `module_function`, a receiverless
+/// instance method is private and the module gets a public singleton copy.
 pub fn method_declaration(
     method: RubyMethod,
     receiverless: bool,
     kind: NamespaceKind,
     proven_class: bool,
-    visibility: MethodVisibility,
-) -> (RubyMethod, NamespaceKind, MethodVisibility) {
+    current: DefinitionVisibility,
+) -> MethodDeclaration {
+    let declared = |method, kind, visibility, module_function_copy| MethodDeclaration {
+        method,
+        kind,
+        visibility,
+        module_function_copy,
+    };
     if kind == NamespaceKind::Singleton {
-        return (method, kind, visibility);
+        return declared(method, kind, current.default, false);
     }
     let name = method.as_str();
     if name == "initialize" && receiverless && proven_class {
@@ -322,8 +347,14 @@ pub fn method_declaration(
             "constructor normalization relies on RubyMethod validation",
             "update RubyMethod validation to accept `new`",
         );
-        return (new, NamespaceKind::Singleton, MethodVisibility::Public);
+        return declared(
+            new,
+            NamespaceKind::Singleton,
+            MethodVisibility::Public,
+            false,
+        );
     }
+    let module_function_copy = receiverless && current.module_function_mode;
     let always_private = matches!(
         name,
         "initialize"
@@ -332,10 +363,12 @@ pub fn method_declaration(
             | "initialize_dup"
             | "respond_to_missing?"
     );
-    if always_private {
-        return (method, kind, MethodVisibility::Private);
-    }
-    (method, kind, visibility)
+    let visibility = if always_private || module_function_copy {
+        MethodVisibility::Private
+    } else {
+        current.default
+    };
+    declared(method, kind, visibility, module_function_copy)
 }
 
 /// Whether every same-file declaration of a namespace is a class. With no

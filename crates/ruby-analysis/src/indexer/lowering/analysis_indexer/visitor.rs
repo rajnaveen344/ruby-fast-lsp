@@ -39,6 +39,7 @@ use super::types::{literal_type, method_body_literal_type};
 use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::{
     alias_reopen_target, eval_block, method_declaration, namespace_is_proven_class,
+    DefinitionVisibility, MethodDeclaration,
 };
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
@@ -194,12 +195,20 @@ impl Visit<'_> for AnalysisIndexer {
                 .map(|fact| fact.kind),
             || None,
         );
-        let (method, owner_kind, visibility) = method_declaration(
+        let MethodDeclaration {
+            method,
+            kind: owner_kind,
+            visibility,
+            module_function_copy,
+        } = method_declaration(
             method,
             node.receiver().is_none(),
             owner_kind,
             proven_class,
-            self.scope.current_visibility(),
+            DefinitionVisibility {
+                default: self.scope.current_visibility(),
+                module_function_mode: self.scope.module_function_mode_enabled(),
+            },
         );
 
         let fqn = FullyQualifiedName::method(owner_namespace.clone(), method);
@@ -259,10 +268,7 @@ impl Visit<'_> for AnalysisIndexer {
                 .with_forwarded_block_call(forwarded_block_call.clone())
                 .with_direct_yield_call(direct_yield_call.clone()),
         );
-        if node.receiver().is_none()
-            && owner_kind == NamespaceKind::Instance
-            && self.scope.module_function_mode_enabled()
-        {
+        if module_function_copy {
             let owner = FullyQualifiedName::namespace_with_kind(
                 owner_namespace.clone(),
                 NamespaceKind::Singleton,
@@ -277,7 +283,7 @@ impl Visit<'_> for AnalysisIndexer {
                             .and_then(YardMethodDoc::format_return_type),
                     )
                     .with_availability(availability)
-                    .with_visibility(self.scope.current_visibility())
+                    .with_visibility(MethodVisibility::Public)
                     .with_forwarded_block_call(forwarded_block_call)
                     .with_direct_yield_call(direct_yield_call),
             );
