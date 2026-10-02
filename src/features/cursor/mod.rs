@@ -16,7 +16,7 @@
 //! ```
 
 pub(crate) mod analysis_location;
-mod method;
+pub(crate) mod method;
 
 use crate::utils::lsp::source_position;
 use parking_lot::RwLock;

@@ -1,32 +1,21 @@
-//! Method Query - Method definition resolution
-//!
-//! ## Flow
-//!
-//! ```text
-//! find_method_definitions()
-//!   ↓
-//! 1. Resolve receiver → namespace FQN
-//! 2. Determine FQNs to search (class: [self], module: [all includers])
-//! 3. Search each FQN's ancestors
-//! 4. Collect and return all definitions
-//! ```
+//! Method navigation over one request [`Cursor`]: resolve the call receiver
+//! to a namespace, a union type, or a `super` owner, then ask the engine's
+//! method lookup for ranked definition ranges. Shared by definition,
+//! references, implementation, signature help, and call hierarchy.
 
 mod analysis;
 
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::NamespaceKind;
-use ruby_analysis::core::ResolvedMethodCallee;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::RubyType;
-use ruby_analysis::indexer::{
-    resolve_receiver_to_namespace, resolve_receiver_type, ReceiverResolutionContext,
-};
+use ruby_analysis::engine::View;
+use ruby_analysis::indexer::{self, ReceiverResolutionContext};
 use tower_lsp::lsp_types::{Location, Position};
 
-use super::EngineQuery;
-use crate::utils::lsp::source_position;
+use super::Cursor;
 
 enum MethodLookupReceiver {
     Namespace(FullyQualifiedName),
@@ -34,114 +23,88 @@ enum MethodLookupReceiver {
     Super(FullyQualifiedName),
 }
 
-impl EngineQuery {
-    /// Find definitions for a Ruby method call.
-    ///
-    /// Algorithm:
-    /// 1. Resolve receiver → namespace FQN
-    /// 2. Determine FQNs to search:
-    ///    - Class: [class_fqn]
-    ///    - Module instance: [all includer FQNs]
-    /// 3. Search each FQN's ancestor chain
-    /// 4. Collect all definitions
-    pub fn find_method_definitions(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-    ) -> Option<Vec<Location>> {
-        self.find_method_definitions_with_private(
-            receiver,
-            method,
-            namespace,
-            namespace_kind,
-            position,
-            true,
-            None,
-        )
-    }
+/// Definitions of `method` called on `receiver` from `namespace`, in the
+/// engine's semantic order. Without `protected_caller` private targets are
+/// allowed (implicit self, `super`, or a static `send`); with it, only public
+/// targets and protected targets visible to that caller are.
+pub(crate) fn definitions(
+    cursor: Cursor<'_>,
+    receiver: &MethodReceiver,
+    method: &RubyMethod,
+    namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+    protected_caller: Option<&FullyQualifiedName>,
+) -> Option<Vec<Location>> {
+    let receiver = lookup_receiver(cursor, receiver, namespace, namespace_kind, position)?;
+    analysis::definitions(cursor.view, &receiver, method, protected_caller)
+}
 
-    pub fn find_protected_method_definitions(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<Vec<Location>> {
-        self.find_method_definitions_with_private(
-            receiver,
-            method,
-            namespace,
-            namespace_kind,
-            position,
-            false,
-            Some(caller_namespace_fqn),
-        )
+fn lookup_receiver(
+    cursor: Cursor<'_>,
+    receiver: &MethodReceiver,
+    namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+) -> Option<MethodLookupReceiver> {
+    if matches!(receiver, MethodReceiver::Super) {
+        return Some(MethodLookupReceiver::Super(
+            FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind),
+        ));
     }
-
-    fn find_method_definitions_with_private(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        allow_private: bool,
-        protected_caller: Option<&FullyQualifiedName>,
-    ) -> Option<Vec<Location>> {
-        let receiver =
-            self.method_lookup_receiver(receiver, namespace, namespace_kind, position)?;
-        analysis::find_method_definitions(self, &receiver, method, allow_private, protected_caller)
+    if let Some(owner) = receiver_namespace(cursor, receiver, namespace, namespace_kind, position) {
+        return Some(MethodLookupReceiver::Namespace(owner));
     }
+    let receiver_type = receiver_type(cursor, receiver, namespace, namespace_kind, position);
+    matches!(receiver_type, RubyType::Union(_)).then_some(MethodLookupReceiver::Type(receiver_type))
+}
 
-    pub fn resolve_method_callees(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-    ) -> Vec<ResolvedMethodCallee> {
-        self.method_lookup_receiver(receiver, namespace, namespace_kind, position)
-            .and_then(|receiver| analysis::resolve_method_callees(self, &receiver, method))
-            .unwrap_or_default()
-    }
+/// The namespace a method receiver denotes at `position`.
+pub(crate) fn receiver_namespace(
+    cursor: Cursor<'_>,
+    receiver: &MethodReceiver,
+    current_namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+) -> Option<FullyQualifiedName> {
+    indexer::resolve_receiver_to_namespace(
+        receiver,
+        &receiver_context(cursor, current_namespace, namespace_kind, position),
+    )
+}
 
-    fn method_lookup_receiver(
-        &self,
-        receiver: &MethodReceiver,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-    ) -> Option<MethodLookupReceiver> {
-        if matches!(receiver, MethodReceiver::Super) {
-            return Some(MethodLookupReceiver::Super(
-                FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind),
-            ));
-        }
-        if let Some(owner) =
-            self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
-        {
-            return Some(MethodLookupReceiver::Namespace(owner));
-        }
-        let receiver_type =
-            self.resolve_receiver_type(receiver, namespace, namespace_kind, position);
-        matches!(receiver_type, RubyType::Union(_))
-            .then_some(MethodLookupReceiver::Type(receiver_type))
+/// The inferred type of a method receiver at `position`.
+pub(crate) fn receiver_type(
+    cursor: Cursor<'_>,
+    receiver: &MethodReceiver,
+    current_namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+) -> RubyType {
+    indexer::resolve_receiver_type(
+        receiver,
+        &receiver_context(cursor, current_namespace, namespace_kind, position),
+    )
+}
+
+fn receiver_context<'q>(
+    cursor: Cursor<'q>,
+    current_namespace: &'q [RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
+) -> ReceiverResolutionContext<'q, View<'q>> {
+    ReceiverResolutionContext {
+        query: Some(cursor.view),
+        document: cursor.document,
+        current_namespace,
+        namespace_kind,
+        byte_offset: cursor.offset(position).unwrap_or(0),
     }
 }
 
-// ============================================================================
-// Receiver Resolution (Receiver → Namespace FQN)
-// ============================================================================
-
-impl EngineQuery {
-    /// Convert method receiver to namespace FQN.
-    /// Used by both go-to-definition and find-references.
+// Transitional: removed once references, signature help, and call hierarchy
+// read one cursor per request.
+impl super::EngineQuery {
     pub(crate) fn resolve_receiver_to_namespace(
         &self,
         receiver: &MethodReceiver,
@@ -149,25 +112,15 @@ impl EngineQuery {
         namespace_kind: NamespaceKind,
         position: Position,
     ) -> Option<FullyQualifiedName> {
-        let doc_guard = self.doc.as_ref().map(|doc| doc.read());
-        let byte_offset = doc_guard
-            .as_ref()
-            .map(|doc| doc.position_to_analysis_offset(source_position(position)))
-            .unwrap_or(0);
-        let engine_guard = self.analysis_engine().map(|engine| engine.read());
-        let analysis_query = engine_guard
-            .as_ref()
-            .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));
-
-        let context = ReceiverResolutionContext {
-            query: analysis_query.as_ref(),
-            document: doc_guard.as_deref(),
-            current_namespace,
-            namespace_kind,
-            byte_offset,
-        };
-
-        resolve_receiver_to_namespace(receiver, &context)
+        self.with_view(|cursor| {
+            receiver_namespace(
+                cursor,
+                receiver,
+                current_namespace,
+                namespace_kind,
+                position,
+            )
+        })
     }
 
     pub(crate) fn resolve_receiver_type(
@@ -177,22 +130,14 @@ impl EngineQuery {
         namespace_kind: NamespaceKind,
         position: Position,
     ) -> RubyType {
-        let doc_guard = self.doc.as_ref().map(|doc| doc.read());
-        let byte_offset = doc_guard
-            .as_ref()
-            .map(|doc| doc.position_to_analysis_offset(source_position(position)))
-            .unwrap_or(0);
-        let engine_guard = self.analysis_engine().map(|engine| engine.read());
-        let analysis_query = engine_guard
-            .as_ref()
-            .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));
-        let context = ReceiverResolutionContext {
-            query: analysis_query.as_ref(),
-            document: doc_guard.as_deref(),
-            current_namespace,
-            namespace_kind,
-            byte_offset,
-        };
-        resolve_receiver_type(receiver, &context)
+        self.with_view(|cursor| {
+            receiver_type(
+                cursor,
+                receiver,
+                current_namespace,
+                namespace_kind,
+                position,
+            )
+        })
     }
 }

@@ -91,7 +91,14 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         server.orphan_engine().clone(),
     );
     let definitions = query
-        .find_definitions_at_position(&usage_uri, tower_lsp::lsp_types::Position::new(1, 9), usage)
+        .with_view(|cursor| {
+            crate::features::navigation::definition::definitions_at(
+                cursor,
+                &usage_uri,
+                tower_lsp::lsp_types::Position::new(1, 9),
+                usage,
+            )
+        })
         .expect("native RBS method call must resolve");
     assert_eq!(definitions.len(), 1);
     assert_eq!(

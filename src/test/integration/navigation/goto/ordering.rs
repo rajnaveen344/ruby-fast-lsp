@@ -1,9 +1,12 @@
 //! Ruby lookup precedence ranks definitions; source order only breaks ties.
 
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{method, EngineQuery};
 use crate::test::harness::FakeEditor;
+use parking_lot::RwLock;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{NamespaceKind, RubyConstant, RubyMethod};
+use ruby_analysis::engine::AnalysisEngine;
+use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position};
 
 fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
@@ -17,6 +20,21 @@ fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
             )
         })
         .collect()
+}
+
+/// Implicit-self `label` definitions from inside `Feature`, without a document.
+fn feature_label_definitions(engine: Arc<RwLock<AnalysisEngine>>) -> Option<Vec<Location>> {
+    EngineQuery::with_engine(engine).with_view(|cursor| {
+        method::definitions(
+            cursor,
+            &MethodReceiver::None,
+            &RubyMethod::new("label").unwrap(),
+            &[RubyConstant::new("Feature").unwrap()],
+            NamespaceKind::Instance,
+            Position::new(0, 0),
+            None,
+        )
+    })
 }
 
 fn files(locations: Vec<Location>) -> Vec<String> {
@@ -106,17 +124,7 @@ async fn semantic_definition_order_prefers_overrides_and_tracks_edits() {
             .server()
             .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         assert_eq!(
-            files(
-                EngineQuery::with_engine(engine)
-                    .find_method_definitions(
-                        &MethodReceiver::None,
-                        &RubyMethod::new("label").unwrap(),
-                        &[RubyConstant::new("Feature").unwrap()],
-                        NamespaceKind::Instance,
-                        Position::new(0, 0),
-                    )
-                    .unwrap()
-            ),
+            files(feature_label_definitions(engine).unwrap()),
             ["/z_child.rb", "/a_parent.rb"],
             "fallback navigation must preserve the same semantic order"
         );
@@ -358,14 +366,7 @@ async fn definition_order_covers_method_lookup_without_document_facts() {
     let engine = editor
         .server()
         .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
-    let locations = EngineQuery::with_engine(engine)
-        .find_method_definitions(
-            &MethodReceiver::None,
-            &RubyMethod::new("label").unwrap(),
-            &[RubyConstant::new("Feature").unwrap()],
-            NamespaceKind::Instance,
-            Position::new(0, 0),
-        )
+    let locations = feature_label_definitions(engine)
         .expect("known module receivers must retain their definition targets");
     assert_eq!(
         destinations(locations),

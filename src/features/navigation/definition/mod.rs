@@ -1,10 +1,13 @@
-//! Go to definition: require-string paths, then `EngineQuery` resolution for
-//! constants, methods, variables, and YARD type references. A request that
+//! Go to definition: require-string paths, then one engine view's resolution
+//! of constants, methods, variables, and YARD type references. A request that
 //! arrives while its target is still indexing waits on an exact navigation
 //! demand (`demand`).
 
 mod demand;
 mod query;
+
+pub(crate) use query::constant_fqn;
+pub use query::definitions_at;
 
 use std::path::PathBuf;
 
@@ -58,33 +61,31 @@ pub async fn handle(
     }
 }
 
-/// Find definition at position using the unified EngineQuery layer.
+/// Find the definition at `position`: a require string's target file, then
+/// the identifier's definitions under one engine view.
 pub async fn find_definition_at_position(
     server: &RubyLanguageServer,
     uri: Url,
     position: Position,
 ) -> Option<GotoDefinitionResponse> {
-    let (content, doc_arc, document, byte_offset) = {
-        let doc_guard = server.documents.read();
-        let doc_arc = doc_guard.get(&uri)?.clone();
-        let doc = doc_arc.read();
-        let byte_offset = doc.position_to_analysis_offset(source_position(position));
-        (
-            doc.content.clone(),
-            doc_arc.clone(),
-            doc.clone(),
-            byte_offset,
-        )
+    let doc_arc = server.documents.read().get(&uri)?.clone();
+    let require = {
+        let document = doc_arc.read();
+        let byte_offset = document.position_to_analysis_offset(source_position(position));
+        find_require_string_at_offset(&document.content, byte_offset as usize)
+            .map(|target| (require_string_lsp_range(&document, &target), target))
     };
-
-    if let Some(response) =
-        require_path_definitions(server, &uri, &content, &document, byte_offset as usize)
-    {
-        return Some(response);
+    if let Some((origin, target)) = require {
+        if let Some(response) = require_path_definitions(server, &uri, origin, &target) {
+            return Some(response);
+        }
     }
 
-    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri));
-    let locations = query.find_definitions_at_position(&uri, position, &content)?;
+    let locations = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri))
+        .with_view(|cursor| {
+            let content = &cursor.document?.content;
+            definitions_at(cursor, &uri, position, content)
+        })?;
     Some(GotoDefinitionResponse::Array(locations))
 }
 
@@ -103,11 +104,9 @@ pub(crate) fn require_string_lsp_range(
 fn require_path_definitions(
     server: &RubyLanguageServer,
     uri: &Url,
-    content: &str,
-    document: &RubyDocument,
-    byte_offset: usize,
+    origin: Range,
+    target: &RequireStringTarget,
 ) -> Option<GotoDefinitionResponse> {
-    let target = find_require_string_at_offset(content, byte_offset)?;
     let current_file = uri.to_file_path().ok()?;
     let project_root = server
         .workspace_for_uri(uri)
@@ -133,7 +132,6 @@ fn require_path_definitions(
         Some(&engine_guard),
     )?;
     let location = location_for_require_target(&resolved, Some(&engine_guard))?;
-    let origin = require_string_lsp_range(document, &target);
     Some(GotoDefinitionResponse::Link(vec![LocationLink {
         origin_selection_range: Some(origin),
         target_uri: location.uri,

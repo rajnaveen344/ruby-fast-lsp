@@ -714,8 +714,9 @@ from its effective runtime selection.
 2. The service calls the definition feature (`src/features/navigation/definition/`)
 3. The definition feature:
    - Resolves require-string paths first
-   - Otherwise uses the analyzer to identify the identifier and local scope at the position, then
-     `EngineQuery` (`definition/query.rs`) for project-wide lookups in `AnalysisEngine`
+   - Otherwise reads one `Cursor` through `EngineQuery::with_view` and calls
+     `definitions_at` (`definition/query.rs`): the analyzer identifies the identifier and
+     local scope at the position, and the engine `View` answers project-wide lookups
      (handling inheritance, mixins, etc.)
    - While the target is still indexing, waits on an exact navigation demand and retries (`definition/demand.rs`)
 4. The feature returns the location(s) to the client

@@ -244,7 +244,7 @@ Delete this file when the last task is done. Git history keeps the record.
       hints, diagnostics.
   - [x] B6a. `EngineQuery::with_view` takes exactly one read guard per
         request.
-  - [ ] B6b. Definition, implementation, and the shared method module.
+  - [x] B6b. Definition, implementation, and the shared method module.
   - [ ] B6c. References and document highlights.
   - [ ] B6d. Hover.
   - [ ] B6e. Completion. Profiler comparison after B6b–e, including writer
