@@ -1,4 +1,5 @@
-//! Editing assistance: completion, signature help, rename, code actions, and formatting.
+//! Editing features: completion, signature help, rename, code actions, and
+//! formatting.
 
 pub mod code_actions;
 pub mod completion;

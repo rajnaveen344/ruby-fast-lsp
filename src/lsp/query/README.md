@@ -57,7 +57,7 @@ The split between `src/lsp/capabilities/` and `src/lsp/query/` is intentional. K
 1. `query/` must not depend on `RubyLanguageServer`, the `docs` map, or handler-specific plumbing. It takes `AnalysisEngine` + optional document context.
 2. `capabilities/` adapter files stay thin (~20–120 lines). If a capability file grows past ~150 lines while backed by analysis facts, the extra logic probably belongs in `query/` or, if editor-agnostic, `ruby-analysis::engine`.
 3. **Exception:** features that don't need analysis facts live only in `capabilities/`. Current examples:
-   - `capabilities/editing/formatting.rs` — runs an external formatter
+   - `src/features/editing/formatting.rs` — runs an external formatter
    - `src/features/presentation/folding_range.rs` — pure AST visitor
    - `src/features/presentation/semantic_tokens.rs` — pure AST visitor
    - `src/features/presentation/document_symbols.rs` — pure AST visitor

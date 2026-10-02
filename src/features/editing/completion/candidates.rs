@@ -1,4 +1,4 @@
-//! Completion Query — Provides engine-backed completion lookups.
+//! Completion candidates: engine-backed constant and method lookups.
 //!
 //! Wraps constant and method completion logic behind `EngineQuery`,
 //! keeping lock management in one place.

@@ -3,6 +3,3 @@
 
 mod debug;
 pub mod diagnostics;
-pub mod editing;
-
-pub use editing::signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};

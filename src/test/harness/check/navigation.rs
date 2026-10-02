@@ -9,8 +9,8 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{assert_same_locations, position_params};
+use crate::features::editing::rename;
 use crate::features::navigation::{call_hierarchy, definition, implementation, references};
-use crate::lsp::capabilities::editing::rename::handle_rename;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::{Tag, TagKind};
 
@@ -141,7 +141,7 @@ pub(super) async fn check_rename(server: &RubyLanguageServer, tags: &[(&Url, &Ta
         "<rename> tags need exactly one tag with a `to` attribute"
     );
 
-    let edit = handle_rename(
+    let edit = rename::handle(
         server,
         RenameParams {
             text_document_position: position_params(uri, request_tag.range.start),
@@ -150,6 +150,7 @@ pub(super) async fn check_rename(server: &RubyLanguageServer, tags: &[(&Url, &Ta
         },
     )
     .await
+    .expect("rename request failed")
     .unwrap_or_else(|| {
         panic!(
             "rename at {:?} to `{new_name}` returned no edit",

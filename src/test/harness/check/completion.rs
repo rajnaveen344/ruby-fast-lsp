@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
 };
 
 use super::position_params;
-use crate::lsp::handlers::request;
+use crate::features::editing::completion;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::Tag;
 
@@ -18,7 +18,7 @@ pub(super) async fn check_completion(server: &RubyLanguageServer, cursor: &Locat
         !items.is_empty() || !excludes.is_empty(),
         "<complete> needs `items` or `excludes`"
     );
-    let response = request::handle_completion(
+    let response = completion::handle(
         server,
         CompletionParams {
             text_document_position: position_params(&cursor.uri, cursor.range.start),

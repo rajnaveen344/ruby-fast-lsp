@@ -3,6 +3,7 @@
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
+use crate::features::editing::{code_actions, completion, formatting, rename, signature_help};
 use crate::features::navigation::namespace_tree::{self, NamespaceTreeParams};
 use crate::features::navigation::{
     call_hierarchy, definition, document_highlights, implementation, references, type_hierarchy,
@@ -243,14 +244,14 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: SignatureHelpParams,
     ) -> LspResult<Option<SignatureHelp>> {
-        request::handle_signature_help(self, params).await
+        signature_help::handle(self, params).await
     }
 
     async fn code_action(
         &self,
         params: CodeActionParams,
     ) -> LspResult<Option<Vec<CodeActionOrCommand>>> {
-        request::handle_code_actions(self, params).await
+        code_actions::handle(self, params).await
     }
 
     async fn semantic_tokens_full(
@@ -295,7 +296,7 @@ impl LanguageServer for RubyLanguageServer {
             params.text_document_position.text_document.uri.path()
         );
         let start_time = Instant::now();
-        let result = request::handle_completion(self, params).await;
+        let result = completion::handle(self, params).await;
 
         info!("[PERF] Completion completed in {:?}", start_time.elapsed());
 
@@ -308,7 +309,7 @@ impl LanguageServer for RubyLanguageServer {
             params.label
         );
         let start_time = Instant::now();
-        let result = request::handle_completion_resolve(self, params).await;
+        let result = completion::handle_resolve(self, params).await;
 
         info!(
             "[PERF] Completion item resolve completed in {:?}",
@@ -368,7 +369,7 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_document_on_type_formatting(self, params).await;
+        let result = formatting::handle_on_type(self, params).await;
 
         info!(
             "[PERF] Document on type formatting completed in {:?}",
@@ -386,7 +387,7 @@ impl LanguageServer for RubyLanguageServer {
             "Document formatting request received for {:?}",
             params.text_document.uri.path()
         );
-        request::handle_document_formatting(self, params).await
+        formatting::handle_document(self, params).await
     }
 
     async fn folding_range(
@@ -487,13 +488,13 @@ impl LanguageServer for RubyLanguageServer {
     }
 
     async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
-        request::handle_rename(self, params).await
+        rename::handle(self, params).await
     }
 
     async fn prepare_rename(
         &self,
         params: TextDocumentPositionParams,
     ) -> LspResult<Option<PrepareRenameResponse>> {
-        request::handle_prepare_rename(self, params).await
+        rename::handle_prepare(self, params).await
     }
 }

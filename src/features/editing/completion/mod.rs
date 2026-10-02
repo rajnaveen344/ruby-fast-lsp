@@ -1,13 +1,20 @@
-use ruby_analysis::core::RubyType;
+//! Completion: shape keys, constants, methods, variables, and snippets at the
+//! cursor, read after the document's current semantic commit.
+
+mod candidates;
 pub mod snippets;
 pub mod variable;
+
+use log::debug;
+use ruby_analysis::core::RubyType;
 
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, SourceFileId,
 };
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
-    CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
-    CompletionTriggerKind, Position, Range, TextEdit, Url,
+    CompletionContext, CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
+    CompletionTextEdit, CompletionTriggerKind, Position, Range, TextEdit, Url,
 };
 
 use ruby_analysis::core::MethodReceiver;
@@ -22,6 +29,27 @@ use crate::utils::lsp::{lsp_position, source_position};
 use crate::utils::parser::position_to_offset;
 
 pub use snippets::RubySnippets;
+
+/// Handle `textDocument/completion`.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: CompletionParams,
+) -> LspResult<Option<CompletionResponse>> {
+    let uri = params.text_document_position.text_document.uri.clone();
+    let position = params.text_document_position.position;
+    debug!("Completion request received with params {:?}", params);
+    Ok(Some(
+        find_completion_at_position(server, uri, position, params.context).await,
+    ))
+}
+
+/// Handle `completionItem/resolve`: items are complete when listed.
+pub async fn handle_resolve(
+    _server: &RubyLanguageServer,
+    item: CompletionItem,
+) -> LspResult<CompletionItem> {
+    Ok(item)
+}
 
 pub async fn find_completion_at_position(
     server: &RubyLanguageServer,

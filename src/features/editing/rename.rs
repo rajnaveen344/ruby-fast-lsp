@@ -4,7 +4,10 @@
 //! This is more robust than stored positions because the parser's own scope
 //! resolution is the source of truth.
 
+use log::info;
 use std::collections::HashMap;
+use std::time::Instant;
+use tower_lsp::jsonrpc::Result as LspResult;
 
 use tower_lsp::lsp_types::{
     Position, PrepareRenameResponse, Range, RenameParams, TextDocumentPositionParams, TextEdit,
@@ -18,7 +21,31 @@ use ruby_analysis::core::{RubyConstant, RubyMethod};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::{Identifier, RenameVisitor, RubyDocument, RubyPrismAnalyzer};
 
-pub async fn handle_prepare_rename(
+/// Handle `textDocument/prepareRename`.
+pub async fn handle_prepare(
+    server: &RubyLanguageServer,
+    params: TextDocumentPositionParams,
+) -> LspResult<Option<PrepareRenameResponse>> {
+    info!("Prepare rename request received for: {:?}", params);
+    Ok(prepare_rename(server, params))
+}
+
+/// Handle `textDocument/rename`.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: RenameParams,
+) -> LspResult<Option<WorkspaceEdit>> {
+    info!(
+        "Rename request received for: {:?}",
+        params.text_document_position
+    );
+    let start_time = Instant::now();
+    let result = rename(server, params);
+    info!("[PERF] Rename completed in {:?}", start_time.elapsed());
+    Ok(result)
+}
+
+fn prepare_rename(
     server: &RubyLanguageServer,
     params: TextDocumentPositionParams,
 ) -> Option<PrepareRenameResponse> {
@@ -85,10 +112,7 @@ fn range_contains(range: Range, position: Position) -> bool {
     range.start <= position && position < range.end
 }
 
-pub async fn handle_rename(
-    server: &RubyLanguageServer,
-    params: RenameParams,
-) -> Option<WorkspaceEdit> {
+fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<WorkspaceEdit> {
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
     let new_name = params.new_name;

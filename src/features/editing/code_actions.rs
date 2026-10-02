@@ -1,18 +1,29 @@
+//! Code actions: the configured linter's safe autocorrect as a quick fix.
+
 use crate::environment::config::LinterKind;
+use crate::features::editing::formatting::full_document_range;
 use crate::invariant::ExpectInvariant;
-use crate::lsp::capabilities::editing::formatting::full_document_range;
 use crate::lsp::linter::fix_document;
 use crate::server::RubyLanguageServer;
 use log::warn;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, Diagnostic, TextEdit,
     WorkspaceEdit,
 };
 
-pub async fn handle_code_actions(
+/// Handle `textDocument/codeAction`: the safe linter quick fix for the whole document.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: CodeActionParams,
+) -> LspResult<Option<Vec<CodeActionOrCommand>>> {
+    Ok(code_actions(server, params).await)
+}
+
+async fn code_actions(
     server: &RubyLanguageServer,
     params: CodeActionParams,
 ) -> Option<Vec<CodeActionOrCommand>> {

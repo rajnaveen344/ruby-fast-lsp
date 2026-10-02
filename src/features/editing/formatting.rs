@@ -1,3 +1,6 @@
+//! Formatting: whole-document formatting through the configured formatter,
+//! and `end` insertion on Enter.
+
 use crate::environment::config::FormatterKind;
 use crate::lsp::linter::format_document;
 use crate::server::RubyLanguageServer;
@@ -6,12 +9,29 @@ use ruby_analysis::indexer::is_erb_path;
 use ruby_prism::{parse, Visit};
 use std::path::Path;
 use std::time::Duration;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
-    DocumentFormattingParams, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams,
-    MessageType, Position, Range, TextEdit,
+    DocumentFormattingParams, DocumentOnTypeFormattingParams, MessageType, Position, Range,
+    TextEdit,
 };
 
-pub async fn handle_document_formatting(
+/// Handle `textDocument/formatting` with the configured external formatter.
+pub async fn handle_document(
+    server: &RubyLanguageServer,
+    params: DocumentFormattingParams,
+) -> LspResult<Option<Vec<TextEdit>>> {
+    Ok(document_formatting(server, params).await)
+}
+
+/// Handle `textDocument/onTypeFormatting`: insert `end` after a block opener.
+pub async fn handle_on_type(
+    server: &RubyLanguageServer,
+    params: DocumentOnTypeFormattingParams,
+) -> LspResult<Option<Vec<TextEdit>>> {
+    Ok(on_type_formatting(server, params))
+}
+
+async fn document_formatting(
     server: &RubyLanguageServer,
     params: DocumentFormattingParams,
 ) -> Option<Vec<TextEdit>> {
@@ -156,14 +176,7 @@ pub fn should_add_end_ast(content: &str) -> bool {
     visitor.has_standalone_conditional && !visitor.has_conditional_assignment
 }
 
-pub fn get_document_on_type_formatting_options() -> DocumentOnTypeFormattingOptions {
-    DocumentOnTypeFormattingOptions {
-        first_trigger_character: "\n".to_string(),
-        more_trigger_character: None,
-    }
-}
-
-pub async fn handle_document_on_type_formatting(
+fn on_type_formatting(
     lang_server: &RubyLanguageServer,
     params: DocumentOnTypeFormattingParams,
 ) -> Option<Vec<TextEdit>> {

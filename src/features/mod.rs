@@ -4,5 +4,6 @@
 //! products but never name `lsp`.
 
 pub mod cursor;
+pub mod editing;
 pub mod navigation;
 pub mod presentation;

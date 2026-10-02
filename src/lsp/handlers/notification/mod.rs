@@ -9,7 +9,7 @@ use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::environment::runtime::version::parse_ruby_family;
 use crate::features::presentation::semantic_tokens;
 use crate::invariant::ExpectInvariant;
-use crate::lsp::capabilities::{self, indexing};
+use crate::lsp::capabilities::indexing;
 use crate::server::RubyLanguageServer;
 use log::{debug, info, warn};
 use std::sync::atomic::Ordering;
@@ -174,9 +174,10 @@ pub async fn handle_initialize(
             resolve_provider: Some(false),
             work_done_progress_options: WorkDoneProgressOptions::default(),
         })),
-        document_on_type_formatting_provider: Some(
-            capabilities::editing::formatting::get_document_on_type_formatting_options(),
-        ),
+        document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
+            first_trigger_character: "\n".to_string(),
+            more_trigger_character: None,
+        }),
         document_formatting_provider: Some(OneOf::Left(true)),
         rename_provider: Some(OneOf::Right(RenameOptions {
             prepare_provider: Some(true),

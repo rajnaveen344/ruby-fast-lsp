@@ -427,7 +427,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C3c. Presentation: hover, inlay hints, code lens, document symbols,
         folding, selection ranges, and semantic tokens into
         `features/presentation/`.
-  - [ ] C3d. Editing: completion, signature help, formatting, rename, and code
+  - [x] C3d. Editing: completion, signature help, formatting, rename, and code
         actions into `features/editing/`.
   - [ ] C3e. Diagnostics and debug: engine projection and linter into
         `features/diagnostics/`, and debug and extension status into
