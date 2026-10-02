@@ -8,7 +8,7 @@ mod namespaces;
 mod thread_memo;
 
 pub use memo::AnalysisQueryCache;
-pub(in crate::engine) use memo::MethodReturnQueryAccess;
+pub(in crate::engine) use memo::{memoizes, MethodMemoKey};
 
 #[cfg(test)]
 mod tests;

@@ -182,7 +182,7 @@ Delete this file when the last task is done. Git history keeps the record.
         one-liners over `lookup::method`; delete those with no callers.
   - [x] B5d. Make the return-type walk consume `MethodAnswer` instead of
         `method_facts_in_chain`. Profiler comparison.
-  - [ ] B5e. Replace the three method memo maps with one keyed on
+  - [x] B5e. Replace the three method memo maps with one keyed on
         `MethodRequest`. Profiler comparison.
   - [ ] B5f. Migrate server callers; delete the remaining legacy wrappers.
   - [ ] B5g. Make `Semantics` method reads call `lookup::method`. Profiler

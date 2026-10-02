@@ -6,7 +6,7 @@ use super::{LookupUnknown, MethodAnswer};
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, ResolvedMethodCallee, RubyMethod, RubyType,
 };
-use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
+use crate::engine::queries::cache::{memoizes, AnalysisQueryCache, MethodMemoKey};
 use crate::engine::resolution::{
     method_facts_in_chain, method_lookup_chain,
     method_lookup_chain_has_unresolved_dependency_from_graph, module_instance_receivers,
@@ -85,19 +85,48 @@ impl MethodFound {
     }
 }
 
-/// Answer `request` against `view`.
+/// Answer `request` against `view`. A view carrying a memo serves
+/// namespace callee, return-type, and signature lookups from it.
 pub fn method(view: &View<'_>, request: MethodRequest<'_>) -> MethodAnswer {
-    answer(view, request, None)
+    let root = FullyQualifiedName::namespace_with_kind(Vec::new(), NamespaceKind::Instance);
+    let target = match request.receiver {
+        LookupReceiver::Namespace(namespace) => Target::Namespace(namespace),
+        LookupReceiver::Reflection(namespace) => Target::Reflection(namespace),
+        LookupReceiver::Type(receiver_type) => Target::Type(receiver_type),
+        LookupReceiver::Super { owner } => Target::Super(owner),
+        LookupReceiver::TopLevel => Target::Namespace(&root),
+    };
+    let (method, want) = (&request.method, request.want);
+    match (view.memo, target) {
+        (Some(memo), Target::Namespace(namespace)) if memoizes(want) => {
+            let access = match want {
+                MethodWant::Return => view.return_memo_access(namespace, method, request.access),
+                MethodWant::Callees
+                | MethodWant::Facts
+                | MethodWant::Reference
+                | MethodWant::Signatures => request.access,
+            };
+            let key = MethodMemoKey::new(namespace, *method, access, want);
+            memo.method(view.query_cache_identity(), key, || {
+                answer(view, target, method, access, want)
+            })
+        }
+        _ => answer(view, target, method, request.access, want),
+    }
 }
 
-/// Answer `request` against `view`, reusing `cache` for callees, return
-/// types, and signatures. The cache binds itself to one engine identity.
+/// Answer `request` against `view`, memoized in `cache`. The cache binds
+/// itself to one engine identity.
 pub fn method_cached(
     view: &View<'_>,
     request: MethodRequest<'_>,
     cache: &AnalysisQueryCache,
 ) -> MethodAnswer {
-    answer(view, request, Some(cache))
+    let view = View {
+        engine: view.engine,
+        memo: Some(cache),
+    };
+    method(&view, request)
 }
 
 /// A receiver with top level resolved to its namespace.
@@ -111,25 +140,17 @@ enum Target<'a> {
 
 fn answer(
     view: &View<'_>,
-    request: MethodRequest<'_>,
-    cache: Option<&AnalysisQueryCache>,
+    target: Target<'_>,
+    method: &RubyMethod,
+    access: ReceiverAccess<'_>,
+    want: MethodWant,
 ) -> MethodAnswer {
-    let root = FullyQualifiedName::namespace_with_kind(Vec::new(), NamespaceKind::Instance);
-    let target = match request.receiver {
-        LookupReceiver::Namespace(namespace) => Target::Namespace(namespace),
-        LookupReceiver::Reflection(namespace) => Target::Reflection(namespace),
-        LookupReceiver::Type(receiver_type) => Target::Type(receiver_type),
-        LookupReceiver::Super { owner } => Target::Super(owner),
-        LookupReceiver::TopLevel => Target::Namespace(&root),
-    };
-    let method = &request.method;
-    let access = request.access;
-    match request.want {
-        MethodWant::Callees => callees(view, target, method, access, cache),
+    match want {
+        MethodWant::Callees => callees(view, target, method, access),
         MethodWant::Facts => facts(view, target, method, access),
-        MethodWant::Return => return_type(view, target, method, access, cache),
+        MethodWant::Return => return_type(view, target, method, access),
         MethodWant::Reference => reference(view, target, method, access),
-        MethodWant::Signatures => signatures(view, target, method, access, cache),
+        MethodWant::Signatures => signatures(view, target, method, access),
     }
 }
 
@@ -138,31 +159,16 @@ fn callees(
     target: Target<'_>,
     method: &RubyMethod,
     access: ReceiverAccess<'_>,
-    cache: Option<&AnalysisQueryCache>,
 ) -> MethodAnswer {
     let (allow_private, protected_caller) = access.visibility();
     let resolved = match target {
-        Target::Namespace(namespace) => {
-            let compute = || {
-                view.resolve_method_callees_inner(
-                    namespace,
-                    method,
-                    allow_private,
-                    protected_caller,
-                    None,
-                )
-            };
-            match cache {
-                Some(cache) => cache.method_callees(
-                    view.query_cache_identity(),
-                    namespace,
-                    *method,
-                    memo_access(access),
-                    compute,
-                ),
-                None => compute(),
-            }
-        }
+        Target::Namespace(namespace) => view.resolve_method_callees_inner(
+            namespace,
+            method,
+            allow_private,
+            protected_caller,
+            None,
+        ),
         Target::Type(receiver_type) => view.resolve_method_callees_for_type_inner(
             receiver_type,
             method,
@@ -228,15 +234,11 @@ fn return_type(
     target: Target<'_>,
     method: &RubyMethod,
     access: ReceiverAccess<'_>,
-    cache: Option<&AnalysisQueryCache>,
 ) -> MethodAnswer {
     let found = match target {
-        Target::Namespace(namespace) => match cache {
-            Some(cache) => {
-                view.method_return_type_for_receiver_memo(namespace, method, access, cache)
-            }
-            None => view.method_return_type_for_receiver_access(namespace, method, access),
-        },
+        Target::Namespace(namespace) => {
+            view.method_return_type_for_receiver_access(namespace, method, access)
+        }
         Target::Super(owner) => {
             if !is_any(access) {
                 return MethodAnswer::Unknown(LookupUnknown::Unsupported);
@@ -261,25 +263,19 @@ fn signatures(
     target: Target<'_>,
     method: &RubyMethod,
     access: ReceiverAccess<'_>,
-    cache: Option<&AnalysisQueryCache>,
 ) -> MethodAnswer {
-    let (allow_private, protected_caller) = access.visibility();
     let facts = match target {
-        Target::Namespace(namespace) => view.resolve_method_signature_facts_maybe_cached(
-            namespace,
-            method,
-            allow_private,
-            protected_caller,
-            cache,
-        ),
-        Target::Type(receiver_type) => {
-            Arc::new(view.resolve_method_signature_facts_for_type_inner(
-                receiver_type,
+        Target::Namespace(namespace) => {
+            let (allow_private, protected_caller) = access.visibility();
+            view.resolve_method_signature_facts_inner(
+                namespace,
                 method,
                 allow_private,
                 protected_caller,
-                cache,
-            ))
+            )
+        }
+        Target::Type(receiver_type) => {
+            view.resolve_method_signature_facts_for_type_inner(receiver_type, method, access)
         }
         Target::Reflection(_) | Target::Super(_) => {
             return MethodAnswer::Unknown(LookupUnknown::Unsupported);
@@ -288,7 +284,7 @@ fn signatures(
     if facts.is_empty() {
         return MethodAnswer::Unknown(LookupUnknown::NoEvidence);
     }
-    MethodAnswer::Found(MethodFound::Signatures(facts))
+    MethodAnswer::Found(MethodFound::Signatures(Arc::new(facts)))
 }
 
 fn reference(
@@ -342,14 +338,6 @@ fn is_any(access: ReceiverAccess<'_>) -> bool {
     match access {
         ReceiverAccess::Any => true,
         ReceiverAccess::Protected { .. } | ReceiverAccess::Public => false,
-    }
-}
-
-fn memo_access(access: ReceiverAccess<'_>) -> MethodReturnQueryAccess {
-    match access {
-        ReceiverAccess::Any => MethodReturnQueryAccess::Private,
-        ReceiverAccess::Public => MethodReturnQueryAccess::Public,
-        ReceiverAccess::Protected { caller } => MethodReturnQueryAccess::Protected(caller.clone()),
     }
 }
 

@@ -321,9 +321,7 @@ fn type_callees_and_signatures_equal_legacy_wrappers() {
                     ReceiverAccess::Public => view.resolve_method_signature_facts_for_type_inner(
                         &receiver_type,
                         &name,
-                        false,
-                        None,
-                        None,
+                        ReceiverAccess::Public,
                     ),
                     ReceiverAccess::Protected { caller } => view
                         .resolve_protected_method_signature_facts_for_type(

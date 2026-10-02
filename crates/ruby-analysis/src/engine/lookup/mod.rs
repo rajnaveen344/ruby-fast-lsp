@@ -14,7 +14,10 @@
 //! report or act on absence must do so only for `Missing`, and must fail
 //! closed on `Unknown`.
 //!
-//! Requests delegate to the engine's resolution functions. The
+//! Requests delegate to the engine's resolution functions. A `View` that
+//! carries an `AnalysisQueryCache` memoizes namespace callee, return-type,
+//! and signature answers in it, keyed on the request and the engine
+//! identity; [`method_cached`] attaches a cache to a view. The
 //! access-flavoured callee, return-type, and signature wrappers on `View` are
 //! one-line views of [`method`] and [`method_cached`]; the tests compare
 //! answers with those wrappers and the remaining legacy paths per want,

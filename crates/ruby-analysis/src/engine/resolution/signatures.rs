@@ -3,7 +3,7 @@
 use super::receiver_type_members;
 use crate::core::{FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, RubyType};
 use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
+use crate::engine::queries::cache::AnalysisQueryCache;
 use crate::engine::queries::View;
 use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
@@ -141,13 +141,14 @@ impl<'a> View<'a> {
         .into_signature_vec()
     }
 
+    /// Signature facts every member of `receiver_type` proves; empty when a
+    /// member proves none. Each namespace is read through the lookup, so a
+    /// memoized view serves it.
     pub(in crate::engine) fn resolve_method_signature_facts_for_type_inner(
         &self,
         receiver_type: &RubyType,
         method: &RubyMethod,
-        allow_private: bool,
-        protected_caller: Option<&FullyQualifiedName>,
-        cache: Option<&AnalysisQueryCache>,
+        access: ReceiverAccess<'_>,
     ) -> Vec<MethodFact> {
         let members = receiver_type_members(receiver_type);
         let mut all_facts = Vec::new();
@@ -159,16 +160,17 @@ impl<'a> View<'a> {
 
             let mut member_facts = Vec::new();
             for namespace in namespaces {
+                let request = MethodRequest {
+                    receiver: LookupReceiver::Namespace(&namespace),
+                    method: *method,
+                    access,
+                    want: MethodWant::Signatures,
+                };
                 member_facts.extend(
-                    self.resolve_method_signature_facts_maybe_cached(
-                        &namespace,
-                        method,
-                        allow_private,
-                        protected_caller,
-                        cache,
-                    )
-                    .iter()
-                    .cloned(),
+                    lookup::method(self, request)
+                        .into_signatures()
+                        .iter()
+                        .cloned(),
                 );
             }
             if member_facts.is_empty() {
@@ -187,45 +189,6 @@ impl<'a> View<'a> {
         });
         all_facts.dedup();
         all_facts
-    }
-
-    pub(in crate::engine) fn resolve_method_signature_facts_maybe_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        allow_private: bool,
-        protected_caller: Option<&FullyQualifiedName>,
-        cache: Option<&AnalysisQueryCache>,
-    ) -> std::sync::Arc<Vec<MethodFact>> {
-        let Some(cache) = cache else {
-            return std::sync::Arc::new(self.resolve_method_signature_facts_inner(
-                namespace_fqn,
-                method,
-                allow_private,
-                protected_caller,
-            ));
-        };
-        let access = if let Some(caller) = protected_caller {
-            MethodReturnQueryAccess::Protected(caller.clone())
-        } else if allow_private {
-            MethodReturnQueryAccess::Private
-        } else {
-            MethodReturnQueryAccess::Public
-        };
-        cache.method_signature_facts(
-            self.engine.query_cache_identity(),
-            namespace_fqn,
-            *method,
-            access,
-            || {
-                self.resolve_method_signature_facts_inner(
-                    namespace_fqn,
-                    method,
-                    allow_private,
-                    protected_caller,
-                )
-            },
-        )
     }
 
     pub(in crate::engine) fn resolve_method_signature_facts_inner(
