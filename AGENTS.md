@@ -38,7 +38,9 @@ Keep reusable analysis independent of LSP types. `src/lsp/query/` adapts cursor 
 document context to `AnalysisQuery` and converts domain ranges to
 protocol responses. Do not duplicate MRO, identity, ranking, or missing-method
 policy in feature adapters. Engine resolution may coordinate inference solvers;
-inference may consult engine queries. Engine ownership of solved state remains
+inference and the indexer read project state only through
+`inference::semantics::Semantics` and never name the engine (an architecture
+test enforces core <- inference <- indexer <- engine). Engine ownership of solved state remains
 singular. Expose domain operations and views, never mutable stores or arena IDs.
 
 ## Correctness contracts
