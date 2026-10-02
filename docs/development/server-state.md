@@ -25,7 +25,7 @@ project, with a separate orphan engine for unowned documents.
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
 | `products` | Runtime discovery, shared immutable dependency products, and the `runtime/status` projection (`ProjectRuntimeStatus`). | [products.rs](../../src/server/products.rs) |
 | `extensions` | Extension registry and dynamic watcher registration lifecycle. | [extensions.rs](../../src/server/extensions.rs) |
-| `diagnostics` | Latest-per-URI outbound queue, exact-source retained linter output, the engine diagnostic projection (`unresolved_diagnostics_from_engine`), the dependency-root `unresolved-require` refresh (its code is the engine's `UNRESOLVED_REQUIRE_CODE`), and open-project diagnostic publication after a load. | [diagnostics.rs](../../src/server/diagnostics.rs) |
+| `diagnostics` | Latest-per-URI outbound queue, exact-source retained linter output, the single engine diagnostic projection (`unresolved_diagnostics_from_engine`, one URI check per file, ranges through `utils::lsp::lsp_file_range`), the dependency-root `unresolved-require` refresh (its code is the engine's `UNRESOLVED_REQUIRE_CODE`), and open-project diagnostic publication after a load. | [diagnostics.rs](../../src/server/diagnostics.rs) |
 | `file_changes` | Latest filesystem events and debounce generation. | [watched_files.rs](../../src/server/watched_files.rs) |
 | `namespace_tree` | Cached Ruby Index projection and debounced invalidation. | [namespace_tree.rs](../../src/server/namespace_tree.rs) |
 

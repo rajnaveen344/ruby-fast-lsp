@@ -263,7 +263,7 @@ Delete this file when the last task is done. Git history keeps the record.
         contract, dynamic mixin hook) into `policy.rs`; rename uses the same
         predicate, with a test for fail-closed rename on an incomplete chain.
   - [x] B7c. The server imports the engine's `unresolved-require` code.
-  - [ ] B7d. One engine-to-LSP projection; delete the coordinator's fast copy
+  - [x] B7d. One engine-to-LSP projection; delete the coordinator's fast copy
         (keep the faster implementation). Measure open-project publish.
   - [ ] B7e. One composition function for syntax, engine, and linter
         diagnostics; replace the hand-assembled publish sites.

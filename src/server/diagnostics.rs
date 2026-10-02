@@ -4,17 +4,16 @@ use super::{RubyLanguageServer, Workspace};
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{IndexingRunState, LoadSink, SourceReader};
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
+use crate::utils::lsp::lsp_file_range;
 use log::{info, warn};
 use parking_lot::{Mutex, RwLock};
-use ruby_analysis::core::{
-    DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity, TextRange,
-};
+use ruby_analysis::core::DiagnosticSeverity as AnalysisDiagnosticSeverity;
 use ruby_analysis::engine::{AnalysisEngine, SourceFile};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 use tower_lsp::Client;
 
 #[derive(Debug, Default)]
@@ -360,46 +359,42 @@ impl RubyLanguageServer {
     }
 }
 
-/// Project one file's engine diagnostic facts while the caller retains the
-/// engine guard through publication.
+/// Project one document's engine diagnostic facts. Callers retain the engine
+/// guard through publication.
 pub(crate) fn unresolved_diagnostics_from_engine(
     engine: &AnalysisEngine,
     uri: &Url,
 ) -> Vec<Diagnostic> {
+    let view = engine.view();
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-    let Some(file_id) = engine.view().file_id(&path) else {
-        return Vec::new();
-    };
+    view.file_id(&path)
+        .and_then(|file_id| view.file(file_id))
+        .map_or_else(Vec::new, |file| file_diagnostics(engine, file))
+}
 
+/// The single engine-to-LSP diagnostic projection. A source that cannot form
+/// a file URI publishes no engine diagnostics.
+fn file_diagnostics(engine: &AnalysisEngine, file: &SourceFile) -> Vec<Diagnostic> {
+    if Url::from_file_path(&file.path).is_err() {
+        return Vec::new();
+    }
     engine
         .view()
-        .diagnostic_facts_in_file(file_id)
+        .diagnostic_facts_in_file(file.id)
         .into_iter()
-        .filter_map(|fact| diagnostic_from_fact(engine, &fact))
+        .filter_map(|fact| {
+            Some(Diagnostic {
+                range: lsp_file_range(file, fact.range)?,
+                severity: Some(lsp_diagnostic_severity(fact.severity)),
+                code: Some(NumberOrString::String(fact.code)),
+                source: Some("ruby-fast-lsp".to_string()),
+                message: fact.message,
+                ..Diagnostic::default()
+            })
+        })
         .collect()
-}
-
-/// Project a fact through its owning source, which must form a file URI.
-fn diagnostic_from_fact(engine: &AnalysisEngine, fact: &DiagnosticFact) -> Option<Diagnostic> {
-    let file = engine.view().file(fact.range.file_id)?;
-    Url::from_file_path(&file.path).ok()?;
-    diagnostic_from_fact_fast(file, fact)
-}
-
-fn diagnostic_from_fact_fast(file: &SourceFile, fact: &DiagnosticFact) -> Option<Diagnostic> {
-    Some(Diagnostic {
-        range: lsp_range_for_text_range_fast(file, fact.range)?,
-        severity: Some(lsp_diagnostic_severity(fact.severity)),
-        code: Some(NumberOrString::String(fact.code.clone())),
-        code_description: None,
-        source: Some("ruby-fast-lsp".to_string()),
-        message: fact.message.clone(),
-        related_information: None,
-        tags: None,
-        data: None,
-    })
 }
 
 fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSeverity {
@@ -409,15 +404,6 @@ fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSe
         AnalysisDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
         AnalysisDiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
     }
-}
-
-fn lsp_range_for_text_range_fast(file: &SourceFile, range: TextRange) -> Option<Range> {
-    let (start_line, start_character) = file.byte_offset_to_line_character(range.start_byte)?;
-    let (end_line, end_character) = file.byte_offset_to_line_character(range.end_byte)?;
-    Some(Range::new(
-        Position::new(start_line, start_character),
-        Position::new(end_line, end_character),
-    ))
 }
 
 impl RubyLanguageServer {
@@ -502,13 +488,7 @@ impl RubyLanguageServer {
                 {
                     continue;
                 }
-                diagnostics.extend(
-                    engine
-                        .view()
-                        .diagnostic_facts_in_file(file.id)
-                        .iter()
-                        .filter_map(|fact| diagnostic_from_fact_fast(file, fact)),
-                );
+                diagnostics.extend(file_diagnostics(&engine, file));
                 self.append_external_linter_diagnostics_for_snapshot(
                     &uri,
                     engine.view().source_snapshot_for_path(&path),

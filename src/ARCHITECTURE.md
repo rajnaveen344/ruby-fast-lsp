@@ -125,7 +125,8 @@ to protocol values. See the [feature guide](features/README.md).
 #### Layout:
 
 - `cursor/`: `EngineQuery` (document plus owning engine), method lookup at the
-  cursor, and range conversion (`analysis_location.rs`)
+  cursor, and location conversion (`analysis_location.rs`, over the one
+  engine-range conversion `utils::lsp::lsp_file_range`)
 - `navigation/`: definitions, references, implementations, call and type
   hierarchies, document highlights, workspace symbols, and the namespace tree
 - `editing/`: completion (with snippets and trigger handling), signature help,

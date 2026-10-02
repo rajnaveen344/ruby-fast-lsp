@@ -32,7 +32,8 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
 - A feature may read `server` state and `loader` products. It never names
   `lsp`; an item a feature needs from `lsp` moves to its proper owner.
 - Query adapters convert cursor positions to analysis offsets and domain
-  ranges to protocol ranges (`cursor::analysis_location`). They do not
+  ranges to protocol ranges (`cursor::analysis_location`, which shares
+  `utils::lsp::lsp_file_range` with diagnostic publication). They do not
   duplicate MRO, identity, ranking, or missing-method policy.
 - Split a feature file that grows past 1,000 lines by responsibility inside
   the feature's folder.
