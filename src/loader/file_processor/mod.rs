@@ -224,7 +224,7 @@ impl FileProcessor {
     /// Parse, collect facts, and compose the file's analysis. The only writes
     /// here precede the walk that reads them: source registration, the
     /// direct declaration seed, and the extension seed through
-    /// `LoadSink::commit_seed`. The final facts and the processed document
+    /// `LoadTarget::commit_extension_seed`. The final facts and the processed document
     /// are returned uncommitted.
     fn analyze_file_with_resolution(
         &self,
@@ -336,7 +336,7 @@ impl FileProcessor {
             self.seed_extension_semantics(
                 &analysis_engine,
                 extension_project_context_snapshot.as_ref(),
-                |seed| ctx.sink.commit_seed(&analysis_engine, seed),
+                |seed| analysis_engine.commit_extension_seed(seed),
             );
         }
         let direct_elapsed = direct_start.elapsed();

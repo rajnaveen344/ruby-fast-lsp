@@ -461,7 +461,7 @@ Delete this file when the last task is done. Git history keeps the record.
         Remove the repeated `.read()` calls in references, hover, and
         definition.
 
-  - [ ] C4c. The single project writer. Split, because the original step
+  - [x] C4c. The single project writer. Split, because the original step
         (a writer task with a command channel and oneshot replies, the
         `LoadSink` adapter sending commands) bundles three changes of very
         different risk:
@@ -472,23 +472,32 @@ Delete this file when the last task is done. Git history keeps the record.
           This touches `loader/file_processor/collection.rs`,
           `loader/coordinator/`, and the source hosts, so it waits until the
           declaration-seed work in the indexer and source hosts lands.
-    - [ ] C4c2. Owner decision: how a single writer executes (see below).
-    - [ ] C4c3. Implement the chosen writer behind the same handle
-          operations. Profiler comparison, with didOpen, cold indexing, and
-          `writer_wait` called out.
-  - [ ] C4d. Move the lifecycle writes to named operations (commands once
+    - [x] C4c2. Owner decision: how a single writer executes (see below).
+          Decided: Option A. The handle keeps its `RwLock`, every write is a
+          named operation, and no writer task is added.
+    - [x] C4c3. Nothing to implement under Option A; the named operations
+          are the writer. Revisit B only after `resolve()` runs in bounded
+          chunks, judged by `writer_wait` p95 against its 50 ms budget.
+  - [x] C4d. Move the lifecycle writes to named operations (commands once
         C4c3 lands).
     - [x] C4d1. File removal, clear-facts, register, the runtime-rebuild
           reset, removal from other projects, and orphan setup call
           `ProjectHandle::{remove_path_of_kind, clear_path_facts_of_kind,
           register_source, reset, remove_path, resolve}`. `lsp/` no longer
           calls `update`.
-    - [ ] C4d2. The require-diagnostic refresh commit (commit if the source
+    - [x] C4d2. The require-diagnostic refresh commit (commit if the source
           snapshot is current, then publish inside the same write) and the
           extension seed (`LoadSink::commit_seed`, which still takes the
           shared engine) become named operations. The refresh must keep its
           projection-to-publication interval free of edits, so its operation
           returns the diagnostics to enqueue rather than enqueueing later.
+          Done: `ProjectHandle::refresh_require_diagnostics_if_snapshot`
+          checks the snapshot, asks the caller under the guard whether the
+          file still accepts the refresh and for its diagnostics, commits,
+          and runs the caller's publish over the updated view under the same
+          guard; enqueueing there rather than after the guard keeps the
+          interval edit-free. `LoadSink::commit_seed` is gone; the loader
+          calls `commit_extension_seed` on its `LoadTarget`.
   - [ ] C4e. Fold `ProjectRuntimeState`'s locks and the require index into
         the handle. Owner decision (see below).
     - [x] C4e1. Remove `Workspace::analysis_engine`, `analysis_engine_for_uri`,

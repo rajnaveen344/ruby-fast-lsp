@@ -179,7 +179,10 @@ impl dyn LoadTarget + '_ {
 
     /// Register the extension semantic seed source and replace its facts
     /// with `seed`. Resolution is deferred: the seed only has to be visible
-    /// to the file walk that follows it.
+    /// to the file walk that follows it. The registry hands a seed over only
+    /// while it records that seed as the one this engine holds, so the loader
+    /// calls this synchronously inside that window and it is never a late
+    /// write.
     pub(crate) fn commit_extension_seed(&self, seed: ExtensionSemanticSeed) {
         self.write(|engine| {
             let file_id = engine.register_file(seed.source());

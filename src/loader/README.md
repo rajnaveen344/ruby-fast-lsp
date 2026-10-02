@@ -91,7 +91,7 @@ requires, so no other loader module can take an engine write guard. Reads use
 A single-file pass is split into analysis and commit. `FileProcessor::analyze_file*`
 parses the file, walks it, and composes its `FileAnalysis`, writing only what
 the walk itself reads: the source registration, the direct declaration seed,
-and the extension seed through `LoadSink::commit_seed`. It returns an
+and the extension seed through `commit_extension_seed`. It returns an
 uncommitted `LoadedFile`. The caller commits it with `LoadedFile::commit`
 immediately, in the same task and with no await in between: the commit
 replaces the file's facts in the engine the analysis read, resolves them as
@@ -102,12 +102,12 @@ indexed commits nothing; a file too broken to analyze commits empty facts.
 The extension registry never writes an engine. Before a file walk the loader
 asks it for the semantic seed (extension namespaces and method targets) that
 the engine lacks for the project's applicability, and commits that seed with
-`LoadSink::commit_seed`. The registry hands the seed over inside its seed
-ledger lock and records it as applied only after the commit returns, so
-concurrent seeds of one engine commit in ledger order and the engine always
-holds the last recorded applicability. Collection entry points that address a
-caller-supplied engine and carry no sink commit through the same loader write,
-`commit_extension_seed`, that the server sink applies.
+the target's `commit_extension_seed`. The registry hands the seed over inside
+its seed ledger lock and records it as applied only after the commit returns,
+so concurrent seeds of one engine commit in ledger order and the engine always
+holds the last recorded applicability. A runtime rebuild empties a project
+engine in place, so the server tells the registry to forget that engine's seed
+(`forget_semantic_seed`) and the rebuild seeds it again.
 
 The loader never removes a file. A file that exists but does not parse stays
 registered with no facts. The pre-collection baseline withholds stale project

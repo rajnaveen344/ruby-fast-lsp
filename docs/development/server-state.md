@@ -18,7 +18,7 @@ Each project's engine is reached only through a
 [`ProjectHandle`](../../src/server/projects/handle.rs). Readers call
 `view(|view| ..)`, which holds the engine read guard for one synchronous
 closure, so an answer reflects one semantic revision and no guard crosses an
-`.await`. Lifecycle writes use named operations (`register_source`, `remove_path`, `remove_path_of_kind`, `clear_path_facts_of_kind`, `resolve`, `reset`); the conditional require-diagnostic commit still uses `update(|engine| ..)`. Handles are compared with
+`.await`. Lifecycle writes use named operations (`register_source`, `remove_path`, `remove_path_of_kind`, `clear_path_facts_of_kind`, `resolve`, `reset`, and `refresh_require_diagnostics_if_snapshot`, which replaces a file's unresolved-require diagnostics only while its source snapshot is current and publishes under the same write guard); `update(|engine| ..)` remains for fixtures and tools. Handles are compared with
 `is_same`. The server routes with `project_for_uri`, `projects`, and
 `orphan_project`. The loader reaches a project through
 `ProjectHandle::load_target`, an `Arc<dyn LoadTarget>` returned by
@@ -59,7 +59,9 @@ above. When a project's facts are resolved the loader calls
 project's open documents from `diagnostics.rs` and reports whether the indexing
 run is still current. The extension registry only produces the extension
 semantic seed; the loader commits it to the project engine through
-`LoadSink::commit_seed`.
+`LoadTarget::commit_extension_seed`. After `reset` empties an engine during a
+runtime rebuild, the server calls the registry's `forget_semantic_seed` so the
+rebuild seeds the engine again.
 
 An interactive file pass (didOpen, didChange, didSave, open-document refreshes
 after a dependency change, and embedded `open_embedded_document`) calls

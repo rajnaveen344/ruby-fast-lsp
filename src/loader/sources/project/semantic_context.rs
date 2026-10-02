@@ -80,11 +80,8 @@ impl IndexerProject {
                     path.display()
                 )
             })?;
-            self.file_processor.ensure_project_semantic_seed(
-                &uri,
-                &analysis_engine,
-                ctx.sink.as_ref(),
-            );
+            self.file_processor
+                .ensure_project_semantic_seed(&uri, &analysis_engine);
         }
 
         let mut snapshot = analysis_engine.register_project_paths_and_snapshot(project_files);

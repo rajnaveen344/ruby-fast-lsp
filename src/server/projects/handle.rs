@@ -8,16 +8,18 @@
 //! the same project exactly when [`ProjectHandle::is_same`] holds.
 //!
 //! Lifecycle code writes through the named operations below (register,
-//! remove, clear, resolve, reset); `update` remains for the conditional
-//! require-diagnostic commit, fixtures, and tools. The loader writes through
+//! remove, clear, resolve, reset, and the conditional require-diagnostic
+//! refresh); `update` remains for fixtures and tools. The loader writes through
 //! the named operations of the [`LoadTarget`] that [`ProjectHandle::load_target`]
 //! returns, and never receives the engine lock. The named operations are the
 //! vocabulary a single project writer would accept as commands.
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadTarget, NamedWrite};
 use parking_lot::RwLock;
-use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput, View};
+use ruby_analysis::core::{DiagnosticFact, FileAnalysis, SourceFileId, SourceKind};
+use ruby_analysis::engine::{
+    AnalysisEngine, ResolveMode, SourceFile, SourceFileInput, SourceFileSnapshot, View,
+};
 use ruby_analysis::inference::semantics::Semantics;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -122,6 +124,40 @@ impl ProjectHandle {
                 kind,
             });
             engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+            true
+        })
+    }
+
+    /// Replace the unresolved-require diagnostics of the file at `path` while
+    /// its current source is `snapshot`, then run `publish` over the updated
+    /// view under the same write guard, so no edit lands between the commit
+    /// and the projection it publishes. `requires` runs under the guard too:
+    /// it decides whether the file still accepts the refresh and returns the
+    /// replacement diagnostics, or `None` to skip the commit. Returns whether
+    /// the diagnostics were replaced.
+    pub fn refresh_require_diagnostics_if_snapshot(
+        &self,
+        path: &Path,
+        snapshot: SourceFileSnapshot,
+        requires: impl FnOnce(&View<'_>, &SourceFile) -> Option<Vec<DiagnosticFact>>,
+        publish: impl FnOnce(&View<'_>),
+    ) -> bool {
+        self.update(|engine| {
+            let view = engine.view();
+            if view.source_snapshot_for_path(path) != Some(snapshot) {
+                return false;
+            }
+            let Some(file) = view.file_id(path).and_then(|id| view.file(id)) else {
+                return false;
+            };
+            let Some(requires) = requires(&view, file) else {
+                return false;
+            };
+            if !engine.replace_unresolved_require_diagnostics_if_source_snapshot(snapshot, requires)
+            {
+                return false;
+            }
+            publish(&engine.view());
             true
         })
     }

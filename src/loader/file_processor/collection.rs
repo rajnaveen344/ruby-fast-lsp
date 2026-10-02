@@ -341,14 +341,13 @@ impl FileProcessor {
         &self,
         uri: &Url,
         analysis_engine: &Arc<dyn LoadTarget>,
-        sink: &dyn LoadSink,
     ) {
         let project_context_snapshot = self.extension_project_context_seed.as_ref().map(|seed| {
             seed.read()
                 .context_snapshot(uri.to_string(), SourceKind::Project)
         });
         self.seed_extension_semantics(analysis_engine, project_context_snapshot.as_ref(), |seed| {
-            sink.commit_seed(analysis_engine, seed)
+            analysis_engine.commit_extension_seed(seed)
         });
     }
 

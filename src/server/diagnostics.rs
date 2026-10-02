@@ -293,52 +293,47 @@ impl RubyLanguageServer {
                 {
                     break 'commit;
                 }
-                workspace.handle().update(|engine| {
-                    let status = workspace.indexing_status.snapshot();
-                    if status.generation != generation
-                        || matches!(
-                            status.phase,
-                            IndexingPhase::Cancelled | IndexingPhase::Failed
-                        )
-                        || engine.view().source_snapshot_for_path(&path) != Some(snapshot)
-                    {
-                        return;
-                    }
-                    let view = engine.view();
-                    let Some(file) = view.file_id(&path).and_then(|id| view.file(id)) else {
-                        return;
-                    };
-                    if !file.kind.contributes_project_diagnostics()
-                        || document
-                            .as_ref()
-                            .is_some_and(|doc| !view.file_content_matches(file.id, &doc.content))
-                    {
-                        return;
-                    }
-                    // Project targets can change without changing the consumer's
-                    // source or dependency roots. Resolve candidates against the
-                    // current engine only inside the commit update.
-                    let requires = reresolve_unresolved_require_diagnostics(
-                        &path,
-                        project_root,
-                        &load_paths,
-                        &feature_index,
-                        Some(&view),
-                        &candidates,
-                    );
-                    if !engine.replace_unresolved_require_diagnostics_if_source_snapshot(
-                        snapshot, requires,
-                    ) {
-                        return;
-                    }
-                    // Closed files retain engine facts but receive no publication.
-                    // Synchronous enqueue keeps edits and resolution outside the
-                    // projection-to-publication interval.
-                    if let Some(syntax) = syntax {
-                        let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
-                        self.queue_diagnostics(uri, diagnostics);
-                    }
-                });
+                workspace.handle().refresh_require_diagnostics_if_snapshot(
+                    &path,
+                    snapshot,
+                    |view, file| {
+                        let status = workspace.indexing_status.snapshot();
+                        if status.generation != generation
+                            || matches!(
+                                status.phase,
+                                IndexingPhase::Cancelled | IndexingPhase::Failed
+                            )
+                            || !file.kind.contributes_project_diagnostics()
+                            || document.as_ref().is_some_and(|doc| {
+                                !view.file_content_matches(file.id, &doc.content)
+                            })
+                        {
+                            return None;
+                        }
+                        // Project targets can change without changing the
+                        // consumer's source or dependency roots. Resolve
+                        // candidates against the current engine only inside
+                        // the commit.
+                        Some(reresolve_unresolved_require_diagnostics(
+                            &path,
+                            project_root,
+                            &load_paths,
+                            &feature_index,
+                            Some(view),
+                            &candidates,
+                        ))
+                    },
+                    |view| {
+                        // Closed files retain engine facts but receive no
+                        // publication. Enqueueing under the commit's guard
+                        // keeps edits and resolution outside the
+                        // projection-to-publication interval.
+                        if let Some(syntax) = syntax {
+                            let diagnostics = self.compose_diagnostics(view, &uri, syntax);
+                            self.queue_diagnostics(uri, diagnostics);
+                        }
+                    },
+                );
             }
             #[cfg(test)]
             self.indexing
