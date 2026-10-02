@@ -8,6 +8,7 @@ use crate::environment::runtime::version::RubyVersion;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{IndexingRunState, LoadContext};
 use crate::loader::file_processor::FileProcessor;
+use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::sources::gems::IndexerGem;
 use crate::loader::sources::project::IndexerProject;
 use crate::loader::sources::stdlib::IndexerStdlib;
@@ -235,7 +236,7 @@ impl IndexingCoordinator {
         // gems start after the catalog exists so they can share the cooperative
         // partition; only frontier files collected before that need catalog-
         // sensitive replay before this project reports readiness.
-        ctx.sink.clear_jruby_import_provider(&self.workspace_root);
+        ctx.sink.set_jruby_add_on(&self.workspace_root, None);
         self.jruby_import_provider = None;
         self.jruby_runtime_archive = None;
         self.setup_file_processor(ctx);
@@ -395,9 +396,9 @@ impl IndexingCoordinator {
 
         self.jruby_import_provider = provider;
         self.jruby_runtime_archive = runtime_archive;
-        ctx.sink.install_jruby_import_provider(
+        ctx.sink.set_jruby_add_on(
             &self.workspace_root,
-            self.jruby_import_provider.clone(),
+            self.jruby_import_provider.clone().map(JrubyAddOn::new),
         );
         self.setup_file_processor(ctx);
 

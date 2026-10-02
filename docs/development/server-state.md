@@ -88,7 +88,7 @@ they are not counts of allocations or independent copies of state.
 | `OpenDocuments` | 2 | Buffer map and weak per-document semantic locks. |
 | `ProjectRegistry` | 3 | Projects, orphan engine, external-document provenance. |
 | `Workspace` | 9 | Root URI/path, indexing status, engine, runtime, extension context, navigation demand, require resolution, owning editor folders. |
-| `ProjectRuntimeState` | 4 | Selected runtime, Ruby version, classpath fingerprint, JRuby import provider. |
+| `ProjectRuntimeState` | 3 | Selected runtime, Ruby version, JRuby add-on (`loader::jruby_add_on::JrubyAddOn`; the classpath fingerprint is read from it). |
 | `DependencyRequireState` | 2 | Require roots and their feature index. |
 | `IndexingServices` | 3 | Scheduler, resource governor, status publisher. |
 | `IndexingStatusPublisher` | 4 | Sequence, publication state, worker wakeup, runtime handle. |

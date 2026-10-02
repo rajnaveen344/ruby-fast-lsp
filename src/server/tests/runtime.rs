@@ -8,6 +8,7 @@ use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::{
     DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeSupportStatus,
 };
+use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingSingleFlightReuseSnapshot};
 use crate::server::{RubyLanguageServer, RuntimeStatusParams};
 use tower_lsp::lsp_types::Url;
@@ -92,7 +93,10 @@ async fn runtime_status_reports_server_owned_project_identity_and_classpath() {
         },
         ..RubyFastLspConfig::default()
     };
-    language_server.set_runtime_classpath_fingerprint(&admin, Some("a".repeat(64)));
+    language_server.set_jruby_add_on(
+        &admin,
+        Some(JrubyAddOn::for_classpath_fingerprint("a".repeat(64))),
+    );
     let generation = admin_workspace
         .indexing_status
         .begin_generation()

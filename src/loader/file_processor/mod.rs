@@ -20,6 +20,7 @@ use crate::environment::runtime::jruby::imports::{
 };
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
+use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::require_paths::RequireFeatureIndex;
 use anyhow::Result;
 pub(crate) use collection::commit_extension_seed;
@@ -189,6 +190,11 @@ impl FileProcessor {
 
     pub(crate) fn set_require_feature_index(&mut self, index: Arc<RequireFeatureIndex>) {
         self.require_feature_index = index;
+    }
+
+    /// Collect catalog-sensitive JRuby facts through the project's add-on.
+    pub(crate) fn with_jruby_add_on(self, add_on: &JrubyAddOn) -> Self {
+        self.with_jruby_import_provider(add_on.import_provider().clone())
     }
 
     pub(crate) fn jruby_import_provider(&self) -> Option<&Arc<JrubyImportProvider>> {

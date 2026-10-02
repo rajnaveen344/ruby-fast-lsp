@@ -12,11 +12,11 @@ use crate::environment::extensions::{
     ExtensionRegistryHandle, ExtensionSemanticSeed, ProjectContextSeed, ProjectContextSnapshot,
 };
 use crate::environment::runtime::catalog::DiscoveredRuntime;
-use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
     GemBindingStat, GemDependencyProduct, GemDependencyProductKey,
 };
+use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
@@ -385,16 +385,10 @@ pub(crate) trait LoadSink: Send + Sync {
         engine: &Arc<RwLock<AnalysisEngine>>,
         run: Option<&IndexingRun>,
     ) -> IndexingRunState;
-    /// Withdraw the JRuby classpath fingerprint and import provider of the
-    /// project at `root`, in that order, before a new run builds them.
-    fn clear_jruby_import_provider(&self, root: &Path);
-    /// Install the JRuby import provider of the project at `root`, then its
-    /// classpath fingerprint; `None` records a run without a provider.
-    fn install_jruby_import_provider(
-        &self,
-        root: &Path,
-        provider: Option<Arc<JrubyImportProvider>>,
-    );
+    /// Replace the JRuby add-on of the project at `root` in one write. A run
+    /// withdraws it (`None`) before building a new one and then installs the
+    /// result, which is `None` when the project's runtime is not JRuby.
+    fn set_jruby_add_on(&self, root: &Path, add_on: Option<JrubyAddOn>);
     /// Deterministic interleaving points for tests.
     #[cfg(test)]
     fn test_schedule(&self) -> Arc<crate::loader::scheduling::test_schedule::TestSchedule>;

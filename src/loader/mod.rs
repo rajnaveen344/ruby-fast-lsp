@@ -18,11 +18,13 @@
 //! - **`require_paths`**: Require-path resolution and unresolved-require diagnostics
 //! - **`scheduling`**: The indexing queue and progress status
 //! - **`cache`**: Persisted dependency products and their producer identity
+//! - **`jruby_add_on`**: The per-project JRuby add-on the owner holds
 
 pub mod cache;
 pub mod context;
 pub mod coordinator;
 pub mod file_processor;
+pub mod jruby_add_on;
 pub mod require_paths;
 pub mod scheduling;
 pub mod sources;

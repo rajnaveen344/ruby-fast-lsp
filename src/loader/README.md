@@ -18,6 +18,10 @@ reference candidates, resolved references, and diagnostics.
   (live configuration, published require roots, shared products, the
   resource governor, runtime discovery, and open buffers through
   `SourceReader`), and `LoadSink`, the owner operations it performs
+- `jruby_add_on.rs`: `JrubyAddOn`, the per-project JRuby add-on the owner
+  holds. The owner sees only its classpath fingerprint and hands it back
+  through `FileProcessor::with_jruby_add_on`; the import provider behind it is
+  visible only inside the loader
 - `file_processor/`: parse one file and run `FactCollector`, merge collected
   facts, and convert extension-produced facts; `syntax_diagnostics.rs` there
   produces parser syntax, unreachable-code, and inconsistent-return
@@ -62,7 +66,8 @@ discovery, and open buffers only through this context.
 `src/server/projects/load_sink.rs`. Every write and owner lookup the loader
 makes goes through it as one domain operation: engine and project routing,
 indexing run checks and phase transitions, progress, runtime, Ruby version,
-and JRuby provider selection, source registration, processed-document marks,
+and the JRuby add-on (`set_jruby_add_on`, one write that replaces
+provider and classpath fingerprint together), source registration, processed-document marks,
 require-root publication and require-diagnostic refresh, navigation demand
 queues, inlay-hint refresh, and extension registry and context. The loader
 calls them in its own order, so the owner observes the load's write sequence.

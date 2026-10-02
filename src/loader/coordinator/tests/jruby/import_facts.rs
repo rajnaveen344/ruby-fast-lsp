@@ -454,7 +454,13 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
                 .expect("fixture JRuby provider must exist"),
         )
         .unwrap();
-    server.set_jruby_import_provider(&root, coordinator.jruby_import_provider.clone());
+    server.set_jruby_add_on(
+        &root,
+        coordinator
+            .jruby_import_provider
+            .clone()
+            .map(crate::loader::jruby_add_on::JrubyAddOn::new),
+    );
 
     let source_path = root.join("imports.rb");
     let uri = Url::from_file_path(&source_path).unwrap();

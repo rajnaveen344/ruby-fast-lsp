@@ -244,11 +244,7 @@ impl RubyLanguageServer {
                     executable,
                     java_home,
                     stub_overlay,
-                    classpath_fingerprint_sha256: workspace
-                        .runtime
-                        .classpath_fingerprint()
-                        .read()
-                        .clone(),
+                    classpath_fingerprint_sha256: workspace.runtime.classpath_fingerprint(),
                     indexing_complete: workspace.indexing_status.snapshot().is_ready(),
                     indexing: workspace.indexing_status.snapshot(),
                 }

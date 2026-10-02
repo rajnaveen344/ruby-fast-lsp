@@ -158,7 +158,7 @@ pub(crate) fn indexing_summary_json(
             "root": workspace.root_path,
             "runtime": workspace.runtime.selected().read().clone(),
             "detected_ruby_version": workspace.runtime.ruby_version().read().clone(),
-            "runtime_classpath_fingerprint_sha256": workspace.runtime.classpath_fingerprint().read().clone(),
+            "runtime_classpath_fingerprint_sha256": workspace.runtime.classpath_fingerprint(),
             "project_files": project_sources.len(),
             "project_source_bytes": project_source_bytes,
             "project_source_fingerprint_sha256": format!("{:x}", source_fingerprint.finalize()),

@@ -279,8 +279,10 @@ loaded extension implements that response surface. The server owns this one
 configured registry; project coordinators adopt it instead of independently
 reading and activating identical packages.
 
-Each isolated project also retains the exact JRuby import provider produced by
-its coordinator. Interactive document processing selects that provider through
+Each isolated project also retains the exact JRuby add-on (`JrubyAddOn`, an
+opaque handle over the import provider) produced by its coordinator; the server
+reads only its classpath fingerprint. Interactive document processing selects
+that add-on through
 the same longest-root/external-provenance ownership rules as the analysis
 engine. Lazy Java signatures, verified source materialization, and bounded
 decompiler work triggered by didOpen/didChange/didSave therefore remain inside

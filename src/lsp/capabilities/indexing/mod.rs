@@ -28,8 +28,8 @@ enum DocumentSemanticMode {
 fn interactive_file_processor(server: &RubyLanguageServer, uri: &Url) -> FileProcessor {
     let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     server
-        .jruby_import_provider_for_uri(uri)
-        .map(|provider| processor.clone().with_jruby_import_provider(provider))
+        .jruby_add_on_for_uri(uri)
+        .map(|add_on| processor.clone().with_jruby_add_on(&add_on))
         .unwrap_or(processor)
 }
 

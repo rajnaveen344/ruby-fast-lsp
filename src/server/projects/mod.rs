@@ -3,11 +3,11 @@ use super::RubyLanguageServer;
 mod load_sink;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
-use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{
     LoadConfig, LoadContext, LoadSink, PublishedRequires, RequireContext, SourceReader,
 };
+use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingRun, ProjectIndexingStatus};
 use parking_lot::RwLock;
@@ -39,8 +39,7 @@ fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
 pub struct ProjectRuntimeState {
     selected: Arc<RwLock<Option<SelectedRuntimeDescriptor>>>,
     ruby_version: Arc<RwLock<Option<String>>>,
-    classpath_fingerprint: Arc<RwLock<Option<String>>>,
-    imports: Arc<RwLock<Option<Arc<JrubyImportProvider>>>>,
+    jruby: Arc<RwLock<Option<JrubyAddOn>>>,
 }
 impl ProjectRuntimeState {
     pub fn selected(&self) -> &RwLock<Option<SelectedRuntimeDescriptor>> {
@@ -49,11 +48,15 @@ impl ProjectRuntimeState {
     pub fn ruby_version(&self) -> &RwLock<Option<String>> {
         &self.ruby_version
     }
-    pub fn classpath_fingerprint(&self) -> &RwLock<Option<String>> {
-        &self.classpath_fingerprint
+    /// The classpath fingerprint of the project's JRuby add-on, if any.
+    pub fn classpath_fingerprint(&self) -> Option<String> {
+        self.jruby
+            .read()
+            .as_ref()
+            .map(|add_on| add_on.classpath_fingerprint().to_string())
     }
-    pub(crate) fn imports(&self) -> &RwLock<Option<Arc<JrubyImportProvider>>> {
-        &self.imports
+    pub(crate) fn jruby_add_on(&self) -> &RwLock<Option<JrubyAddOn>> {
+        &self.jruby
     }
 }
 
@@ -319,42 +322,20 @@ impl RubyLanguageServer {
         }
     }
 
-    pub(crate) fn set_runtime_classpath_fingerprint(
-        &self,
-        root: &PathBuf,
-        fingerprint: Option<String>,
-    ) {
-        if let Some(workspace) = self
-            .projects
-            .read()
-            .iter()
-            .find(|workspace| &workspace.root_path == root)
-        {
-            *workspace.runtime.classpath_fingerprint().write() = fingerprint;
-        }
-    }
-
-    pub(crate) fn set_jruby_import_provider(
-        &self,
-        root: &Path,
-        provider: Option<Arc<JrubyImportProvider>>,
-    ) {
+    pub(crate) fn set_jruby_add_on(&self, root: &Path, add_on: Option<JrubyAddOn>) {
         if let Some(workspace) = self
             .projects
             .read()
             .iter()
             .find(|workspace| workspace.root_path == root)
         {
-            *workspace.runtime.imports().write() = provider;
+            *workspace.runtime.jruby_add_on().write() = add_on;
         }
     }
 
-    pub(crate) fn jruby_import_provider_for_uri(
-        &self,
-        uri: &Url,
-    ) -> Option<Arc<JrubyImportProvider>> {
+    pub(crate) fn jruby_add_on_for_uri(&self, uri: &Url) -> Option<JrubyAddOn> {
         self.analysis_workspace_for_uri(uri)
-            .and_then(|workspace| workspace.runtime.imports().read().clone())
+            .and_then(|workspace| workspace.runtime.jruby_add_on().read().clone())
     }
 
     pub(crate) fn set_effective_runtime(

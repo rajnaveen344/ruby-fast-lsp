@@ -575,8 +575,7 @@ async fn rebuild_runtime_owned_project_state(
         })
         .collect::<Vec<_>>();
     server.release_external_documents_for_project(&workspace.root_uri);
-    server.set_jruby_import_provider(&workspace.root_path, None);
-    server.set_runtime_classpath_fingerprint(&workspace.root_path, None);
+    server.set_jruby_add_on(&workspace.root_path, None);
     server.set_effective_runtime(&workspace.root_path, None);
     server.set_extension_project_ruby_version(&workspace.root_path, None);
     *workspace.analysis_engine.write() = ruby_analysis::engine::AnalysisEngine::new();

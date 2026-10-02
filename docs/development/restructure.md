@@ -419,7 +419,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `loader/cache/producer_identity_tests.rs` fails when a listed
         producer calls a workspace crate whose tree is not listed. Expect one
         cold gem reindex.
-  - [ ] C6b. One add-on value. The server holds `Option<JrubyAddOn>` per
+  - [x] C6b. One add-on value. The server holds `Option<JrubyAddOn>` per
         project instead of an import provider and a separate classpath
         fingerprint lock, and the loader hands it over through one
         `LoadSink` write:
