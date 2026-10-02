@@ -30,7 +30,7 @@ impl FactCollector {
         let superclass = node.superclass().and_then(|superclass| {
             let reference = mixin_ref_from_node(&superclass)?;
             let super_range = self.direct_range(&superclass.location());
-            let target = self.direct_resolve_namespace_from(
+            let target = self.declared_resolve_namespace_from(
                 &reference.parts,
                 reference.absolute,
                 &lexical_context,

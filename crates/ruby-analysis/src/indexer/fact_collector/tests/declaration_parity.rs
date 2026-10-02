@@ -15,8 +15,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use url::Url;
 
-/// Both walks' declarations for `source`, seed first. The collector sees only
-/// the core namespaces, as it does for a dependency file.
+/// Both walks' declarations for `source`, seed first. Both start from the
+/// core namespaces, and the collector also sees every namespace the seed
+/// declares in the file, as the loader wires it once the seed has run.
 fn walk_declarations(source: &str) -> (BTreeSet<String>, BTreeSet<String>) {
     let path = PathBuf::from("/workspace/lib/parity.rb");
     let mut engine = Project::new();
@@ -35,6 +36,7 @@ fn walk_declarations(source: &str) -> (BTreeSet<String>, BTreeSet<String>) {
         FactCollector::analysis_only(document, Arc::new(NullFactCollectorExtensionHost), engine)
             .without_body_inference()
             .with_shared_direct_known_namespaces(Arc::new(known));
+    collector.extend_direct_known_namespaces(seed.graph_nodes.iter().map(|fact| fact.fqn.clone()));
     collector.visit(&ruby_prism::parse(source.as_bytes()).node());
     let collected = collector.finish().analysis;
     (declarations(&seed), declarations(&collected))
@@ -230,6 +232,73 @@ fn self_receiver_def_needs_a_class_object_self() {
         !seed
             .iter()
             .any(|declaration| declaration.contains("#meta") || declaration.contains("#solo")),
+        "{seed:#?}"
+    );
+}
+
+#[test]
+fn class_body_edges_bind_namespaces_declared_so_far() {
+    // Ruby evaluates a superclass and a mixin argument when the class body
+    // runs, so `Error` binds the `Shapes::Error` declared above it, not the
+    // `Shapes::Inner::Error` declared below it. `Later` is not yet defined,
+    // so the include stays an unresolved lexical reference.
+    let source = "module Shapes\n  class Error < StandardError; end\n  module Inner\n    \
+                  class Err < Error\n      include Later\n    end\n    \
+                  class Error < StandardError; end\n    module Later; end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "edge Shapes::Inner::Err Superclass Shapes::Error",
+            "unresolved Shapes::Inner::Err Include Later in Shapes::Inner::Err",
+        ],
+    );
+}
+
+#[test]
+fn declaration_calls_in_blocks_act_on_the_definition_owner() {
+    // A receiverless declaration call in an ordinary block lands where a
+    // `def` in that block lands. In an include hook that is the hook's
+    // module, which models `klass.class_eval { include Sized }` as giving
+    // every includer `Sized`, as the hook does at run time.
+    let source = "module Shapes\n  module Sized; end\n  module Marker\n    \
+                  def self.append_features(klass)\n      super\n      \
+                  klass.class_eval do\n        include(Sized)\n      end\n    end\n  \
+                  end\n  class Holder\n    configure do\n      attr_reader :size\n    \
+                  end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "edge Shapes::Marker Include Shapes::Sized",
+            "method Shapes::Holder#size on Shapes::Holder Some(Instance)",
+        ],
+    );
+}
+
+#[test]
+fn dynamic_definitions_need_a_class_object_self() {
+    // `define_method` and `define_singleton_method` are sent to `self`. In a
+    // singleton method body `self` is the class, so both define on it. In
+    // `initialize`, which the index records as `new`, `self` is still an
+    // instance, and an eval block on an unknown receiver proves nothing, so
+    // neither `hidden` nor `solo` lands on the class.
+    let source = "module Shapes\n  class Base\n    def self.build\n      \
+                  define_singleton_method(:made) { 1 }\n      define_method(:shaped) { 1 }\n    \
+                  end\n    def initialize(target)\n      target.singleton_class.class_eval do\n        \
+                  private\n        define_method(:hidden) { 1 }\n      end\n      \
+                  define_singleton_method(:solo) { 1 }\n    end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "method Shapes::Base#made on #<Class:Shapes::Base> Some(Singleton)",
+            "method Shapes::Base#shaped on Shapes::Base Some(Instance)",
+            "method Shapes::Base#new on #<Class:Shapes::Base>",
+        ],
+    );
+    let (seed, _) = walk_declarations(source);
+    assert!(
+        !seed
+            .iter()
+            .any(|declaration| declaration.contains("#hidden") || declaration.contains("#solo")),
         "{seed:#?}"
     );
 }

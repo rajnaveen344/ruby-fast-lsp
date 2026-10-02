@@ -8,7 +8,7 @@ use crate::core::{
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{
-    visit_alias_method_node, visit_call_node, visit_class_node,
+    visit_alias_method_node, visit_block_node, visit_call_node, visit_class_node,
     visit_class_variable_and_write_node, visit_class_variable_operator_write_node,
     visit_class_variable_or_write_node, visit_class_variable_target_node,
     visit_class_variable_write_node, visit_constant_path_target_node,
@@ -21,7 +21,7 @@ use ruby_prism::{
     visit_local_variable_and_write_node, visit_local_variable_operator_write_node,
     visit_local_variable_or_write_node, visit_local_variable_target_node,
     visit_local_variable_write_node, visit_module_node, visit_singleton_class_node,
-    AliasMethodNode, CallNode, ClassNode, ClassVariableAndWriteNode,
+    AliasMethodNode, BlockNode, CallNode, ClassNode, ClassVariableAndWriteNode,
     ClassVariableOperatorWriteNode, ClassVariableOrWriteNode, ClassVariableTargetNode,
     ClassVariableWriteNode, ConstantPathTargetNode, ConstantPathWriteNode, ConstantTargetNode,
     ConstantWriteNode, DefNode, GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode,
@@ -44,6 +44,29 @@ use crate::indexer::documents::scope_rules::{
 };
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
+use crate::indexer::{is_framework_instance_block_call_name, LocalScopeKind};
+
+impl AnalysisIndexer {
+    /// Visit a call's receiver, arguments, and block. A receiverless
+    /// framework block such as `included do … end` runs on the class.
+    fn visit_call_children(&mut self, node: &CallNode<'_>) {
+        if node.receiver().is_some()
+            || !is_framework_instance_block_call_name(node.name().as_slice())
+        {
+            visit_call_node(self, node);
+            return;
+        }
+        if let Some(arguments) = node.arguments() {
+            self.visit_arguments_node(&arguments);
+        }
+        if let Some(block) = node.block() {
+            self.scope
+                .push_scope_kind(LocalScopeKind::FrameworkInstanceBlock);
+            self.visit(&block);
+            self.scope.pop_scope_kind();
+        }
+    }
+}
 
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
@@ -131,7 +154,9 @@ impl Visit<'_> for AnalysisIndexer {
             );
         }
 
+        self.scope.push_scope_kind(LocalScopeKind::Constant);
         visit_class_node(self, node);
+        self.scope.pop_scope_kind();
         self.scope.pop_ns_scope();
     }
 
@@ -160,7 +185,9 @@ impl Visit<'_> for AnalysisIndexer {
             self.push_namespace_facts(fqn, GraphNodeKind::Module, range, name_range);
         }
 
+        self.scope.push_scope_kind(LocalScopeKind::Constant);
         visit_module_node(self, node);
+        self.scope.pop_scope_kind();
         self.scope.pop_ns_scope();
     }
 
@@ -201,6 +228,9 @@ impl Visit<'_> for AnalysisIndexer {
                 .map(|fact| fact.kind),
             || None,
         );
+        // `self` in the body follows the receiver, even where the declaration
+        // moves to another side, as `initialize` becomes the singleton `new`.
+        let body_kind = owner_kind;
         let MethodDeclaration {
             method,
             kind: owner_kind,
@@ -305,16 +335,21 @@ impl Visit<'_> for AnalysisIndexer {
 
         // `self` in the body is the receiver; a nested definition still
         // lands in the enclosing owner.
+        self.scope.push_scope_kind(match body_kind {
+            NamespaceKind::Singleton => LocalScopeKind::ClassMethod,
+            NamespaceKind::Instance => LocalScopeKind::InstanceMethod,
+        });
         self.scope.push_method_fqn(fqn, owner_kind);
         self.scope.push_method_execution_context(
             owner_namespace,
-            owner_kind,
+            body_kind,
             definition_namespace,
             definition_kind,
         );
         visit_def_node(self, node);
         self.scope.pop_execution_context();
         self.scope.pop_method_fqn();
+        self.scope.pop_scope_kind();
     }
 
     fn visit_alias_method_node(&mut self, node: &AliasMethodNode<'_>) {
@@ -512,7 +547,13 @@ impl Visit<'_> for AnalysisIndexer {
             self.push_receiver_define_singleton_method_fact(node);
         }
 
-        visit_call_node(self, node);
+        self.visit_call_children(node);
+    }
+
+    fn visit_block_node(&mut self, node: &BlockNode<'_>) {
+        self.scope.push_scope_kind(LocalScopeKind::Block);
+        visit_block_node(self, node);
+        self.scope.pop_scope_kind();
     }
 
     fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'_>) {

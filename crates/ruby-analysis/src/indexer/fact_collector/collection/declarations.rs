@@ -106,6 +106,19 @@ impl FactCollector {
         })
     }
 
+    /// The namespace a declaration-time reference (superclass, mixin) binds
+    /// when the class body runs: only namespaces declared so far.
+    pub fn declared_resolve_namespace_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
+            self.direct_namespace_is_declared(fqn)
+        })
+    }
+
     pub fn namespace_is_known(&self, fqn: &FullyQualifiedName) -> bool {
         if self.direct_namespace_is_known(fqn) {
             return true;
@@ -164,13 +177,15 @@ impl FactCollector {
         provenance: GraphEdgeProvenance,
         range: TextRange,
     ) {
-        let Some(target) = self.direct_resolve_namespace(parts, absolute) else {
+        let lexical_context = self.scope_tracker.get_ns_stack();
+        let Some(target) = self.declared_resolve_namespace_from(parts, absolute, &lexical_context)
+        else {
             self.facts.analysis.unresolved_graph_edges.push(
                 UnresolvedGraphEdgeFact::new(
                     source,
                     parts.to_vec(),
                     absolute,
-                    FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack()),
+                    FullyQualifiedName::namespace(lexical_context),
                     kind,
                     range,
                 )

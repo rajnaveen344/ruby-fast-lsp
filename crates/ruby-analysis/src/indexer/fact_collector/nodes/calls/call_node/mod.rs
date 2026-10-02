@@ -15,13 +15,6 @@ use ruby_prism::CallNode;
 
 use crate::indexer::fact_collector::FactCollector;
 
-fn is_visibility_call(node: &CallNode) -> bool {
-    matches!(
-        node.name().as_slice(),
-        b"private" | b"protected" | b"public" | b"module_function"
-    )
-}
-
 impl FactCollector {
     pub(in crate::indexer::fact_collector) fn process_call_node_entry(&mut self, node: &CallNode) {
         let extension_host = self.extensions.host.clone();
@@ -59,16 +52,9 @@ impl FactCollector {
     }
 
     fn process_direct_call_facts(&mut self, node: &CallNode) -> bool {
-        // Visibility calls act on the definition owner that a receiverless
-        // `def` in the same block lands on, so they follow that owner even
-        // where the block's `self` is unproven.
-        if node.receiver().is_none()
-            && !self.scope_tracker.implicit_receiver_context_is_proven()
-            && !is_visibility_call(node)
-        {
-            return false;
-        }
-
+        // A receiverless declaration call in an ordinary block acts on the
+        // block's definition owner, as a `def` there does, whether or not the
+        // block's `self` is proven; the seed walk applies the same rule.
         self.push_direct_included_hook_mixin_edges(node);
 
         if node.receiver().is_some() && node.name().as_slice() == b"class_attribute" {

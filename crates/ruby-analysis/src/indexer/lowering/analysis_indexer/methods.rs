@@ -15,6 +15,7 @@ use super::syntax::{
     symbol_name_and_range,
 };
 use super::AnalysisIndexer;
+use crate::indexer::documents::scope_rules::implicit_singleton_namespace;
 
 impl AnalysisIndexer {
     fn push_method_fact(
@@ -288,6 +289,9 @@ impl AnalysisIndexer {
         }
     }
 
+    /// `define_method` and `define_singleton_method` are calls on `self`, so
+    /// they define only where `self` is a class or module object; the
+    /// collector applies the same rule.
     pub(super) fn push_define_method_fact(&mut self, node: &CallNode<'_>) {
         let Some((name, range)) = define_method_name_and_range(node, self.file_id, 0) else {
             return;
@@ -295,34 +299,22 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        if self.owner_namespace().is_empty() {
+        let Some(namespace) = implicit_singleton_namespace(&self.scope) else {
             return;
-        }
-        let owner_kind = if self.scope.block_execution_context_active() {
-            NamespaceKind::Instance
-        } else if self.owner_kind() == NamespaceKind::Singleton {
+        };
+        let owner_kind = if !self.scope.execution_context_active() && self.scope.in_singleton() {
             NamespaceKind::Singleton
-        } else if let Some((_method, method_kind)) = self.scope.current_method() {
-            if method_kind == NamespaceKind::Instance {
-                return;
-            }
-            NamespaceKind::Instance
         } else {
             NamespaceKind::Instance
         };
-        self.push_method_fact_without_parameter_shape(
-            self.owner_namespace(),
-            owner_kind,
-            method,
-            range,
-        );
+        self.push_method_fact_without_parameter_shape(namespace, owner_kind, method, range);
     }
 
     pub(super) fn push_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
-        if self.owner_namespace().is_empty() || self.scope.current_method().is_some() {
+        let Some(namespace) = implicit_singleton_namespace(&self.scope) else {
             return;
-        }
-        self.push_define_singleton_method_for_namespace(node, self.owner_namespace());
+        };
+        self.push_define_singleton_method_for_namespace(node, namespace);
     }
 
     pub(super) fn push_receiver_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
