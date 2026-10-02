@@ -2,6 +2,6 @@
 //! extension-generated facts, and multi-workspace routing.
 
 mod erb;
-mod extensions;
+mod rspec;
 // Multi-workspace routing
 mod workspaces;

@@ -643,6 +643,50 @@ Delete this file when the last task is done. Git history keeps the record.
           that locks `rspec-core` 3.x, and assert identical observations.
           Record each divergence below and fix bugs in the owning
           implementation, preferring the package.
+      - Done: the cases moved from `sources/extensions.rs` into
+        `src/test/integration/sources/rspec/`. Each runs in a project that
+        locks `rspec-core` 3.x, takes the implementation as a parameter, and
+        returns a transcript of every definition, reference, rename, and
+        diagnostic it observed, with project-relative paths. `semantic` runs
+        them through the native fallback.
+      - Comparing both implementations on all 24 cases found two divergences;
+        the other 22 transcripts were identical.
+        1. `extension_requires_resolved_rspec_constant`: with the package,
+           `RSpec.describe` on an undefined `RSpec` also reported
+           "Unresolved method `describe` on `RSpec`". Engine bug: the
+           package's semantic seed adds `RSpec.describe` method facts, and
+           diagnostics counted an owner with only method facts as existing,
+           while method lookup answered Unknown for it. Fixed in the engine;
+           owner existence for absence claims now needs a graph node or
+           constant fact, as lookup does
+           (`method_facts_alone_do_not_prove_a_missing_method_on_their_owner`).
+        2. `bang_subject_defines_subject_helper_method`: with the package,
+           goto definition on a bare `subject` also returned the call site.
+           Not a source divergence: `extension.rb` already treats a bare
+           `subject` as a read (aca148c1), but the checked-in
+           `rspec-ruby.wasm` predates that change and was never rebuilt.
+      - Intended difference, kept as `package_requires_locked_rspec_core`:
+        in a project without a lockfile the native fallback still resolves
+        a `let` helper and the package does not.
+      - Blocked: rebuilding the Wasm needs the mruby/wasi-sdk toolchain,
+        either the Docker builder (`extensions/mruby-sdk/scripts/build-wasm-docker.sh
+        extensions/rspec-ruby`, which downloads Debian, wasi-sdk 33, and
+        mruby 4.0.0) or a local `MRUBY_ROOT` and `WASI_SDK_PATH`. Neither is
+        installed here and the Docker daemon is not running. Every later
+        step depends on it: shipping the stale package in npm (C7d2) would
+        bring back the bare-`subject` bug for projects that lock
+        `rspec-core` 3.x, and so would porting the cases (C7d3) or deleting
+        the fallback (C7d4).
+        Options: (a) rebuild with the Docker builder, update
+        `checksum_sha256` in `extension.toml`, and copy the package into
+        `editors/vscode/vsix/extensions/rspec-ruby`; (b) install wasi-sdk
+        and build mruby locally, then the same; (c) teach the host to skip
+        bare `subject` calls, which duplicates package policy in the host.
+        Recommendation: (a), then add the `parity` module back (each case
+        run through `Rspec::NativeFallback` and `Rspec::Package` with
+        `assert_eq!` on the transcripts), confirm all 24 match, and continue
+        with C7d2. A packaging test that compares the Wasm against a build of
+        `extension.rb` would stop the artifact going stale again.
     - [ ] C7d2. Ship the RSpec package in the npm platform packages and have
           the server load packages bundled next to its executable by
           default, at the lowest priority, so a configured package with the
