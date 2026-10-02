@@ -2,5 +2,6 @@
 
 // Domain-specific (YARD type annotations)
 mod constants;
+mod declarations;
 mod inference;
 mod mixins;

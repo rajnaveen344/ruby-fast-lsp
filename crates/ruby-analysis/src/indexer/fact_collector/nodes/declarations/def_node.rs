@@ -1,8 +1,9 @@
 use crate::core::{
-    ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind, GraphNodeKind,
+    ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind,
     MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, NamespaceKind,
     RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
+use crate::indexer::documents::scope_rules::{method_declaration, namespace_is_proven_class};
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
 use log::warn;
@@ -74,34 +75,25 @@ impl FactCollector {
             return false;
         }
 
-        let mut method = RubyMethod::new(method_name_str.as_ref()).unwrap();
-        let mut actual_namespace_kind = namespace_kind;
+        let source_method = RubyMethod::new(method_name_str.as_ref()).unwrap();
         let definition_fqn = FullyQualifiedName::namespace(definition_namespace.clone());
-        let direct_definition_kinds = self
-            .facts
-            .analysis
-            .graph_nodes
-            .iter()
-            .filter(|fact| fact.fqn == definition_fqn)
-            .map(|fact| fact.kind)
-            .collect::<Vec<_>>();
-        let definition_is_proven_class = if direct_definition_kinds.is_empty() {
-            self.semantics.project.namespace_node_kind(&definition_fqn)
-                == Some(GraphNodeKind::Class)
-        } else {
-            direct_definition_kinds
+        let definition_is_proven_class = namespace_is_proven_class(
+            self.facts
+                .analysis
+                .graph_nodes
                 .iter()
-                .all(|kind| *kind == GraphNodeKind::Class)
-        };
-        let is_constructor = method.as_str() == "initialize"
-            && node.receiver().is_none()
-            && namespace_kind == NamespaceKind::Instance
-            && definition_is_proven_class;
-
-        if is_constructor {
-            method = RubyMethod::new("new").unwrap();
-            actual_namespace_kind = NamespaceKind::Singleton;
-        }
+                .filter(|fact| fact.fqn == definition_fqn)
+                .map(|fact| fact.kind),
+            || self.semantics.project.namespace_node_kind(&definition_fqn),
+        );
+        let (method, actual_namespace_kind, visibility) = method_declaration(
+            source_method,
+            node.receiver().is_none(),
+            namespace_kind,
+            definition_is_proven_class,
+            self.scope_tracker.current_visibility(),
+        );
+        let is_constructor = method != source_method;
 
         let name_location = node.name_loc();
         // Use full method body range (def to end) for entry.location, consistent with class/module
@@ -185,6 +177,7 @@ impl FactCollector {
                 .as_ref()
                 .and_then(YardMethodDoc::format_return_type),
             availability.clone(),
+            visibility,
         );
         if node.receiver().is_none()
             && actual_namespace_kind == NamespaceKind::Instance
@@ -214,6 +207,7 @@ impl FactCollector {
                     .as_ref()
                     .and_then(YardMethodDoc::format_return_type),
                 availability,
+                self.scope_tracker.current_visibility(),
             );
         }
 

@@ -335,6 +335,7 @@ impl FactCollector {
             documentation,
             return_type_label,
             crate::core::MethodAvailability::Available,
+            self.scope_tracker.current_visibility(),
         );
     }
 
@@ -349,6 +350,7 @@ impl FactCollector {
         documentation: Option<String>,
         return_type_label: Option<String>,
         availability: crate::core::MethodAvailability,
+        visibility: MethodVisibility,
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
@@ -360,7 +362,7 @@ impl FactCollector {
                 .with_name_range(name_range)
                 .with_signature_metadata(documentation, return_type_label)
                 .with_availability(availability)
-                .with_visibility(self.scope_tracker.current_visibility()),
+                .with_visibility(visibility),
         );
     }
 

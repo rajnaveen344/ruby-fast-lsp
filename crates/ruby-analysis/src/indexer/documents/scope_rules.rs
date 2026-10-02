@@ -3,7 +3,10 @@
 //! opens. Walks differ only in which namespaces they know, so each rule takes
 //! that knowledge as a predicate or receiver resolver.
 
-use crate::core::{FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant, RubyType};
+use crate::core::{
+    FullyQualifiedName, GraphNodeKind, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod,
+    RubyType,
+};
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
@@ -292,6 +295,63 @@ pub fn class_methods_block(
         definition_namespace: target,
         definition_kind: NamespaceKind::Instance,
     })
+}
+
+/// What a `def` of `method` declares on the `kind` side of its owner.
+///
+/// A receiverless `initialize` on the instance side of a proven class is the
+/// class's constructor, recorded as public singleton `new`. A module has no
+/// `new`, so its `initialize` stays an instance method. Ruby makes
+/// `initialize`, `initialize_copy`, `initialize_clone`, `initialize_dup`, and
+/// `respond_to_missing?` private on any non-singleton owner, whatever the
+/// current default visibility.
+pub fn method_declaration(
+    method: RubyMethod,
+    receiverless: bool,
+    kind: NamespaceKind,
+    proven_class: bool,
+    visibility: MethodVisibility,
+) -> (RubyMethod, NamespaceKind, MethodVisibility) {
+    if kind == NamespaceKind::Singleton {
+        return (method, kind, visibility);
+    }
+    let name = method.as_str();
+    if name == "initialize" && receiverless && proven_class {
+        let new = RubyMethod::new("new").expect_invariant(
+            "`new` must be a valid Ruby method name",
+            "constructor normalization relies on RubyMethod validation",
+            "update RubyMethod validation to accept `new`",
+        );
+        return (new, NamespaceKind::Singleton, MethodVisibility::Public);
+    }
+    let always_private = matches!(
+        name,
+        "initialize"
+            | "initialize_copy"
+            | "initialize_clone"
+            | "initialize_dup"
+            | "respond_to_missing?"
+    );
+    if always_private {
+        return (method, kind, MethodVisibility::Private);
+    }
+    (method, kind, visibility)
+}
+
+/// Whether every same-file declaration of a namespace is a class. With no
+/// same-file declaration, `known_kind` is the walk's project knowledge.
+pub fn namespace_is_proven_class(
+    same_file_kinds: impl IntoIterator<Item = GraphNodeKind>,
+    known_kind: impl FnOnce() -> Option<GraphNodeKind>,
+) -> bool {
+    let mut declared = false;
+    for kind in same_file_kinds {
+        if kind != GraphNodeKind::Class {
+            return false;
+        }
+        declared = true;
+    }
+    declared || known_kind() == Some(GraphNodeKind::Class)
 }
 
 /// The text of a symbol or string literal.

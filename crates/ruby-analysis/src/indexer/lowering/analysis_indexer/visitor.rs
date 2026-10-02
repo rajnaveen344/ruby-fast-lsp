@@ -37,7 +37,9 @@ use super::syntax::{
 };
 use super::types::{literal_type, method_body_literal_type};
 use super::AnalysisIndexer;
-use crate::indexer::documents::scope_rules::{alias_reopen_target, eval_block};
+use crate::indexer::documents::scope_rules::{
+    alias_reopen_target, eval_block, method_declaration, namespace_is_proven_class,
+};
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
 
@@ -162,7 +164,7 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_def_node(&mut self, node: &DefNode<'_>) {
         let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let Ok(mut method) = RubyMethod::new(&method_name) else {
+        let Ok(method) = RubyMethod::new(&method_name) else {
             visit_def_node(self, node);
             return;
         };
@@ -181,14 +183,24 @@ impl Visit<'_> for AnalysisIndexer {
                 return;
             }
         }
-        if method.as_str() == "initialize" {
-            method = RubyMethod::new("new").expect_invariant(
-                "`new` must be a valid Ruby method name",
-                "constructor normalization relies on RubyMethod validation",
-                "update RubyMethod validation to accept `new`",
-            );
-            owner_kind = NamespaceKind::Singleton;
-        }
+        // The seed knows no namespace kinds from other files, so only a
+        // same-file class declaration proves a constructor.
+        let definition_fqn = FullyQualifiedName::namespace(owner_namespace.clone());
+        let proven_class = namespace_is_proven_class(
+            self.facts
+                .graph_nodes
+                .iter()
+                .filter(|fact| fact.fqn == definition_fqn)
+                .map(|fact| fact.kind),
+            || None,
+        );
+        let (method, owner_kind, visibility) = method_declaration(
+            method,
+            node.receiver().is_none(),
+            owner_kind,
+            proven_class,
+            self.scope.current_visibility(),
+        );
 
         let fqn = FullyQualifiedName::method(owner_namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(owner_namespace.clone(), owner_kind);
@@ -243,7 +255,7 @@ impl Visit<'_> for AnalysisIndexer {
                         .and_then(YardMethodDoc::format_return_type),
                 )
                 .with_availability(availability.clone())
-                .with_visibility(self.scope.current_visibility())
+                .with_visibility(visibility)
                 .with_forwarded_block_call(forwarded_block_call.clone())
                 .with_direct_yield_call(direct_yield_call.clone()),
         );
