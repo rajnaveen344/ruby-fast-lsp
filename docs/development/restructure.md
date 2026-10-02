@@ -783,13 +783,14 @@ Delete this file when the last task is done. Git history keeps the record.
       declares or assigns, and applies the shared alias rule. An alias
       declared in another file is still not followed there: the walk has no
       project knowledge until the query adapter passes it in (D1f).
-    - [x] Decision recorded, no test yet: the seed turns every `initialize`
-      into singleton `new`, including in modules and on `def self.initialize`.
-      The collector converts only a receiverless `initialize` in a proven
-      class. In Ruby, `Klass.new` allocates and then sends `initialize`
-      through the instance ancestors, so a module's `initialize` runs for a
-      class that includes it and has no `initialize` of its own. A module
-      has no `new` of its own to define. Options:
+    - [x] Decided and, in D1e1, implemented as option 2: the seed turned
+      every `initialize` into singleton `new`, including in modules and on
+      `def self.initialize`. The collector converted only a receiverless
+      `initialize` in a proven class. In Ruby, `Klass.new` allocates and
+      then sends `initialize` through the instance ancestors, so a module's
+      `initialize` runs for a class that includes it and has no
+      `initialize` of its own. A module has no `new` of its own to define.
+      Options:
       1. Keep the seed rule: `Mod.new` resolves to code that never runs for
          it, and `Includer.new` misses the module.
       2. Adopt the collector rule in the seed: a module keeps a private
@@ -797,10 +798,10 @@ Delete this file when the last task is done. Git history keeps the record.
       3. Record `initialize` as an instance method everywhere and resolve
          `Klass.new` at query time to the first `initialize` in `Klass`'s
          instance ancestors.
-      Recommendation: take option 2 in D1e, where the seed becomes the only
-      producer and the two rules must agree. Then move to option 3 in the
-      query layer (B6b) with a test of `Includer.new` navigating to the
-      module's `initialize`.
+      Both walks now follow option 2 (`module_initialize_stays_an_instance_method`,
+      `included_initialize_is_private`). Option 3 remains for the query
+      layer (B6b), with a test of `Includer.new` navigating to the module's
+      `initialize`.
     - [x] `self.define_singleton_method(:x) { }` and
       `self.send(:define_method, :x) { }` opened a block context only in the
       cursor walk, and neither the seed nor the collector defined the
@@ -857,24 +858,65 @@ Delete this file when the last task is done. Git history keeps the record.
       +20% on the sample, +10-20% on a 343-file gem workspace, and the gem
       fingerprint changed because the two walks disagree. Not landed;
       dependencies keep collector declarations until the walks agree.
-    - The two walks disagree in five ways (found by diffing their
+    - The two walks disagreed in five ways (found by diffing their
       declarations on a gem workspace). Project files take the seed's
-      declarations, so each is a seed bug:
-      1. `initialize` in a module or unproven class: the seed emits
-         singleton `new`, the collector keeps instance `initialize`
-         (option 2 of the `initialize` decision above).
-      2. Visibility calls (`protected`, ...) in a reopened core class give
-         different visibility overrides and methods.
-      3. Multi-write constants (`A, B = ...`) produce no constant symbols in
-         the seed.
-      4. Some `def`s are singleton in one walk and instance in the other.
-      5. Same-file superclass and include targets: the collector resolves
-         them and the seed leaves them unresolved; `class
-         Outer::Inner::Err < Error` binds `Outer::Error` in the seed and
-         `Outer::Inner::Error` in the collector.
-  - [ ] D1e1. Fix the five disagreements, each with a generic failing test
-        and its own commit, then diff the two walks again on the gem
-        workspace until the declaration sets match.
+      declarations, so each was a seed bug unless Ruby said otherwise:
+      1. `initialize` in a module or unproven class (option 2 above).
+      2. Visibility calls in blocks, and `module_function`.
+      3. Multi-write constants (`A, B = ...`) and constant path parents.
+      4. Singleton versus instance `def`s.
+      5. Same-file superclass and include targets.
+  - [x] D1e1. Fix the disagreements, each with a generic failing test and its
+        own commit. `fact_collector/tests/declaration_parity.rs` runs both
+        walks over neutral sources and requires equal declaration sets. The
+        rules both walks now share:
+    - `initialize` is singleton `new` only for a receiverless `def` in a
+      proven class; elsewhere it stays a private instance method. An
+      `initialize` body's `self` is an instance either way.
+    - `module_function` (with names or as a mode) makes the instance method
+      private and adds a public singleton copy.
+    - A receiverless declaration call (`private`, `attr_*`, `alias_method`,
+      `include`, `define_method`, ...) in an ordinary block acts on the
+      block's definition owner, as a `def` there does. In `class_eval` and
+      `module_eval` blocks these calls act on the receiver.
+    - Multi-write and compound (`||=`, `&&=`, `op=`) constant targets are
+      write sites found by the same lexical path as `X = v`; a compound
+      write seeds its type from the operand, as the constant inlay contract
+      already showed for `A += 1`.
+    - A nested `def` lands on the lexical definition owner. `def self.x`,
+      `define_method`, and `define_singleton_method` need a `self` that is a
+      class object; inside an instance method or a singleton-class body they
+      do not define a class method of the enclosing class.
+    - Superclass and mixin arguments bind when the class body runs, so they
+      resolve against namespaces declared so far in the file plus project
+      knowledge; method bodies may use the whole file.
+    - `extend` edges belong to the singleton ancestry, so `extend self` is
+      not an inheritance cycle.
+    The profiler pair (perf-d1e1, four interleaved rounds) shows no
+    slowdown beyond noise; the sample fingerprint moved from
+    `313f6a0eaa37c2c5f3380c0295c5a946` to `d87950376a10f71dc2a51d13e42ed2a6`
+    because the sample's declarations changed.
+    Diffing the walks over the Ruby 3.3 standard library went from 78
+    differences to 21; the installed gems leave 44 differences in 11 files.
+    All fall in these categories, recorded rather than fixed:
+    - Conditional constant aliases followed by a reopen (`X = A if c; class
+      X`): the collector's `constant_reference_type` falls back to a lexical
+      join and names a different class than the seed (bundler `Deprecate`,
+      `GemParser`, concurrent-ruby `LockLocalVar`).
+    - `Module.new { include M }`, `Class.new`, and `Struct.new` blocks are
+      not modelled as bodies. The seed then records a self-include that the
+      collector's local cycle check drops; the seed has no cycle check.
+    - An eval receiver inside a method body that names a namespace declared
+      later in the file: the collector resolves it from the whole file, and
+      the seed, which has no whole-file pre-pass, does not.
+    - Shared limitations, where both walks agree but Ruby differs: a
+      `define_singleton_method` in a `Class.new` block lands on the enclosing
+      class; `class << self` in an instance method and `class << expr` still
+      produce edges; frame-boundary lexical lookup resolves
+      `class Inner::Box; include Sized` to `Shapes::Inner::Sized`; the loader
+      prefilter misses `for X in` constant targets.
+    The first three categories still change dependency declarations if
+    D1e2 switches them to the seed; settle or accept them there.
   - [ ] D1e2. Dependencies build a seed (profiler pair; the indexing cost
         above must be paid back by D1e3), the hosts write through the seed
         sink, collector lookups read the sink, and the collector's
