@@ -1,10 +1,9 @@
 //! Live and post-indexing navigation and diagnostic probes at workspace positions.
 
 use ruby_fast_lsp::features::cursor::EngineQuery;
+use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::loader::scheduling::status;
 use ruby_fast_lsp::lsp::capabilities::indexing;
-use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
-use ruby_fast_lsp::lsp::handlers::request;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
 use std::path::PathBuf;
@@ -88,7 +87,7 @@ pub(crate) async fn observe_first_live_definition(
     });
     loop {
         let query_started = Instant::now();
-        let locations = match request::handle_goto_definition(
+        let locations = match definition::handle(
             server,
             GotoDefinitionParams {
                 text_document_position_params: TextDocumentPositionParams {
@@ -255,9 +254,9 @@ pub(crate) async fn sample_definitions(
             character: probe.character,
         };
         let started = Instant::now();
-        let locations = definitions::find_definition_at_position(server, uri.clone(), position)
+        let locations = definition::find_definition_at_position(server, uri.clone(), position)
             .await
-            .map(definitions::definition_locations)
+            .map(definition::definition_locations)
             .unwrap_or_default();
         println!(
             "{}",

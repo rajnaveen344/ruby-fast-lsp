@@ -1,6 +1,7 @@
 //! Navigation tests: definitions, references, hierarchies, and highlights.
 
 mod call_hierarchy;
+mod definition_demand;
 mod document_highlights;
 mod goto;
 mod implementation;

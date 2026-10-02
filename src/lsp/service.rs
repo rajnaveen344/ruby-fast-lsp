@@ -3,6 +3,7 @@
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
+use crate::features::navigation::{definition, document_highlights, implementation, references};
 use crate::lsp::capabilities::debug::{self, LookupParams, LookupResponse};
 use crate::lsp::handlers::{notification, request};
 use crate::lsp::query::navigation::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
@@ -171,7 +172,7 @@ impl LanguageServer for RubyLanguageServer {
                 .path()
         );
         let start_time = Instant::now();
-        let result = request::handle_goto_definition(self, params).await;
+        let result = definition::handle(self, params).await;
 
         info!(
             "[PERF] Goto definition completed in {:?}",
@@ -194,7 +195,7 @@ impl LanguageServer for RubyLanguageServer {
                 .path()
         );
         let start_time = Instant::now();
-        let result = request::handle_goto_implementation(self, params).await;
+        let result = implementation::handle(self, params).await;
 
         info!(
             "[PERF] Goto implementation completed in {:?}",
@@ -210,7 +211,7 @@ impl LanguageServer for RubyLanguageServer {
             params.text_document_position.text_document.uri.path()
         );
         let start_time = Instant::now();
-        let result = request::handle_references(self, params).await;
+        let result = references::handle(self, params).await;
 
         info!("[PERF] References completed in {:?}", start_time.elapsed());
 
@@ -221,7 +222,7 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: DocumentHighlightParams,
     ) -> LspResult<Option<Vec<DocumentHighlight>>> {
-        request::handle_document_highlight(self, params).await
+        document_highlights::handle(self, params).await
     }
 
     async fn selection_range(

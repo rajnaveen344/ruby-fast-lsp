@@ -148,8 +148,8 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
     );
     drop(engine);
 
-    let definitions = definitions::definition_locations(
-        definitions::find_definition_at_position(
+    let definitions = definition::definition_locations(
+        definition::find_definition_at_position(
             &server,
             uri,
             tower_lsp::lsp_types::Position::new(2, 14),

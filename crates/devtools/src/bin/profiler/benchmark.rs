@@ -3,7 +3,7 @@
 use crate::invariant::ExpectInvariant;
 use devtools::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
 use ruby_fast_lsp::features::cursor::EngineQuery;
-use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
+use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing, presentation::hover};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
@@ -126,8 +126,7 @@ pub(crate) async fn run_production_benchmark(
     .await;
 
     for _ in 0..5 {
-        let _ =
-            definitions::find_definition_at_position(server, uri.clone(), method_position).await;
+        let _ = definition::find_definition_at_position(server, uri.clone(), method_position).await;
     }
 
     let hover_params = || HoverParams {
@@ -154,13 +153,13 @@ pub(crate) async fn run_production_benchmark(
     for _ in 0..iterations {
         let start = Instant::now();
         let result =
-            definitions::find_definition_at_position(server, uri.clone(), method_position).await;
+            definition::find_definition_at_position(server, uri.clone(), method_position).await;
         definition_samples.push(start.elapsed());
         invariant!(
             result
                 .as_ref()
                 .is_some_and(
-                    |response| !definitions::definition_locations(response.clone()).is_empty()
+                    |response| !definition::definition_locations(response.clone()).is_empty()
                 ),
             what = "benchmark definition returned no locations",
             why = "timing an empty query would produce misleading evidence",

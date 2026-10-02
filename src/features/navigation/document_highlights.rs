@@ -1,11 +1,25 @@
-//! Same-document semantic highlights.
+//! Document highlights: same-document semantic occurrences of the symbol at
+//! the cursor, built on the reference query.
 
-use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, Position, Url};
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::{
+    DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams, Position, Url,
+};
 
 use crate::features::cursor::EngineQuery;
 use crate::server::RubyLanguageServer;
 
-pub async fn find_document_highlights(
+/// Handle `textDocument/documentHighlight`.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: DocumentHighlightParams,
+) -> LspResult<Option<Vec<DocumentHighlight>>> {
+    let uri = &params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+    Ok(find_document_highlights(server, uri, position))
+}
+
+fn find_document_highlights(
     server: &RubyLanguageServer,
     uri: &Url,
     position: Position,

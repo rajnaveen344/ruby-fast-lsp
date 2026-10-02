@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{assert_same_locations, position_params};
+use crate::features::navigation::{definition, implementation, references};
 use crate::lsp::capabilities::editing::rename::handle_rename;
 use crate::lsp::handlers::request;
 use crate::server::RubyLanguageServer;
@@ -28,16 +29,16 @@ pub(super) async fn check_locations(
     };
     let actual = match kind {
         TagKind::Def => goto_locations(
-            request::handle_goto_definition(server, params())
+            definition::handle(server, params())
                 .await
                 .expect("definition request failed"),
         ),
         TagKind::Impl => goto_locations(
-            request::handle_goto_implementation(server, params())
+            implementation::handle(server, params())
                 .await
                 .expect("implementation request failed"),
         ),
-        TagKind::Ref => request::handle_references(
+        TagKind::Ref => references::handle(
             server,
             ReferenceParams {
                 text_document_position: position_params(&cursor.uri, cursor.range.start),

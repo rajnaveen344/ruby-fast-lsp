@@ -62,7 +62,7 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
         .await
         .unwrap();
     assert!(
-        definitions::find_definition_at_position(&server, caller_uri.clone(), Position::new(0, 2),)
+        definition::find_definition_at_position(&server, caller_uri.clone(), Position::new(0, 2),)
             .await
             .is_none(),
         "the target must remain outside the fixed startup frontier before its demand"
@@ -85,8 +85,8 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
         ticket.wait().await,
         navigation_demand::NavigationDemandOutcome::TargetProcessed
     );
-    let definitions = definitions::definition_locations(
-        definitions::find_definition_at_position(&server, caller_uri, Position::new(0, 2))
+    let definitions = definition::definition_locations(
+        definition::find_definition_at_position(&server, caller_uri, Position::new(0, 2))
             .await
             .expect("the exact demanded target must resolve before project-stage completion"),
     );

@@ -1,14 +1,18 @@
-//! Definitions Capability - Go to definition support
-//!
-//! Handles definition requests by dispatching to:
-//! - Require/require_relative string path resolution (LocationLink with full-string origin)
-//! - `EngineQuery` for constants, methods (via method resolution), and globals
-//! - Document analysis for local variables
-//! - YARD parser for type comments
+//! Go to definition: require-string paths, then `EngineQuery` resolution for
+//! constants, methods, variables, and YARD type references. A request that
+//! arrives while its target is still indexing waits on an exact navigation
+//! demand (`demand`).
+
+mod demand;
+mod query;
 
 use std::path::PathBuf;
 
-use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
+use log::info;
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::{
+    GotoDefinitionParams, GotoDefinitionResponse, Location, LocationLink, Position, Range, Url,
+};
 
 use crate::features::cursor::EngineQuery;
 use crate::loader::require_paths::{
@@ -19,19 +23,39 @@ use crate::server::RubyLanguageServer;
 use crate::utils::lsp::{lsp_position, source_position};
 use ruby_analysis::indexer::RubyDocument;
 
-pub(crate) fn navigation_demand_keys_at_position(
+/// Handle `textDocument/definition`.
+pub async fn handle(
     server: &RubyLanguageServer,
-    uri: &Url,
-    position: Position,
-) -> Option<crate::lsp::query::navigation::definition::DefinitionNavigationDemandKeys> {
-    let content = {
-        let documents = server.documents.read();
-        let content = documents.get(uri)?.read().content.clone();
-        content
-    };
-    crate::lsp::query::navigation::definition::definition_navigation_demand_keys(
-        uri, position, &content,
-    )
+    params: GotoDefinitionParams,
+) -> LspResult<Option<GotoDefinitionResponse>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+
+    let project = server.analysis_workspace_for_uri(&uri);
+    let mut definition = find_definition_at_position(server, uri.clone(), position).await;
+    if definition.is_none() {
+        let demand_keys = demand::navigation_demand_keys_at_position(server, &uri, position);
+        if let (Some(project), Some(demand_keys)) = (&project, &demand_keys) {
+            definition =
+                demand::wait_for_demanded_definition(server, project, demand_keys, &uri, position)
+                    .await?;
+        }
+    }
+
+    match definition {
+        Some(response) => {
+            if let Some(project) = &project {
+                for target_uri in definition_target_uris(&response) {
+                    server.retain_external_document_project(&target_uri, project);
+                }
+            }
+            Ok(Some(response))
+        }
+        None => {
+            info!("No definition found for position {:?}", position);
+            Ok(None)
+        }
+    }
 }
 
 /// Find definition at position using the unified EngineQuery layer.
@@ -119,7 +143,7 @@ fn require_path_definitions(
 }
 
 /// Collect target URIs from a definition response for external-project retention.
-pub(crate) fn definition_target_uris(response: &GotoDefinitionResponse) -> Vec<Url> {
+fn definition_target_uris(response: &GotoDefinitionResponse) -> Vec<Url> {
     match response {
         GotoDefinitionResponse::Scalar(location) => vec![location.uri.clone()],
         GotoDefinitionResponse::Array(locations) => locations

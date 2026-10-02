@@ -1,10 +1,10 @@
 //! Complete indexing workflow over realistic project fixtures.
 
 use super::*;
+use crate::features::navigation::definition;
 use crate::loader::scheduling::navigation_demand;
 use crate::loader::scheduling::status;
 use crate::lsp::capabilities::indexing;
-use crate::lsp::capabilities::navigation::definitions;
 
 mod core_stubs;
 mod demand_batches;

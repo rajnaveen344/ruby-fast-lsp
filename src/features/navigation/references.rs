@@ -1,6 +1,5 @@
-//! Reference Query - Find usages of symbols
-//!
-//! Consolidates reference logic from `capabilities/references.rs`.
+//! Find references: every usage of the symbol at the cursor, plus the
+//! same-document locations that document highlights reuse.
 
 use crate::invariant::ExpectInvariant;
 use log::info;
@@ -19,12 +18,40 @@ use ruby_analysis::inference::semantics::ReceiverAccess;
 use ruby_prism::Visit;
 use std::path::Path;
 use std::sync::Arc;
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::{Location, Position, Range, ReferenceParams, Url};
 
 use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
 use crate::features::cursor::EngineQuery;
+use crate::server::RubyLanguageServer;
 use crate::utils::lsp::{lsp_text_location, source_position};
 use crate::utils::parser::position_to_offset;
+
+/// Handle `textDocument/references`.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: ReferenceParams,
+) -> LspResult<Option<Vec<Location>>> {
+    let uri = params.text_document_position.text_document.uri;
+    let position = params.text_document_position.position;
+    Ok(find_references_at_position(server, &uri, position).await)
+}
+
+/// Find all references to the symbol at `position` in an open document.
+pub async fn find_references_at_position(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    position: Position,
+) -> Option<Vec<Location>> {
+    let (content, doc_arc) = {
+        let docs_guard = server.documents.read();
+        let doc_arc = docs_guard.get(uri)?.clone();
+        let doc = doc_arc.read();
+        (doc.content.clone(), doc_arc.clone())
+    };
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(uri));
+    query.find_references_at_position(uri, position, &content)
+}
 
 impl EngineQuery {
     /// Find all references to the symbol at the given position.

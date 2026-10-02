@@ -714,14 +714,14 @@ from its effective runtime selection.
 ### 2. Go to Definition
 
 1. Client sends a "go to definition" request with a position
-2. Server delegates to the definition capability (`src/lsp/capabilities/navigation/definitions.rs`)
-3. Definition capability:
-   - Uses the analyzer to identify the identifier and local scope at the position
-   - If not a local variable, delegates to the **Query Engine** (`src/lsp/query/navigation/definition.rs`)
-4. Query Engine:
-   - Uses `EngineQuery` to perform project-wide lookups in `AnalysisEngine` (handling inheritance, mixins, etc.)
-   - Returns resolved locations
-5. Capability returns the location(s) to the client
+2. The service calls the definition feature (`src/features/navigation/definition/`)
+3. The definition feature:
+   - Resolves require-string paths first
+   - Otherwise uses the analyzer to identify the identifier and local scope at the position, then
+     `EngineQuery` (`definition/query.rs`) for project-wide lookups in `AnalysisEngine`
+     (handling inheritance, mixins, etc.)
+   - While the target is still indexing, waits on an exact navigation demand and retries (`definition/demand.rs`)
+4. The feature returns the location(s) to the client
 
 ### 3. File Change Handling
 
