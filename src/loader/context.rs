@@ -9,7 +9,7 @@
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::{
-    ExtensionRegistryHandle, ProjectContextSeed, ProjectContextSnapshot,
+    ExtensionRegistryHandle, ExtensionSemanticSeed, ProjectContextSeed, ProjectContextSnapshot,
 };
 use crate::environment::runtime::catalog::DiscoveredRuntime;
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
@@ -359,6 +359,11 @@ pub(crate) trait LoadSink: Send + Sync {
         uri: &Url,
         kind: SourceKind,
     ) -> Option<ProjectContextSnapshot>;
+    /// Commit the extension semantic seed into `engine` before a file walk
+    /// reads it. The registry hands a seed over only while it records that
+    /// seed as the one `engine` holds, so the commit runs synchronously
+    /// inside that window and is never a late write.
+    fn commit_seed(&self, engine: &Arc<RwLock<AnalysisEngine>>, seed: ExtensionSemanticSeed);
     /// Retain `document` as the processed document of `uri` and mark its
     /// current version indexed.
     fn mark_document_indexed(&self, uri: &Url, document: RubyDocument);

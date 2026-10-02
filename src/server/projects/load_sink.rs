@@ -3,10 +3,11 @@
 use super::Workspace;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{
-    ExtensionRegistryHandle, ProjectContextSeed, ProjectContextSnapshot,
+    ExtensionRegistryHandle, ExtensionSemanticSeed, ProjectContextSeed, ProjectContextSnapshot,
 };
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::loader::context::{IndexingRunState, LoadSink};
+use crate::loader::file_processor::commit_extension_seed;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
@@ -125,6 +126,10 @@ impl LoadSink for RubyLanguageServer {
         kind: SourceKind,
     ) -> Option<ProjectContextSnapshot> {
         self.extension_project_context_snapshot_for_uri(uri, kind)
+    }
+
+    fn commit_seed(&self, engine: &Arc<RwLock<AnalysisEngine>>, seed: ExtensionSemanticSeed) {
+        commit_extension_seed(engine, seed);
     }
 
     fn mark_document_indexed(&self, uri: &Url, document: RubyDocument) {

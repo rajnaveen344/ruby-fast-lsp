@@ -22,6 +22,7 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
 use crate::loader::require_paths::RequireFeatureIndex;
 use anyhow::Result;
+pub(crate) use collection::commit_extension_seed;
 use collection::{replace_analysis_facts_for_file, replace_file_analysis};
 use compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
 use log::{debug, info};
@@ -353,15 +354,11 @@ impl FileProcessor {
             .as_ref()
             .map(|snapshot| snapshot.context.clone());
         if extensions_enabled {
-            if let Some(snapshot) = extension_project_context_snapshot.as_ref() {
-                self.extension_registry
-                    .ensure_semantic_seed_facts_for_snapshot(&analysis_engine, snapshot);
-            } else {
-                self.extension_registry.ensure_semantic_seed_facts(
-                    &analysis_engine,
-                    extension_project_context.as_ref(),
-                );
-            }
+            self.seed_extension_semantics(
+                &analysis_engine,
+                extension_project_context_snapshot.as_ref(),
+                |seed| ctx.sink.commit_seed(&analysis_engine, seed),
+            );
         }
         let direct_elapsed = direct_start.elapsed();
 

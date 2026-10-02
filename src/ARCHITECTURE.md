@@ -28,6 +28,9 @@ Module dependencies point down: `loader`, `environment`, and `utils` never
 import `server`, `lsp`, or `features`, and `server` never imports `lsp`. The
 structure check enforces this; see
 [source folder organization](../support/structure/README.md#module-layering).
+`environment` produces facts and never mutates project semantic state: the
+extension registry hands its semantic seed to the loader, which commits it
+through `LoadSink::commit_seed`.
 
 ### Analysis Library
 

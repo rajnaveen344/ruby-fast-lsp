@@ -41,7 +41,9 @@ through the context's `LoadSink`, which the server implements in the
 above. When a project's facts are resolved the loader calls
 `LoadSink::project_facts_ready`; the server then publishes diagnostics for the
 project's open documents from `diagnostics.rs` and reports whether the indexing
-run is still current.
+run is still current. The extension registry only produces the extension
+semantic seed; the loader commits it to the project engine through
+`LoadSink::commit_seed`.
 
 A file leaves its project through `Project::remove`: a closed file that is
 deleted or falls outside the source policy, a closed excluded document, and a

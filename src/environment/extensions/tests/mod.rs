@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod, SourceKind,
+    FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod, SourceFileId,
+    SourceKind,
 };
 use ruby_fast_lsp_extension_api::{
     BlockExecutionContextPatch, CallContext, ExecutionContextTarget, IndexPatch,
@@ -54,7 +55,9 @@ use crate::environment::extensions::registry::status::{
     ExtensionStatus, ExtensionTelemetry, GuestCallKind,
 };
 use crate::environment::extensions::responses::response_patch_to_document_symbol;
-use crate::environment::extensions::{ProjectContextSeed, MAX_EXTENSION_WASM_BYTES};
+use crate::environment::extensions::{
+    ExtensionSemanticSeed, ProjectContextSeed, MAX_EXTENSION_WASM_BYTES,
+};
 use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };

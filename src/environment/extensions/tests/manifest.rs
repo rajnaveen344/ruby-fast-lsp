@@ -52,8 +52,31 @@ frame = true
     );
 }
 
+/// The seed the registry hands over for `engine`, or `None` when the engine
+/// already holds the seed for this applicability.
+fn produced_seed(
+    registry: &ExtensionRegistryHandle,
+    engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+) -> Option<ExtensionSemanticSeed> {
+    let mut produced = None;
+    registry.with_semantic_seed(engine, project, |seed| produced = Some(seed));
+    produced
+}
+
+fn seeds_rspec_describe(seed: &ExtensionSemanticSeed) -> bool {
+    seed.analysis(SourceFileId(0)).methods.iter().any(|fact| {
+        matches!(
+            &fact.fqn,
+            FullyQualifiedName::Method(namespace, method)
+                if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
+                    && method.as_str() == "describe"
+        )
+    })
+}
+
 #[test]
-fn semantic_seed_facts_are_installed_only_in_every_applicable_isolated_project_engine() {
+fn semantic_seed_facts_are_produced_for_every_applicable_isolated_project_engine() {
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
     let config = RubyFastLspConfig {
         extension_packages: vec![package.to_string_lossy().into_owned()],
@@ -81,28 +104,31 @@ fn semantic_seed_facts_are_installed_only_in_every_applicable_isolated_project_e
     let second_project = project("file:///umbrella/second", "3.13.5");
     let ineligible_project = project("file:///umbrella/future", "4.0.0");
 
-    registry.ensure_semantic_seed_facts(&first, Some(&first_project));
-    registry.ensure_semantic_seed_facts(&second, Some(&second_project));
-    registry.ensure_semantic_seed_facts(&ineligible, Some(&ineligible_project));
-
-    for engine in [first, second] {
-        let engine = engine.read();
+    for (engine, context) in [(&first, &first_project), (&second, &second_project)] {
+        let seed = produced_seed(&registry, engine, Some(context))
+            .expect("an unseeded applicable engine must receive a seed");
         assert!(
-            engine.all_method_facts().iter().any(|fact| {
-                matches!(
-                    &fact.fqn,
-                    FullyQualifiedName::Method(namespace, method)
-                        if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
-                            && method.as_str() == "describe"
-                )
-            }),
+            seeds_rspec_describe(&seed),
             "every applicable isolated project engine must receive the RSpec.describe semantic target"
         );
+        assert_eq!(
+            produced_seed(&registry, engine, Some(context)),
+            None,
+            "an engine that already holds the seed for this applicability must not be seeded again"
+        );
     }
+    let ineligible_seed = produced_seed(&registry, &ineligible, Some(&ineligible_project))
+        .expect("an unseeded engine always receives its seed, even an empty one");
     assert!(
-        ineligible.read().all_method_facts().is_empty(),
+        ineligible_seed.analysis(SourceFileId(0)).methods.is_empty(),
         "an isolated project with an unsupported RSpec version must not receive semantic targets"
     );
+    for engine in [&first, &second, &ineligible] {
+        assert!(
+            engine.read().all_method_facts().is_empty(),
+            "the registry produces seed facts and never writes the engine itself"
+        );
+    }
 }
 
 #[test]
@@ -162,16 +188,10 @@ fn cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh() {
         "file:///umbrella/app/spec/example_spec.rb".to_string(),
         SourceKind::Project,
     );
-    registry.ensure_semantic_seed_facts_for_snapshot(&engine, &eligible);
+    let mut eligible_seed = None;
+    registry.with_semantic_seed_for_snapshot(&engine, &eligible, |seed| eligible_seed = Some(seed));
     assert!(
-        engine.read().all_method_facts().iter().any(|fact| {
-            matches!(
-                &fact.fqn,
-                FullyQualifiedName::Method(namespace, method)
-                    if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
-                        && method.as_str() == "describe"
-            )
-        }),
+        eligible_seed.as_ref().is_some_and(seeds_rspec_describe),
         "the eligible cached snapshot must seed RSpec.describe"
     );
 
@@ -185,11 +205,13 @@ fn cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh() {
         "file:///umbrella/app/spec/example_spec.rb".to_string(),
         SourceKind::Project,
     );
-    registry.ensure_semantic_seed_facts_for_snapshot(&engine, &ineligible);
+    let mut ineligible_seed = None;
+    registry
+        .with_semantic_seed_for_snapshot(&engine, &ineligible, |seed| ineligible_seed = Some(seed));
 
     assert!(
-        engine.read().all_method_facts().is_empty(),
-        "dependency refresh must replace stale extension semantic targets"
+        ineligible_seed.is_some_and(|seed| seed.analysis(SourceFileId(0)).methods.is_empty()),
+        "dependency refresh must produce a replacement seed without stale semantic targets"
     );
 }
 

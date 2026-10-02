@@ -69,6 +69,16 @@ calls them in its own order, so the owner observes the load's write sequence.
 Fact commits and resolution still run on the engine handle returned by
 `engine_for_uri`.
 
+The extension registry never writes an engine. Before a file walk the loader
+asks it for the semantic seed (extension namespaces and method targets) that
+the engine lacks for the project's applicability, and commits that seed with
+`LoadSink::commit_seed`. The registry hands the seed over inside its seed
+ledger lock and records it as applied only after the commit returns, so
+concurrent seeds of one engine commit in ledger order and the engine always
+holds the last recorded applicability. Collection entry points that address a
+caller-supplied engine and carry no sink commit through the same loader write,
+`commit_extension_seed`, that the server sink applies.
+
 The loader never removes a file. A file that exists but does not parse stays
 registered with no facts. The pre-collection baseline withholds stale project
 facts with empty updates on its private snapshot, because the declaration seed

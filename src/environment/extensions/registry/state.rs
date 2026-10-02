@@ -1,13 +1,10 @@
+#[cfg(test)]
 use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{Mutex, RwLock};
-use ruby_analysis::core::{
-    FileAnalysis, FullyQualifiedName, GraphNodeFact, MethodFact, NamespaceKind, SourceKind,
-    SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
-};
-use ruby_analysis::engine::{ResolveMode, SourceFileInput};
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_fast_lsp_extension_api::Extension;
@@ -22,6 +19,7 @@ use crate::environment::extensions::loading::packages::{
 #[cfg(test)]
 use crate::environment::extensions::registry::handle::ExtensionRegistryHandle;
 use crate::environment::extensions::registry::loaded::LoadedWasmExtension;
+use crate::environment::extensions::registry::seed::ExtensionSemanticSeed;
 use crate::environment::extensions::registry::status::ExtensionStatusReport;
 use crate::environment::extensions::ExtensionApplicabilityFingerprint;
 use crate::utils::persistent_cache::PersistentDerivedProductCache;
@@ -325,11 +323,19 @@ impl ExtensionRegistry {
             .any(|extension| extension.is_loaded() && extension.handles_call(method_name))
     }
 
-    pub(super) fn ensure_semantic_seed_facts(
+    /// Hand `commit` the semantic seed that `engine` lacks for this project
+    /// applicability, then record it as applied. Nothing is produced when
+    /// the engine already holds the seed for `applicability_fingerprint`.
+    ///
+    /// The seed ledger stays locked while `commit` runs, so concurrent seeds
+    /// of one engine commit in the order the ledger records them and the
+    /// last recorded applicability is the one the engine holds.
+    pub(super) fn with_semantic_seed(
         &self,
         engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
         project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
         applicability_fingerprint: ExtensionApplicabilityFingerprint,
+        commit: impl FnOnce(ExtensionSemanticSeed),
     ) {
         let mut seeded_engines = self.semantic_seeded_engines.lock();
         seeded_engines.retain(|seeded| seeded.engine.strong_count() > 0);
@@ -345,55 +351,13 @@ impl ExtensionRegistry {
             seeded.applicability_fingerprint = applicability_fingerprint;
         }
 
-        let mut engine_guard = engine.write();
-        let file_id = engine_guard.register_file(SourceFileInput {
-            path: std::path::absolute("/__ruby_fast_lsp_extension__/semantic_targets.rb")
-                .expect_invariant(
-                    "extension semantic source has no absolute native path",
-                    "registered definitions need a valid file URI for navigation",
-                    "retain the filesystem root when constructing the synthetic source path",
-                ),
-            content: String::new(),
-            kind: SourceKind::Stub,
-        });
-        let range = TextRange::new(file_id, 0, 0);
-        let mut facts = FileAnalysis::default();
-        for extension in &self.extensions {
-            if !extension.is_loaded() || !extension.applies_to(project) {
-                continue;
-            }
-            for namespace in &extension.semantic_namespaces {
-                let instance = FullyQualifiedName::namespace_with_kind(
-                    namespace.owner.clone(),
-                    NamespaceKind::Instance,
-                );
-                let singleton = FullyQualifiedName::namespace_with_kind(
-                    namespace.owner.clone(),
-                    NamespaceKind::Singleton,
-                );
-                for owner in [instance, singleton] {
-                    let fact = GraphNodeFact::new(owner, namespace.declaration_kind, range);
-                    if !facts.graph_nodes.contains(&fact) {
-                        facts.graph_nodes.push(fact);
-                    }
-                }
-            }
-            for target in &extension.semantic_targets {
-                let owner = FullyQualifiedName::namespace_with_kind(
-                    target.owner.clone(),
-                    target.owner_kind,
-                );
-                let fqn = FullyQualifiedName::method(target.owner.clone(), target.method);
-                facts.symbols.push(SymbolFact::new(
-                    fqn.clone(),
-                    AnalysisSymbolKind::Method,
-                    range,
-                ));
-                facts.methods.push(MethodFact::new(fqn, owner, range));
-            }
-        }
-        engine_guard.update(file_id, facts, ResolveMode::Deferred);
-        drop(engine_guard);
+        let seed = ExtensionSemanticSeed::from_extensions(
+            self.extensions
+                .iter()
+                .filter(|extension| extension.is_loaded() && extension.applies_to(project))
+                .map(Arc::as_ref),
+        );
+        commit(seed);
         if !seeded_engines.iter().any(|seeded| {
             seeded
                 .engine

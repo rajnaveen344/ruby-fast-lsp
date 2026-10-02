@@ -7,6 +7,7 @@ use super::{
     analysis_source, CollectedFileAnalysisOutput, CollectedProjectAnalysis, FileResolution,
     ProjectFileCollectionTiming,
 };
+use crate::environment::extensions::{ExtensionSemanticSeed, ProjectContextSnapshot};
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadSink;
@@ -70,7 +71,38 @@ pub(super) fn replace_file_analysis(
     }
 }
 
+/// Register the extension semantic seed source in `engine` and replace its
+/// facts with `seed`. Resolution is deferred: the seed only has to be visible
+/// to the file walk that follows it.
+pub(crate) fn commit_extension_seed(
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+    seed: ExtensionSemanticSeed,
+) {
+    let mut engine = analysis_engine.write();
+    let file_id = engine.register_file(seed.source());
+    engine.update(file_id, seed.analysis(file_id), ResolveMode::Deferred);
+}
+
 impl FileProcessor {
+    /// Commit the extension semantic seed `engine` lacks for `snapshot`'s
+    /// project (or for no project) through `commit`, before a file walk
+    /// consults it.
+    pub(super) fn seed_extension_semantics(
+        &self,
+        engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        snapshot: Option<&ProjectContextSnapshot>,
+        commit: impl FnOnce(ExtensionSemanticSeed),
+    ) {
+        match snapshot {
+            Some(snapshot) => self
+                .extension_registry
+                .with_semantic_seed_for_snapshot(engine, snapshot, commit),
+            None => self
+                .extension_registry
+                .with_semantic_seed(engine, None, commit),
+        }
+    }
+
     // ========================================================================
     // Content-based Indexing (in-memory content)
     // ========================================================================
@@ -341,18 +373,15 @@ impl FileProcessor {
         &self,
         uri: &Url,
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        sink: &dyn LoadSink,
     ) {
         let project_context_snapshot = self.extension_project_context_seed.as_ref().map(|seed| {
             seed.read()
                 .context_snapshot(uri.to_string(), SourceKind::Project)
         });
-        if let Some(snapshot) = project_context_snapshot.as_ref() {
-            self.extension_registry
-                .ensure_semantic_seed_facts_for_snapshot(analysis_engine, snapshot);
-        } else {
-            self.extension_registry
-                .ensure_semantic_seed_facts(analysis_engine, None);
-        }
+        self.seed_extension_semantics(analysis_engine, project_context_snapshot.as_ref(), |seed| {
+            sink.commit_seed(analysis_engine, seed)
+        });
     }
 
     pub fn replace_collected_project_file_facts_as_deferred_resolution(
@@ -631,15 +660,14 @@ impl FileProcessor {
             .as_ref()
             .map(|snapshot| snapshot.context.clone());
         if extensions_enabled {
-            if let Some(snapshot) = extension_project_context_snapshot.as_ref() {
-                self.extension_registry
-                    .ensure_semantic_seed_facts_for_snapshot(&analysis_engine, snapshot);
-            } else {
-                self.extension_registry.ensure_semantic_seed_facts(
-                    &analysis_engine,
-                    extension_project_context.as_ref(),
-                );
-            }
+            // Collection entry points that address a caller-supplied engine
+            // carry no sink; they commit the seed through the same loader
+            // write the server sink applies.
+            self.seed_extension_semantics(
+                &analysis_engine,
+                extension_project_context_snapshot.as_ref(),
+                |seed| commit_extension_seed(&analysis_engine, seed),
+            );
         }
 
         let mut fact_collector = FactCollector::analysis_only(

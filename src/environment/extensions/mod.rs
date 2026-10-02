@@ -15,6 +15,7 @@ pub(crate) use project_context::{
     ExtensionApplicabilityFingerprint, ProjectContextSeed, ProjectContextSnapshot,
 };
 pub use registry::handle::ExtensionRegistryHandle;
+pub(crate) use registry::seed::ExtensionSemanticSeed;
 pub(crate) use registry::state::ExtensionApplicabilitySnapshot;
 pub use registry::status::{
     ExtensionStat, ExtensionStatusParams, ExtensionStatusReport, ExtensionStatusResponse,

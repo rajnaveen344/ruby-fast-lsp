@@ -381,7 +381,11 @@ impl IndexerProject {
                         path.display()
                     )
                 })?;
-                file_processor_ref.ensure_project_semantic_seed(&uri, &analysis_engine);
+                file_processor_ref.ensure_project_semantic_seed(
+                    &uri,
+                    &analysis_engine,
+                    ctx.sink.as_ref(),
+                );
             }
         }
         let batch_registration_started = Instant::now();

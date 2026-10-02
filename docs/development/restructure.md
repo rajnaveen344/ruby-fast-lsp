@@ -308,9 +308,22 @@ Delete this file when the last task is done. Git history keeps the record.
         their glob helpers also read `IndexingConfig`, so they moved with it
         to `loader/sources/project/files.rs`; `should_index_file` and the
         configuration-free Ruby collectors stay in utils.
-  - [ ] C2f. Make the extension registry return the seed `FileAnalysis`
+  - [x] C2f. Make the extension registry return the seed `FileAnalysis`
         instead of writing the engine. The loader commits it through
-        `LoadSink::commit_seed`.
+        `LoadSink::commit_seed`. Done in one piece: the registry produces an
+        `ExtensionSemanticSeed` (registry `seed.rs`) whose `source()` and
+        `analysis(file_id)` the loader registers and commits. The seed
+        ledger (engine identity and applicability fingerprint) stays in the
+        registry, and the registry hands the seed to a caller-supplied
+        commit inside the ledger lock, so ordering is unchanged and nothing
+        is committed late. `analyze_file` and the project baseline seed
+        commit through `LoadSink::commit_seed`. The shared collection core
+        also serves sink-less entry points on caller-supplied engines
+        (`*_in_engine`, the project batch worker, devtools), so it calls the
+        same loader write, `commit_extension_seed`, directly; it moves to
+        the sink when collection takes a sink or when B3k removes the
+        seed-before-walk commit. Environment has no production engine write;
+        JRuby navigation tests still build local fixture engines.
   - [x] C2g. Move `impl LanguageServer` and the debug and namespace-tree
         request methods from `server/mod.rs` to `src/lsp/service.rs`. The
         server keeps state only.
