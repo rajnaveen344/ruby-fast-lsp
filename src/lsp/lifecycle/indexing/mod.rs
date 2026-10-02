@@ -5,9 +5,7 @@ use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::project::files::ProjectFilePolicy;
 use crate::server::{ProjectHandle, RubyLanguageServer};
-use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{ResolveMode, SourceFileInput};
 
 use log::{debug, info};
 use std::path::Path;
@@ -704,12 +702,9 @@ fn clear_project_file_facts(server: &RubyLanguageServer, uri: &Url) -> bool {
 /// Other files stop resolving into it, and a later registration at the same
 /// path starts from a fresh identity.
 fn remove_file_if_kind(server: &RubyLanguageServer, uri: &Url, expected_kind: SourceKind) -> bool {
-    server.project_for_uri(uri).update(|engine| {
-        let Some(file_id) = registered_file_of_kind(engine, uri, expected_kind) else {
-            return false;
-        };
-        engine.remove(file_id, ResolveMode::Immediate)
-    })
+    server
+        .project_for_uri(uri)
+        .remove_path_of_kind(&uri_path(uri), expected_kind)
 }
 
 /// Keep a file that still exists on disk but could not be read or analyzed
@@ -720,43 +715,14 @@ fn clear_file_facts_if_kind(
     uri: &Url,
     expected_kind: SourceKind,
 ) -> bool {
-    server.project_for_uri(uri).update(|engine| {
-        let Some(file_id) = registered_file_of_kind(engine, uri, expected_kind) else {
-            return false;
-        };
-        let path = engine
-            .view()
-            .file(file_id)
-            .map(|file| file.path.clone())
-            .expect_invariant(
-                "a registered file vanished under the engine write lock",
-                "the lookup and the clear hold one engine write borrow",
-                "keep lookup and clear inside one project update",
-            );
-        let file_id = engine.register_file(SourceFileInput {
-            path,
-            content: String::new(),
-            kind: expected_kind,
-        });
-        engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-        true
-    })
+    server
+        .project_for_uri(uri)
+        .clear_path_facts_of_kind(&uri_path(uri), expected_kind)
 }
 
-fn registered_file_of_kind(
-    engine: &ruby_analysis::engine::Project,
-    uri: &Url,
-    expected_kind: SourceKind,
-) -> Option<ruby_analysis::core::SourceFileId> {
-    let path = uri
-        .to_file_path()
-        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let file_id = engine.view().file_id(&path)?;
-    engine
-        .view()
-        .file(file_id)
-        .is_some_and(|file| file.kind == expected_kind)
-        .then_some(file_id)
+fn uri_path(uri: &Url) -> std::path::PathBuf {
+    uri.to_file_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()))
 }
 
 #[cfg(test)]

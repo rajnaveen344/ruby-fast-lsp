@@ -18,7 +18,7 @@ Each project's engine is reached only through a
 [`ProjectHandle`](../../src/server/projects/handle.rs). Readers call
 `view(|view| ..)`, which holds the engine read guard for one synchronous
 closure, so an answer reflects one semantic revision and no guard crosses an
-`.await`. Writers call `update(|engine| ..)`. Handles are compared with
+`.await`. Lifecycle writes use named operations (`register_source`, `remove_path`, `remove_path_of_kind`, `clear_path_facts_of_kind`, `resolve`, `reset`); the conditional require-diagnostic commit still uses `update(|engine| ..)`. Handles are compared with
 `is_same`. The server routes with `project_for_uri`, `projects`, and
 `orphan_project`. The loader alone receives the shared engine
 (`ProjectHandle::shared_engine`) through `LoadSink::engine_for_uri` and the

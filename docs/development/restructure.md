@@ -461,24 +461,78 @@ Delete this file when the last task is done. Git history keeps the record.
         Remove the repeated `.read()` calls in references, hover, and
         definition.
 
-  Notes: `ProjectHandle` lives in `src/server/projects/handle.rs`.
-  `Workspace::analysis_engine`, `analysis_engine_for_uri`,
-  `analysis_engines`, and `orphan_engine` are already gone: the server routes
-  with `project_for_uri`, `projects`, and `orphan_project`, and `EngineQuery`
-  holds a handle. The loader still receives the shared engine through
-  `ProjectHandle::shared_engine` (sink, coordinator override, and the
-  analysis-only collector). Tests that inspect state across many statements
-  use the test-only owned guards `test_read` and `test_write`.
-  - [ ] C4c. Add the writer task: a command channel (commit-if-snapshot,
-        register, resolve chunk, reset) with replies through oneshot. The
-        `LoadSink` adapter sends commands. Profiler comparison, with didOpen
-        and cold indexing called out.
-  - [ ] C4d. Move the lifecycle writes (clear facts, runtime-rebuild reset,
-        the require-diagnostic refresh, the extension seed, and project
-        engine setup) to commands.
-  - [ ] C4e. Fold `ProjectRuntimeState`'s four locks and the require index
-        into the handle's state. Remove `Workspace::analysis_engine` and
-        `analysis_engine_for_uri`. Update `docs/development/server-state.md`.
+  - [ ] C4c. The single project writer. Split, because the original step
+        (a writer task with a command channel and oneshot replies, the
+        `LoadSink` adapter sending commands) bundles three changes of very
+        different risk:
+    - [ ] C4c1. Loader writes go through named handle operations instead of
+          the shared engine: file-fact commit, deferred registration,
+          whole-project resolve, and compaction. `LoadSink::engine_for_uri`,
+          `set_analysis_engine`, and `ProjectHandle::shared_engine` go away.
+          This touches `loader/file_processor/collection.rs`,
+          `loader/coordinator/`, and the source hosts, so it waits until the
+          declaration-seed work in the indexer and source hosts lands.
+    - [ ] C4c2. Owner decision: how a single writer executes (see below).
+    - [ ] C4c3. Implement the chosen writer behind the same handle
+          operations. Profiler comparison, with didOpen, cold indexing, and
+          `writer_wait` called out.
+  - [ ] C4d. Move the lifecycle writes to named operations (commands once
+        C4c3 lands).
+    - [x] C4d1. File removal, clear-facts, register, the runtime-rebuild
+          reset, removal from other projects, and orphan setup call
+          `ProjectHandle::{remove_path_of_kind, clear_path_facts_of_kind,
+          register_source, reset, remove_path, resolve}`. `lsp/` no longer
+          calls `update`.
+    - [ ] C4d2. The require-diagnostic refresh commit (commit if the source
+          snapshot is current, then publish inside the same write) and the
+          extension seed (`LoadSink::commit_seed`, which still takes the
+          shared engine) become named operations. The refresh must keep its
+          projection-to-publication interval free of edits, so its operation
+          returns the diagnostics to enqueue rather than enqueueing later.
+  - [ ] C4e. Fold `ProjectRuntimeState`'s locks and the require index into
+        the handle. Owner decision (see below).
+    - [x] C4e1. Remove `Workspace::analysis_engine`, `analysis_engine_for_uri`,
+          `analysis_engines`, and `orphan_engine`. Update
+          `docs/development/server-state.md`.
+
+  Notes: `ProjectHandle` lives in `src/server/projects/handle.rs`. The
+  server routes with `project_for_uri`, `projects`, and `orphan_project`, and
+  `EngineQuery` holds a handle. The loader still receives the shared engine
+  through `ProjectHandle::shared_engine` (sink, coordinator override, and the
+  analysis-only collector) until C4c1. Tests that inspect state across many
+  statements use the test-only owned guards `test_read` and `test_write`.
+
+  Decision needed for C4c2. A writer task alone does not shorten reader
+  waits: the long write is whole-project `resolve()`, which runs as one
+  call on a governor thread under the write guard, and a command that runs
+  it still blocks readers for the same time. The loader also replies from
+  blocking governor threads, where tokio's `blocking_recv` is allowed, but
+  some interactive writes run on async tasks and hold the document semantic
+  lock across the write, so replies there must be awaited.
+  - Option A: keep the `RwLock` inside the handle and finish C4c1 and C4d2,
+    so every write is a named operation; add no task. No behavior or
+    performance change, and the operations are already the command set.
+  - Option B: one writer thread per project consuming a command enum, with
+    readers still on the read guard. Orders writes explicitly but leaves
+    `writer_wait` unchanged until `resolve()` is chunked, and adds a channel
+    hop to every didOpen and didChange commit.
+  - Option C: readers on an immutable snapshot (`Arc<Project>`) swapped
+    after each write. Readers never wait, but every write clones or
+    rebuilds the engine, which the 32 MiB engine-heap budget does not allow
+    without persistent stores.
+  - Recommendation: A now. Take B only after the engine can resolve in
+    bounded chunks (an engine change with its own plan step), and decide
+    by the profiler's `writer_wait` p95 against its 50 ms budget.
+
+  Decision needed for C4e. `ProjectRuntimeState` holds three independent
+  locks (selected runtime, Ruby version, JRuby add-on) and the require index
+  is `PublishedRequires`, whose guard the require refresh holds through its
+  commit. Folding them under the engine guard would combine transitions that
+  happen independently today, which `docs/development/server-state.md` rules
+  out. Folding them into the handle as separate fields only relocates them.
+  Recommendation: relocate them into the handle as part of C5, when
+  `Workspace` shrinks, and fold them under one owner only if C4c3 chooses
+  a writer that owns all project state.
 - [ ] C5. Reduce the server to `Server { client, config, documents, projects }`.
 - [x] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.

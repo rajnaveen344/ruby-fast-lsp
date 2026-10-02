@@ -33,7 +33,7 @@ fn new_orphan_project() -> ProjectHandle {
         "loose files require the same universal constant facts as project engines",
         "keep the embedded core RBS overlay parseable and register it before orphan documents",
     );
-    project.update(AnalysisEngine::resolve);
+    project.resolve();
     project
 }
 
@@ -578,11 +578,7 @@ impl ProjectRegistry {
             if project.is_same(owner) {
                 continue;
             }
-            project.update(|engine| {
-                if let Some(file_id) = engine.view().file_id(&path) {
-                    engine.remove(file_id, ruby_analysis::engine::ResolveMode::Immediate);
-                }
-            });
+            project.remove_path(&path);
         }
     }
 
@@ -604,13 +600,8 @@ impl ProjectRegistry {
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         let content = source.into();
-        self.project_for_uri(uri).update(|engine| {
-            engine.register_file(ruby_analysis::engine::SourceFileInput {
-                path,
-                content,
-                kind,
-            })
-        })
+        self.project_for_uri(uri)
+            .register_source(path, content, kind)
     }
 
     pub fn remove_workspace(&self, root_uri: &Url) {
