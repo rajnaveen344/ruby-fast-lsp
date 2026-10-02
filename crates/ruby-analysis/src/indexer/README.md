@@ -27,9 +27,12 @@ state only through `inference::semantics::Semantics`; outside tests the indexer
 names no engine type, and callers pass a `View` or the shared engine.
 
 Scope rules shared by every walk (lexical constant lookup, declaration reopen
-candidates, and the namespace a static receiver names) live in
+candidates, the namespace a static receiver names, and the execution context
+an eval, `define_method`, or Concern `class_methods` block opens) live in
 `documents/scope_rules.rs`, beside `ScopeTracker`. A walk passes in only which
-namespaces it knows; do not copy the lookup loop into a walker.
+namespaces it knows or how it resolves a receiver; do not copy a rule into a
+walker. Inside an eval block, definitions follow the receiver while constant
+writes and nested `class`/`module` bodies stay in the lexical scope.
 
 All directories meet the ten-entry limit. The query folder is at the limit;
 another query file needs a meaningful subdivision. For collector state and

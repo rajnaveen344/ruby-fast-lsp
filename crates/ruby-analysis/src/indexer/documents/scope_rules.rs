@@ -1,11 +1,13 @@
-//! Scope rules every declaration walk shares: lexical constant lookup and the
-//! namespace a static receiver names. Walks differ only in which namespaces
-//! they know, so each rule takes that knowledge as a predicate.
+//! Scope rules every declaration walk shares: lexical constant lookup, the
+//! namespace a static receiver names, and the execution context a block call
+//! opens. Walks differ only in which namespaces they know, so each rule takes
+//! that knowledge as a predicate or receiver resolver.
 
-use crate::core::{FullyQualifiedName, RubyConstant};
-use ruby_prism::Node;
+use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant};
+use crate::invariant::ExpectInvariant;
+use ruby_prism::{CallNode, Node};
 
-use super::scope_tracker::mixin_ref_from_node;
+use super::scope_tracker::{mixin_ref_from_node, ScopeTracker};
 
 /// Lexical lookup candidates for `parts`, innermost enclosing namespace first
 /// and the top level last. An absolute path has the single candidate `parts`.
@@ -82,6 +84,129 @@ pub fn resolve_receiver_namespace(
         is_known,
     )
     .map(|fqn| fqn.namespace_parts())
+}
+
+/// The execution context a statically recognized block call opens: what
+/// `self` is inside the block and where a `def` inside it lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockExecution {
+    pub implicit_namespace: Vec<RubyConstant>,
+    pub implicit_kind: NamespaceKind,
+    pub definition_namespace: Vec<RubyConstant>,
+    pub definition_kind: NamespaceKind,
+}
+
+impl BlockExecution {
+    pub fn enter(self, scope_tracker: &mut ScopeTracker) {
+        scope_tracker.push_block_execution_context(
+            self.implicit_namespace,
+            self.implicit_kind,
+            self.definition_namespace,
+            self.definition_kind,
+        );
+    }
+}
+
+/// The namespace `self` names at the current point, when it is a class or
+/// module object.
+pub fn implicit_singleton_namespace(scope_tracker: &ScopeTracker) -> Option<Vec<RubyConstant>> {
+    let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
+    (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty()).then_some(namespace)
+}
+
+/// `Target.class_eval do … end` and its `module_*`/`instance_*` forms.
+/// `resolve_receiver` is the walk's knowledge of constant receivers.
+pub fn eval_block(
+    node: &CallNode<'_>,
+    scope_tracker: &ScopeTracker,
+    resolve_receiver: impl Fn(&Node<'_>) -> Option<Vec<RubyConstant>>,
+) -> Option<BlockExecution> {
+    let definition_kind = match node.name().as_slice() {
+        b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => NamespaceKind::Instance,
+        b"instance_eval" | b"instance_exec" => NamespaceKind::Singleton,
+        _ => return None,
+    };
+    node.block()?;
+    let namespace = match node.receiver() {
+        Some(receiver) if receiver.as_self_node().is_none() => resolve_receiver(&receiver)?,
+        None | Some(_) => implicit_singleton_namespace(scope_tracker)?,
+    };
+    Some(BlockExecution {
+        implicit_namespace: namespace.clone(),
+        implicit_kind: NamespaceKind::Singleton,
+        definition_namespace: namespace,
+        definition_kind,
+    })
+}
+
+/// A `define_method`/`define_singleton_method` block, called directly or
+/// through `send`. `self` inside the block is the defined method's receiver;
+/// a `def` inside it still lands in the enclosing definition owner.
+pub fn dynamic_definition_block(
+    node: &CallNode<'_>,
+    scope_tracker: &ScopeTracker,
+    resolve_receiver: impl Fn(&Node<'_>) -> Option<Vec<RubyConstant>>,
+) -> Option<BlockExecution> {
+    node.block()?;
+    let (implicit_namespace, implicit_kind) = match node.receiver() {
+        None => {
+            let kind = match node.name().as_slice() {
+                b"define_method"
+                    if !scope_tracker.execution_context_active()
+                        && scope_tracker.in_singleton() =>
+                {
+                    NamespaceKind::Singleton
+                }
+                b"define_method" => NamespaceKind::Instance,
+                b"define_singleton_method" => NamespaceKind::Singleton,
+                _ => return None,
+            };
+            (implicit_singleton_namespace(scope_tracker)?, kind)
+        }
+        Some(receiver) if node.name().as_slice() == b"define_singleton_method" => {
+            (resolve_receiver(&receiver)?, NamespaceKind::Singleton)
+        }
+        Some(receiver)
+            if matches!(
+                node.name().as_slice(),
+                b"send" | b"public_send" | b"__send__"
+            ) =>
+        {
+            let arguments = node.arguments()?;
+            let selector = static_name(&arguments.arguments().iter().next()?)?;
+            let kind = match selector.as_str() {
+                "define_method" => NamespaceKind::Instance,
+                "define_singleton_method" => NamespaceKind::Singleton,
+                _ => return None,
+            };
+            if node.name().as_slice() == b"public_send" && kind == NamespaceKind::Instance {
+                return None;
+            }
+            (resolve_receiver(&receiver)?, kind)
+        }
+        Some(_) => return None,
+    };
+    let (definition_namespace, definition_kind) = scope_tracker.method_definition_context();
+    Some(BlockExecution {
+        implicit_namespace,
+        implicit_kind,
+        definition_namespace,
+        definition_kind,
+    })
+}
+
+/// A Concern `class_methods do … end` block, which defines methods on the
+/// enclosing namespace's `ClassMethods` module.
+pub fn class_methods_block(node: &CallNode<'_>) -> Option<RubyConstant> {
+    if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
+        return None;
+    }
+    node.block()?;
+    Some(RubyConstant::new("ClassMethods").expect_invariant(
+        "static Concern ClassMethods constant is invalid",
+        "`ClassMethods` is a valid Ruby constant",
+        "inspect RubyConstant validation",
+    ))
 }
 
 /// The text of a symbol or string literal.

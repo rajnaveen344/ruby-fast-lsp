@@ -205,13 +205,7 @@ impl Visit<'_> for FactCollector {
                 "keep FactCollector::visit_call_node extension traversal balanced",
             );
             self.scope_tracker.pop_execution_context();
-        } else if let Some((
-            implicit_namespace,
-            implicit_kind,
-            definition_namespace,
-            definition_kind,
-        )) = self.static_dynamic_definition_block_context(node)
-        {
+        } else if let Some(execution) = self.dynamic_definition_block(node) {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
             }
@@ -223,12 +217,8 @@ impl Visit<'_> for FactCollector {
                 "context matching required the same Prism call to have a block",
                 "keep call traversal and context matching atomic",
             );
-            self.scope_tracker.push_block_execution_context(
-                implicit_namespace.clone(),
-                implicit_kind,
-                definition_namespace,
-                definition_kind,
-            );
+            let implicit_namespace = execution.implicit_namespace.clone();
+            execution.enter(&mut self.scope_tracker);
             self.push_direct_dynamic_definition_block_return_type(node, implicit_namespace);
             self.flow.block_parameters.push(Vec::new());
             self.visit(&block);
@@ -238,9 +228,7 @@ impl Visit<'_> for FactCollector {
                 "keep FactCollector::visit_call_node dynamic-definition traversal balanced",
             );
             self.scope_tracker.pop_execution_context();
-        } else if let Some((eval_namespace, implicit_kind, definition_kind)) =
-            self.static_eval_block_context(node)
-        {
+        } else if let Some(execution) = self.eval_block(node) {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
             }
@@ -248,12 +236,7 @@ impl Visit<'_> for FactCollector {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_block_execution_context(
-                    eval_namespace.clone(),
-                    implicit_kind,
-                    eval_namespace,
-                    definition_kind,
-                );
+                execution.enter(&mut self.scope_tracker);
                 self.flow.block_parameters.push(Vec::new());
                 self.visit(&block);
                 self.flow.block_parameters.pop().expect_invariant(

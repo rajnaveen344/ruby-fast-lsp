@@ -1,6 +1,6 @@
-use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant};
+use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, RubyConstant};
+use crate::indexer::documents::scope_rules::{self, BlockExecution};
 use crate::indexer::LocalScopeKind as LVScopeKind;
-use crate::invariant::ExpectInvariant;
 use ruby_prism::{BlockNode, CallNode, NumberedParametersNode, ParametersNode};
 
 use crate::indexer::fact_collector::FactCollector;
@@ -107,133 +107,34 @@ impl FactCollector {
 }
 
 impl FactCollector {
-    pub(in crate::indexer::fact_collector) fn static_eval_block_context(
+    pub(in crate::indexer::fact_collector) fn eval_block(
         &self,
         node: &CallNode,
-    ) -> Option<(Vec<RubyConstant>, NamespaceKind, NamespaceKind)> {
-        let (implicit_receiver_kind, method_definition_kind) = match node.name().as_slice() {
-            b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => {
-                (NamespaceKind::Singleton, NamespaceKind::Instance)
-            }
-            b"instance_eval" | b"instance_exec" => {
-                (NamespaceKind::Singleton, NamespaceKind::Singleton)
-            }
-            _ => return None,
-        };
-        node.block()?;
-        let namespace = match node.receiver() {
-            None => {
-                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-                (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
-                    .then_some(namespace)?
-            }
-            Some(receiver) if receiver.as_self_node().is_some() => {
-                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-                (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
-                    .then_some(namespace)?
-            }
-            Some(receiver) => self.resolve_constant_receiver_namespace(&receiver)?,
-        };
-        Some((namespace, implicit_receiver_kind, method_definition_kind))
+    ) -> Option<BlockExecution> {
+        scope_rules::eval_block(node, &self.scope_tracker, |receiver| {
+            self.resolve_constant_receiver_namespace(receiver)
+        })
     }
 
-    pub(in crate::indexer::fact_collector) fn static_dynamic_definition_block_context(
+    pub(in crate::indexer::fact_collector) fn dynamic_definition_block(
         &self,
         node: &CallNode,
-    ) -> Option<(
-        Vec<RubyConstant>,
-        NamespaceKind,
-        Vec<RubyConstant>,
-        NamespaceKind,
-    )> {
-        node.block()?;
-        let (definition_namespace, definition_kind) =
-            self.scope_tracker.method_definition_context();
-        let (implicit_namespace, implicit_kind) = match node.receiver() {
-            None => {
-                let target_kind = match node.name().as_slice() {
-                    b"define_method"
-                        if !self.scope_tracker.execution_context_active()
-                            && self.scope_tracker.in_singleton() =>
-                    {
-                        NamespaceKind::Singleton
-                    }
-                    b"define_method" => NamespaceKind::Instance,
-                    b"define_singleton_method" => NamespaceKind::Singleton,
-                    _ => return None,
-                };
-                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-                if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
-                    return None;
-                }
-                (namespace, target_kind)
-            }
-            Some(receiver) if node.name().as_slice() == b"define_singleton_method" => (
-                self.resolve_constant_receiver_namespace(&receiver)?,
-                NamespaceKind::Singleton,
-            ),
-            Some(receiver)
-                if matches!(
-                    node.name().as_slice(),
-                    b"send" | b"public_send" | b"__send__"
-                ) =>
-            {
-                let arguments = node.arguments()?;
-                let selector = arguments.arguments().iter().next()?;
-                let target_kind = if let Some(symbol) = selector.as_symbol_node() {
-                    match symbol.unescaped() {
-                        b"define_method" => NamespaceKind::Instance,
-                        b"define_singleton_method" => NamespaceKind::Singleton,
-                        _ => return None,
-                    }
-                } else if let Some(string) = selector.as_string_node() {
-                    match string.unescaped() {
-                        b"define_method" => NamespaceKind::Instance,
-                        b"define_singleton_method" => NamespaceKind::Singleton,
-                        _ => return None,
-                    }
-                } else {
-                    return None;
-                };
-                if node.name().as_slice() == b"public_send"
-                    && target_kind == NamespaceKind::Instance
-                {
-                    return None;
-                }
-                (
-                    self.resolve_constant_receiver_namespace(&receiver)?,
-                    target_kind,
-                )
-            }
-            Some(_) => return None,
-        };
-        Some((
-            implicit_namespace,
-            implicit_kind,
-            definition_namespace,
-            definition_kind,
-        ))
+    ) -> Option<BlockExecution> {
+        scope_rules::dynamic_definition_block(node, &self.scope_tracker, |receiver| {
+            self.resolve_constant_receiver_namespace(receiver)
+        })
     }
 
     pub(in crate::indexer::fact_collector) fn concern_class_methods_block_namespace(
         &mut self,
         node: &CallNode,
     ) -> Option<Vec<RubyConstant>> {
-        if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
-            return None;
-        }
-        node.block()?;
-
+        let class_methods = scope_rules::class_methods_block(node)?;
         let current_namespace = self.scope_tracker.get_ns_stack();
         if current_namespace.is_empty() {
             return None;
         }
 
-        let class_methods = RubyConstant::new("ClassMethods").expect_invariant(
-            "static Concern ClassMethods constant is invalid",
-            "`ClassMethods` is a valid Ruby constant",
-            "inspect RubyConstant validation",
-        );
         let mut target_namespace = current_namespace.clone();
         target_namespace.push(class_methods);
         let target_fqn = FullyQualifiedName::namespace(target_namespace);

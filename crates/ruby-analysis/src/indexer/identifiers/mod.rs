@@ -8,6 +8,7 @@ mod variables;
 use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant};
 use crate::invariant::ExpectInvariant;
 
+use crate::indexer::documents::scope_rules;
 use crate::indexer::{Identifier, LVScopeId, ScopeTracker};
 
 use ruby_prism::*;
@@ -180,9 +181,7 @@ fn static_receiver_namespace(
     scope_tracker: &ScopeTracker,
 ) -> Option<Vec<RubyConstant>> {
     if node.as_self_node().is_some() {
-        let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
-        return (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
-            .then_some(namespace);
+        return scope_rules::implicit_singleton_namespace(scope_tracker);
     }
     if let Some(receiver) = crate::indexer::mixin_ref_from_node(node) {
         return Some(receiver.parts);
@@ -193,135 +192,9 @@ fn static_receiver_namespace(
     }
     let mut namespace = static_receiver_namespace(&call.receiver()?, scope_tracker)?;
     let arguments = call.arguments()?;
-    let argument = arguments.arguments().iter().next()?;
-    let name = if let Some(symbol) = argument.as_symbol_node() {
-        String::from_utf8_lossy(symbol.unescaped()).to_string()
-    } else if let Some(string) = argument.as_string_node() {
-        String::from_utf8_lossy(string.unescaped()).to_string()
-    } else {
-        return None;
-    };
+    let name = scope_rules::static_name(&arguments.arguments().iter().next()?)?;
     namespace.push(RubyConstant::new(&name).ok()?);
     Some(namespace)
-}
-
-fn static_eval_block_context(
-    node: &CallNode,
-    scope_tracker: &ScopeTracker,
-) -> Option<(Vec<RubyConstant>, NamespaceKind, NamespaceKind)> {
-    let (implicit_receiver_kind, method_definition_kind) = match node.name().as_slice() {
-        b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => {
-            (NamespaceKind::Singleton, NamespaceKind::Instance)
-        }
-        b"instance_eval" | b"instance_exec" => (NamespaceKind::Singleton, NamespaceKind::Singleton),
-        _ => return None,
-    };
-    node.block()?;
-    let eval_namespace = match node.receiver() {
-        None => {
-            let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
-            (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
-                .then_some(namespace)?
-        }
-        Some(receiver) if receiver.as_self_node().is_some() => {
-            let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
-            (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
-                .then_some(namespace)?
-        }
-        Some(receiver) => static_receiver_namespace(&receiver, scope_tracker)?,
-    };
-    Some((
-        eval_namespace,
-        implicit_receiver_kind,
-        method_definition_kind,
-    ))
-}
-
-fn static_dynamic_definition_block_context(
-    node: &CallNode,
-    scope_tracker: &ScopeTracker,
-) -> Option<(
-    Vec<RubyConstant>,
-    NamespaceKind,
-    Vec<RubyConstant>,
-    NamespaceKind,
-)> {
-    node.block()?;
-    let (definition_namespace, definition_kind) = scope_tracker.method_definition_context();
-    let (implicit_namespace, implicit_kind) = match node.receiver() {
-        None => {
-            let target_kind = match node.name().as_slice() {
-                b"define_method"
-                    if !scope_tracker.execution_context_active()
-                        && scope_tracker.in_singleton() =>
-                {
-                    NamespaceKind::Singleton
-                }
-                b"define_method" => NamespaceKind::Instance,
-                b"define_singleton_method" => NamespaceKind::Singleton,
-                _ => return None,
-            };
-            let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
-            if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
-                return None;
-            }
-            (namespace, target_kind)
-        }
-        Some(receiver) if node.name().as_slice() == b"define_singleton_method" => (
-            static_receiver_namespace(&receiver, scope_tracker)?,
-            NamespaceKind::Singleton,
-        ),
-        Some(receiver)
-            if matches!(
-                node.name().as_slice(),
-                b"send" | b"public_send" | b"__send__"
-            ) =>
-        {
-            let arguments = node.arguments()?;
-            let selector = arguments.arguments().iter().next()?;
-            let target_kind = if let Some(symbol) = selector.as_symbol_node() {
-                match symbol.unescaped() {
-                    b"define_method" => NamespaceKind::Instance,
-                    b"define_singleton_method" => NamespaceKind::Singleton,
-                    _ => return None,
-                }
-            } else if let Some(string) = selector.as_string_node() {
-                match string.unescaped() {
-                    b"define_method" => NamespaceKind::Instance,
-                    b"define_singleton_method" => NamespaceKind::Singleton,
-                    _ => return None,
-                }
-            } else {
-                return None;
-            };
-            if node.name().as_slice() == b"public_send" && target_kind == NamespaceKind::Instance {
-                return None;
-            }
-            (
-                static_receiver_namespace(&receiver, scope_tracker)?,
-                target_kind,
-            )
-        }
-        Some(_) => return None,
-    };
-    Some((
-        implicit_namespace,
-        implicit_kind,
-        definition_namespace,
-        definition_kind,
-    ))
-}
-
-fn concern_class_methods_block_namespace(node: &CallNode) -> Option<Vec<RubyConstant>> {
-    if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
-        return None;
-    }
-    node.block()?;
-    Some(vec![RubyConstant::new("ClassMethods").expect_invariant(
-        "static Concern ClassMethods constant is invalid",
-        "`ClassMethods` is a valid Ruby constant",
-        "inspect RubyConstant validation",
-    )])
 }
 
 impl Visit<'_> for IdentifierVisitor {
@@ -483,12 +356,10 @@ impl Visit<'_> for IdentifierVisitor {
                 "keep the Prism call node immutable during visitor dispatch",
             ));
             self.scope_tracker.pop_execution_context();
-        } else if let Some((
-            implicit_namespace,
-            implicit_kind,
-            definition_namespace,
-            definition_kind,
-        )) = static_dynamic_definition_block_context(node, &self.scope_tracker)
+        } else if let Some(execution) =
+            scope_rules::dynamic_definition_block(node, &self.scope_tracker, |receiver| {
+                static_receiver_namespace(receiver, &self.scope_tracker)
+            })
         {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
@@ -501,16 +372,13 @@ impl Visit<'_> for IdentifierVisitor {
                 "context matching required the same Prism call to have a block",
                 "keep identifier traversal and context matching atomic",
             );
-            self.scope_tracker.push_block_execution_context(
-                implicit_namespace,
-                implicit_kind,
-                definition_namespace,
-                definition_kind,
-            );
+            execution.enter(&mut self.scope_tracker);
             self.visit(&block);
             self.scope_tracker.pop_execution_context();
-        } else if let Some((eval_namespace, implicit_kind, definition_kind)) =
-            static_eval_block_context(node, &self.scope_tracker)
+        } else if let Some(execution) =
+            scope_rules::eval_block(node, &self.scope_tracker, |receiver| {
+                static_receiver_namespace(receiver, &self.scope_tracker)
+            })
         {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
@@ -519,21 +387,16 @@ impl Visit<'_> for IdentifierVisitor {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_block_execution_context(
-                    eval_namespace.clone(),
-                    implicit_kind,
-                    eval_namespace,
-                    definition_kind,
-                );
+                execution.enter(&mut self.scope_tracker);
                 self.visit(&block);
                 self.scope_tracker.pop_execution_context();
             }
-        } else if let Some(class_methods_namespace) = concern_class_methods_block_namespace(node) {
+        } else if let Some(class_methods) = scope_rules::class_methods_block(node) {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_ns_scopes(class_methods_namespace);
+                self.scope_tracker.push_ns_scopes(vec![class_methods]);
                 self.visit(&block);
                 self.scope_tracker.pop_ns_scope();
             }

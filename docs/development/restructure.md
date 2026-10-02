@@ -601,9 +601,11 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] D1a. Share the lexical lookup, declaration-reopen, and
         receiver-namespace rules (`scope_rules.rs`) between the seed and the
         collector.
-  - [ ] D1b. Share the call-block classifier (eval, dynamic definition,
-        `class_methods`, framework instance block) between the collector and
-        the cursor walk, with receiver resolution passed in.
+  - [x] D1b. Share the call-block classifier (eval, dynamic definition,
+        `class_methods`) between the collector and the cursor walk, with
+        receiver resolution passed in. The seed keeps its own eval classifier
+        until D1d, and the framework instance block test stays a one-line
+        name check in both walks.
   - [ ] D1c. Fix the scope disagreements, each with a failing generic test
         first:
     - [x] Constants assigned and classes opened inside an eval block belong to
