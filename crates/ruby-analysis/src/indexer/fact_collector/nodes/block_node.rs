@@ -1,4 +1,4 @@
-use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, RubyConstant};
+use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind};
 use crate::indexer::documents::scope_rules::{self, BlockExecution};
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use ruby_prism::{BlockNode, CallNode, NumberedParametersNode, ParametersNode};
@@ -125,29 +125,26 @@ impl FactCollector {
         })
     }
 
-    pub(in crate::indexer::fact_collector) fn concern_class_methods_block_namespace(
+    /// A Concern `class_methods` block: declares the `ClassMethods` module
+    /// and extends its owner with it.
+    pub(in crate::indexer::fact_collector) fn concern_class_methods_block(
         &mut self,
         node: &CallNode,
-    ) -> Option<Vec<RubyConstant>> {
-        let class_methods = scope_rules::class_methods_block(node)?;
-        let current_namespace = self.scope_tracker.get_ns_stack();
-        if current_namespace.is_empty() {
-            return None;
-        }
-
-        let mut target_namespace = current_namespace.clone();
-        target_namespace.push(class_methods);
-        let target_fqn = FullyQualifiedName::namespace(target_namespace);
+    ) -> Option<BlockExecution> {
+        let execution = scope_rules::class_methods_block(
+            node,
+            scope_rules::implicit_singleton_namespace(&self.scope_tracker),
+        )?;
+        let target = execution.definition_namespace.clone();
+        let owner = FullyQualifiedName::namespace(target[..target.len() - 1].to_vec());
         let range = self.direct_range(&node.location());
-        self.direct_push_namespace_facts(target_fqn, GraphNodeKind::Module, range, range);
-        self.direct_push_edge(
-            FullyQualifiedName::namespace(current_namespace),
-            &[class_methods],
-            false,
-            GraphEdgeKind::Extend,
+        self.direct_push_namespace_facts(
+            FullyQualifiedName::namespace(target.clone()),
+            GraphNodeKind::Module,
+            range,
             range,
         );
-
-        Some(vec![class_methods])
+        self.direct_push_edge(owner, &target, true, GraphEdgeKind::Extend, range);
+        Some(execution)
     }
 }

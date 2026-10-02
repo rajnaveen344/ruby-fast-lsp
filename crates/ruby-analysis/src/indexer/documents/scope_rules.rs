@@ -251,18 +251,30 @@ pub fn dynamic_definition_block(
     })
 }
 
-/// A Concern `class_methods do … end` block, which defines methods on the
-/// enclosing namespace's `ClassMethods` module.
-pub fn class_methods_block(node: &CallNode<'_>) -> Option<RubyConstant> {
+/// A Concern `class_methods do … end` block. It is sent to `self`, so it
+/// defines methods on the `ClassMethods` module of the namespace `self`
+/// names (`self_namespace`), which inside an eval block is the receiver. The
+/// block keeps the lexical scope.
+pub fn class_methods_block(
+    node: &CallNode<'_>,
+    self_namespace: Option<Vec<RubyConstant>>,
+) -> Option<BlockExecution> {
     if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
         return None;
     }
     node.block()?;
-    Some(RubyConstant::new("ClassMethods").expect_invariant(
+    let mut target = self_namespace.filter(|namespace| !namespace.is_empty())?;
+    target.push(RubyConstant::new("ClassMethods").expect_invariant(
         "static Concern ClassMethods constant is invalid",
         "`ClassMethods` is a valid Ruby constant",
         "inspect RubyConstant validation",
-    ))
+    ));
+    Some(BlockExecution {
+        implicit_namespace: target.clone(),
+        implicit_kind: NamespaceKind::Singleton,
+        definition_namespace: target,
+        definition_kind: NamespaceKind::Instance,
+    })
 }
 
 /// The text of a symbol or string literal.

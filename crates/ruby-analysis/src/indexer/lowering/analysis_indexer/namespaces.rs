@@ -11,7 +11,7 @@ use ruby_prism::{CallNode, Node};
 use super::syntax::{constant_parts_and_absolute, included_hook_mixin_call_kind};
 use super::{AnalysisIndexer, ScopeKind};
 use crate::indexer::documents::scope_rules::{
-    resolve_lexical_namespace, resolve_receiver_namespace,
+    class_methods_block, resolve_lexical_namespace, resolve_receiver_namespace,
 };
 
 impl AnalysisIndexer {
@@ -200,40 +200,23 @@ impl AnalysisIndexer {
         Some((namespace, definition_scope))
     }
 
+    /// A Concern `class_methods` block: declares the `ClassMethods` module,
+    /// extends its owner with it, and returns where its methods land.
     pub(super) fn push_concern_class_methods_block(
         &mut self,
         node: &CallNode<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
-            return None;
-        }
-        node.block()?;
-        if self.owner_stack.is_empty() {
-            return None;
-        }
-
-        let class_methods = RubyConstant::new("ClassMethods").expect_invariant(
-            "static Concern ClassMethods constant is invalid",
-            "`ClassMethods` is a valid Ruby constant",
-            "inspect RubyConstant validation",
-        );
-        let mut target_namespace = self.owner_stack.clone();
-        target_namespace.push(class_methods);
+        let target = class_methods_block(node, self.namespace_body_owner().map(<[_]>::to_vec))?
+            .definition_namespace;
+        let owner = FullyQualifiedName::namespace(target[..target.len() - 1].to_vec());
         let range = self.range(&node.location());
         self.push_namespace_facts(
-            FullyQualifiedName::namespace(target_namespace),
+            FullyQualifiedName::namespace(target.clone()),
             GraphNodeKind::Module,
             range,
             range,
         );
-        self.push_edge(
-            FullyQualifiedName::namespace(self.owner_stack.clone()),
-            &[class_methods],
-            false,
-            GraphEdgeKind::Extend,
-            range,
-        );
-
-        Some(vec![class_methods])
+        self.push_edge(owner, &target, true, GraphEdgeKind::Extend, range);
+        Some(target)
     }
 }

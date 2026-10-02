@@ -52,6 +52,36 @@ Product.<ref>find_by_term</ref>
     .await;
 }
 
+/// `class_methods` inside `Target.class_eval` defines `Target::ClassMethods`,
+/// not a module under the block's lexical namespace.
+#[tokio::test]
+async fn references_concern_class_method_declared_in_eval_block() {
+    check(
+        r#"
+module Searchable
+  extend ActiveSupport::Concern
+end
+
+module Extensions
+  Searchable.class_eval do
+    class_methods do
+      def find_by_term$0
+        "ok"
+      end
+    end
+  end
+end
+
+class Product
+  include Searchable
+end
+
+Product.<ref>find_by_term</ref>
+"#,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn references_included_hook_instance_method() {
     check(

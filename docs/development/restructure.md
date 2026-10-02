@@ -628,9 +628,11 @@ Delete this file when the last task is done. Git history keeps the record.
       cursor walk, and neither the seed nor the collector defined the
       method. `resolve_receiver_namespace` now takes the namespace `self`
       names in each walk.
-    - Concern `class_methods` inside an eval block: the seed nests
+    - [x] Concern `class_methods` inside an eval block: the seed nested
       `ClassMethods` under the eval receiver; the collector and cursor walk
-      nest it under the lexical namespace.
+      nested it under the lexical namespace. `class_methods` is sent to
+      `self`, so `scope_rules::class_methods_block` now targets the namespace
+      `self` names and opens a block context that keeps the lexical scope.
     - [x] The seed accepted only `self` as a `def` receiver and dropped
       `def Name.x` inside `class Name`. A constant-path receiver
       (`def A::B.x`) is still skipped by the seed; the collector attaches it

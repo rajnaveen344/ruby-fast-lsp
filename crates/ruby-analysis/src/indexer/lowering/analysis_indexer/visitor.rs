@@ -432,16 +432,12 @@ impl Visit<'_> for AnalysisIndexer {
             }
             return;
         }
-        if let Some(class_methods_namespace) = self.push_concern_class_methods_block(node) {
+        if let Some(class_methods) = self.push_concern_class_methods_block(node) {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                let mut lexical = self.lexical_stack.clone();
-                lexical.extend(class_methods_namespace.iter().cloned());
-                let mut owner = self.owner_stack.clone();
-                owner.extend(class_methods_namespace);
-                self.enter_namespace_frame(lexical, owner);
+                self.enter_namespace_frame(self.lexical_stack.clone(), class_methods);
                 self.scope_stack.push(ScopeKind::Instance);
                 self.visit(&block);
                 self.scope_stack.pop();

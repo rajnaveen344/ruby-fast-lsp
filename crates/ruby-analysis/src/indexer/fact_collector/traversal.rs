@@ -246,14 +246,12 @@ impl Visit<'_> for FactCollector {
                 );
                 self.scope_tracker.pop_execution_context();
             }
-        } else if let Some(class_methods_namespace) =
-            self.concern_class_methods_block_namespace(node)
-        {
+        } else if let Some(execution) = self.concern_class_methods_block(node) {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_ns_scopes(class_methods_namespace);
+                execution.enter(&mut self.scope_tracker);
                 self.flow.block_parameters.push(Vec::new());
                 self.visit(&block);
                 self.flow.block_parameters.pop().expect_invariant(
@@ -261,7 +259,7 @@ impl Visit<'_> for FactCollector {
                     "each pushed block type frame must be popped exactly once",
                     "keep FactCollector::visit_call_node block traversal balanced",
                 );
-                self.scope_tracker.pop_ns_scope();
+                self.scope_tracker.pop_execution_context();
             }
         } else {
             if let Some(receiver) = node.receiver() {

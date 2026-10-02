@@ -403,14 +403,17 @@ impl Visit<'_> for IdentifierVisitor {
                 self.visit(&block);
                 self.scope_tracker.pop_execution_context();
             }
-        } else if let Some(class_methods) = scope_rules::class_methods_block(node) {
+        } else if let Some(execution) = scope_rules::class_methods_block(
+            node,
+            scope_rules::implicit_singleton_namespace(&self.scope_tracker),
+        ) {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_ns_scopes(vec![class_methods]);
+                execution.enter(&mut self.scope_tracker);
                 self.visit(&block);
-                self.scope_tracker.pop_ns_scope();
+                self.scope_tracker.pop_execution_context();
             }
         } else if crate::indexer::is_framework_instance_block_call_name(node.name().as_slice())
             && node.receiver().is_none()
