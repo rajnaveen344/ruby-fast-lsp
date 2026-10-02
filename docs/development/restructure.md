@@ -259,7 +259,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B7. Gather diagnostic policy into one module.
   - [x] B7a. `engine/diagnostics/policy.rs` absorbs `helpers.rs` and owns the
         code constants and severities.
-  - [ ] B7b. Move the suppression predicates (incomplete chain, explicit
+  - [x] B7b. Move the suppression predicates (incomplete chain, explicit
         contract, dynamic mixin hook) into `policy.rs`; rename uses the same
         predicate, with a test for fail-closed rename on an incomplete chain.
   - [ ] B7c. The server imports the engine's `unresolved-require` code.
@@ -268,6 +268,22 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] B7e. One composition function for syntax, engine, and linter
         diagnostics; replace the hand-assembled publish sites.
   - [ ] B7f. Move composition with C3e; the linter stays a runner.
+
+  Notes (B7b): rename and absence claims share `AncestryCompleteness`, the
+  walk that answers `Unknown(IncompleteChain)` for an unresolved lookup edge
+  or an ambiguous superclass on any ancestor. Absence claims add barriers
+  rename does not: an open top-level owner, a singleton owner without an
+  indexed metaclass, and a dynamic mixin hook. Unifying fully would make
+  rename refuse every top-level method and every owner whose mixin defines
+  `included`, `prepended`, or `extended`. This is a design choice, not a bug,
+  because rename follows positive lookup identity over static edges, as
+  method lookup does. A test pins the split. Options: (a) keep the split
+  (current); (b) make rename also refuse hooked owners, since a hook can
+  define a colliding name; (c) give the hook barrier a reason in
+  `LookupUnknown` so lookup and rename can opt in. `lookup::method`'s
+  `absence()` still reads its own FQN-id chain check
+  (`method_lookup_chain_has_unresolved_dependency_from_graph`). Moving it onto
+  `AncestryCompleteness` is a follow-up that needs its own edge-case tests.
 - [x] B8. Break the indexer ↔ inference ↔ engine cycle so dependencies point
       one way: core ← inference ← indexer ← engine.
   - [x] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.

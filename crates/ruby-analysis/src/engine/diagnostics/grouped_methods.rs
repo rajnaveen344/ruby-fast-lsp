@@ -2,14 +2,13 @@
 //! diagnostics across every receiver member.
 
 use crate::invariant::ExpectInvariant;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use super::policy::UNRESOLVED_METHOD;
-use super::MethodChainCompletenessCache;
+use super::policy::{MethodAbsenceClaims, UNRESOLVED_METHOD};
 use crate::core::names::fqn_id::FqnId;
 use crate::core::{
     DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, MethodFact, MethodReferenceAccess,
-    ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    ResolvedMethodCallee, RubyMethod, RubyType, SourceFileId,
 };
 use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::{Project, View};
@@ -137,8 +136,7 @@ impl Project {
         receiver_type: &RubyType,
         method: RubyMethod,
         diagnostics: &crate::core::MethodReferenceDiagnostics,
-        unresolved_method_edge_sources: &HashSet<Vec<RubyConstant>>,
-        completeness_cache: &mut MethodChainCompletenessCache,
+        absence_claims: &mut MethodAbsenceClaims,
         diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
     ) {
         if !diagnostics.diagnose_unresolved {
@@ -148,12 +146,7 @@ impl Project {
         if namespaces.is_empty()
             || namespaces.iter().any(|owner| {
                 !self.method_namespace_target_exists(owner)
-                    || (!self.method_absence_has_explicit_contract(owner, method)
-                        && self.method_lookup_chain_is_incomplete_cached(
-                            owner,
-                            unresolved_method_edge_sources,
-                            completeness_cache,
-                        ))
+                    || absence_claims.suppresses(self, owner, method)
             })
         {
             return;

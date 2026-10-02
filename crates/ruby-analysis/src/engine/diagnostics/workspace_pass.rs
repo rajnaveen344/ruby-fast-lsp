@@ -6,10 +6,8 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::grouped_methods::grouped_method_targets;
-use super::policy::{UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
-use super::{
-    constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache, MethodReferenceCacheKey,
-};
+use super::policy::{MethodAbsenceClaims, UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
+use super::{constant_name, MethodCallOutcomeCaches, MethodReferenceCacheKey};
 use crate::core::names::fqn_id::ConstLookupId;
 use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::reference_store::ConstLookup;
@@ -49,8 +47,7 @@ impl Project {
             HashMap::new();
         let mut constant_target_cache: HashMap<ConstLookupId, Option<FqnId>> = HashMap::new();
         let mut method_lookup_chain_cache = MethodLookupChainCache::new();
-        let unresolved_method_edge_sources = self.unresolved_lookup_edge_sources();
-        let mut method_chain_completeness_cache = MethodChainCompletenessCache::default();
+        let mut method_absence_claims = MethodAbsenceClaims::new(self);
         let mut resolved_call_outcomes = HashMap::new();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
         self.uses.clear_resolved();
@@ -209,8 +206,7 @@ impl Project {
                                 receiver_type,
                                 candidate.method,
                                 diagnostics,
-                                &unresolved_method_edge_sources,
-                                &mut method_chain_completeness_cache,
+                                &mut method_absence_claims,
                                 &mut unresolved_constants,
                             );
                             if let Some(expression_range) = candidate.call_expression_range {
@@ -387,14 +383,7 @@ impl Project {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
-                            let explicit_absence = self
-                                .method_absence_has_explicit_contract(&owner_fqn, candidate.method);
-                            if !explicit_absence
-                                && self.method_lookup_chain_is_incomplete_cached(
-                                    &owner_fqn,
-                                    &unresolved_method_edge_sources,
-                                    &mut method_chain_completeness_cache,
-                                )
+                            if method_absence_claims.suppresses(self, &owner_fqn, candidate.method)
                             {
                                 continue;
                             }
@@ -465,7 +454,7 @@ impl Project {
         );
         stats.set(
             ResolveStat::IncompleteMethodChainCacheEntries,
-            stats::count(method_chain_completeness_cache.results.len()),
+            stats::count(method_absence_claims.decided_owner_count()),
         );
         stats.set(
             ResolveStat::MethodReturnCacheHits,
@@ -512,8 +501,7 @@ impl Project {
         drop(method_suggestion_cache);
         drop(constant_target_cache);
         drop(method_lookup_chain_cache);
-        drop(unresolved_method_edge_sources);
-        drop(method_chain_completeness_cache);
+        drop(method_absence_claims);
         drop(call_outcome_caches);
 
         self.uses.restore_candidates(reference_candidate_store);

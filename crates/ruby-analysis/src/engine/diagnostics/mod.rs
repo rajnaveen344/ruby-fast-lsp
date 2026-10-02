@@ -17,9 +17,7 @@ use std::collections::HashMap;
 
 use crate::core::names::fqn_id::ConstLookupId;
 use crate::core::names::fqn_id::FqnId;
-use crate::core::{
-    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType, TextRange,
-};
+use crate::core::{NamespaceKind, RubyConstant, RubyMethod, RubyType, TextRange};
 
 type MethodReferenceCacheKey = (ConstLookupId, NamespaceKind, RubyMethod, bool);
 
@@ -49,13 +47,6 @@ struct MethodCallOutcomeCaches {
     visibility_misses: usize,
     ambiguous_return_hits: usize,
     ambiguous_return_misses: usize,
-}
-
-#[derive(Default)]
-struct MethodChainCompletenessCache {
-    results: HashMap<FullyQualifiedName, bool>,
-    dynamic_mixin_hooks: HashMap<FullyQualifiedName, bool>,
-    ambiguous_superclasses: HashMap<FullyQualifiedName, bool>,
 }
 
 fn constant_name(parts: &[RubyConstant]) -> String {

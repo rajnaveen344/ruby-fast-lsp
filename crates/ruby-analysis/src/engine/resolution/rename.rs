@@ -1,7 +1,6 @@
 //! Rename targets and their safety checks for methods and constants.
 
 use crate::invariant::ExpectInvariant;
-use std::collections::HashSet;
 
 use super::lookup_chain::method_lookup_chain;
 use super::ConstantRenameTarget;
@@ -10,6 +9,7 @@ use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
     FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolKind, TextRange,
 };
+use crate::engine::diagnostics::policy::AncestryCompleteness;
 use crate::engine::queries::View;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -136,7 +136,12 @@ impl<'a> View<'a> {
         }) {
             return None;
         }
-        if self.method_lookup_chain_is_incomplete_for_rename(&identity.owner) {
+        // The same completeness walk that suppresses `unresolved-method`
+        // claims: an unknown lookup edge leaves the collision proof open.
+        if !AncestryCompleteness::new(self.engine)
+            .chain(self.engine, &identity.owner, |_| false)
+            .is_missing()
+        {
             return None;
         }
         if let Some(new_name) = new_name {
@@ -324,30 +329,6 @@ impl<'a> View<'a> {
         identities.sort();
         identities.dedup();
         identities
-    }
-
-    fn method_lookup_chain_is_incomplete_for_rename(&self, owner: &FullyQualifiedName) -> bool {
-        let unresolved_sources = self.engine.unresolved_lookup_edge_sources();
-        let mut pending = vec![owner.clone()];
-        let mut visited = HashSet::new();
-        while let Some(current) = pending.pop() {
-            if !visited.insert(current.clone()) {
-                continue;
-            }
-            if self.superclass_is_ambiguous(&current) {
-                return true;
-            }
-            if unresolved_sources.contains(&current.namespace_parts()) {
-                return true;
-            }
-            pending.extend(
-                self.engine
-                    .graph_ancestry_edges_from(&current)
-                    .into_iter()
-                    .map(|edge| self.engine.names.expand_interned_fqn(edge.target)),
-            );
-        }
-        false
     }
 }
 

@@ -5,8 +5,8 @@ use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use super::grouped_methods::grouped_method_targets;
-use super::policy::{UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
-use super::{constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache};
+use super::policy::{MethodAbsenceClaims, UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
+use super::{constant_name, MethodCallOutcomeCaches};
 use crate::core::storage::reference_store::ConstLookup;
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
@@ -32,8 +32,7 @@ impl Project {
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
         let mut method_lookup_chain_cache = MethodLookupChainCache::new();
-        let unresolved_method_edge_sources = self.unresolved_lookup_edge_sources();
-        let mut method_chain_completeness_cache = MethodChainCompletenessCache::default();
+        let mut method_absence_claims = MethodAbsenceClaims::new(self);
         let mut resolved_refs = Vec::new();
         let mut resolved_call_outcomes = HashMap::new();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
@@ -171,8 +170,7 @@ impl Project {
                                 receiver_type,
                                 method,
                                 diagnostics,
-                                &unresolved_method_edge_sources,
-                                &mut method_chain_completeness_cache,
+                                &mut method_absence_claims,
                                 &mut unresolved,
                             );
                             if let Some(expression_range) = call_expression_range {
@@ -334,15 +332,7 @@ impl Project {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
-                            let explicit_absence =
-                                self.method_absence_has_explicit_contract(&owner_fqn, method);
-                            if !explicit_absence
-                                && self.method_lookup_chain_is_incomplete_cached(
-                                    &owner_fqn,
-                                    &unresolved_method_edge_sources,
-                                    &mut method_chain_completeness_cache,
-                                )
-                            {
+                            if method_absence_claims.suppresses(self, &owner_fqn, method) {
                                 continue;
                             }
                             let suggestion = namespace_exists
