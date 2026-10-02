@@ -3,7 +3,7 @@
 use super::IndexingCoordinator;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
-use crate::loader::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 use anyhow::Result;

@@ -9,8 +9,8 @@ use crate::loader::cache::dependency_product::{
 };
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
-use crate::loader::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
 use crate::utils;
+use crate::utils::admission::{IndexingResourcePriority, IndexingWorkSpec};
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
 use rayon::prelude::*;

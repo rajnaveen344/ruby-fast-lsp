@@ -235,16 +235,16 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     let indexer = shared_dependency_indexer(&project_root, &gem_root);
     let mut server = RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
         .expect("construct isolated cache server");
-    server.indexing.set_resources(
-        crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-            crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+    server
+        .indexing
+        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
+            crate::utils::admission::IndexingResourcePolicy::with_limits(
                 6,
                 2,
                 512 * 1024 * 1024,
                 2,
             ),
-        ),
-    );
+        ));
     server
         .indexing
         .resources()

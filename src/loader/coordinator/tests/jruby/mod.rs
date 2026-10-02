@@ -3,7 +3,7 @@
 use super::*;
 use crate::environment::runtime::jruby::classpath;
 use crate::environment::runtime::jruby::java_catalog;
-use crate::loader::scheduling::resources;
+use crate::utils::admission;
 
 mod decompiled_navigation;
 mod import_facts;

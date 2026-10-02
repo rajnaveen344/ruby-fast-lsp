@@ -42,16 +42,16 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
     let path = workspace.path().join("opened.rb");
     let uri = Url::from_file_path(&path).unwrap();
     let mut server = RubyLanguageServer::default();
-    server.indexing.set_resources(
-        crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-            crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+    server
+        .indexing
+        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
+            crate::utils::admission::IndexingResourcePolicy::with_limits(
                 1,
                 1,
                 256 * 1024 * 1024,
                 1,
             ),
-        ),
-    );
+        ));
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
     let release = Arc::new(tokio::sync::Notify::new());
@@ -62,9 +62,9 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
         holder_resources
             .run_async_with_resources(
                 "interactive semantic contention holder",
-                crate::loader::scheduling::resources::IndexingWorkSpec::new(
+                crate::utils::admission::IndexingWorkSpec::new(
                     Some(holder_root),
-                    crate::loader::scheduling::resources::IndexingResourcePriority::Background,
+                    crate::utils::admission::IndexingResourcePriority::Background,
                     1,
                     256 * 1024 * 1024,
                     1,
@@ -140,16 +140,16 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
     let path = workspace.path().join("changing.rb");
     let uri = Url::from_file_path(&path).unwrap();
     let mut server = RubyLanguageServer::default();
-    server.indexing.set_resources(
-        crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-            crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+    server
+        .indexing
+        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
+            crate::utils::admission::IndexingResourcePolicy::with_limits(
                 1,
                 1,
                 256 * 1024 * 1024,
                 1,
             ),
-        ),
-    );
+        ));
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
     handle_did_open(
         &server,
@@ -172,9 +172,9 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
         holder_resources
             .run_async_with_resources(
                 "didChange ordering contention holder",
-                crate::loader::scheduling::resources::IndexingWorkSpec::new(
+                crate::utils::admission::IndexingWorkSpec::new(
                     Some(holder_root),
-                    crate::loader::scheduling::resources::IndexingResourcePriority::Background,
+                    crate::utils::admission::IndexingResourcePriority::Background,
                     1,
                     256 * 1024 * 1024,
                     1,

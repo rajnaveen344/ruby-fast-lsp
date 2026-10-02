@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
-use crate::loader::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 
@@ -550,7 +550,7 @@ mod tests {
             };
             let source = "puts \"hello\"\n  example\n";
             let indexing_resources = IndexingResourceGovernor::new(
-                crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+                crate::utils::admission::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     EDITOR_TOOL_TRANSIENT_MEMORY_BYTES,

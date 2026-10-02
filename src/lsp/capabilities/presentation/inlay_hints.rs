@@ -203,16 +203,16 @@ mod tests {
         std::fs::write(&path, source).unwrap();
 
         let mut server = RubyLanguageServer::default();
-        server.indexing.set_resources(
-            crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-                crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+        server
+            .indexing
+            .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
+                crate::utils::admission::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     256 * 1024 * 1024,
                     1,
                 ),
-            ),
-        );
+            ));
         server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
         indexing::handle_did_open(
             &server,
@@ -235,9 +235,9 @@ mod tests {
             holder_resources
                 .run_async_with_resources(
                     "inlay semantic commit contention holder",
-                    crate::loader::scheduling::resources::IndexingWorkSpec::new(
+                    crate::utils::admission::IndexingWorkSpec::new(
                         Some(holder_root),
-                        crate::loader::scheduling::resources::IndexingResourcePriority::Background,
+                        crate::utils::admission::IndexingResourcePriority::Background,
                         1,
                         256 * 1024 * 1024,
                         1,

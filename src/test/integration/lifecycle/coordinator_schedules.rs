@@ -33,9 +33,9 @@ async fn edit_between_real_collection_and_commit(
     let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
     // The concurrent schedule needs one lane for each producer. Set its
     // resource contract explicitly instead of inheriting the host CPU count.
-    editor.set_indexing_resource_policy(
-        crate::loader::scheduling::resources::IndexingResourcePolicy::new(cpu_lanes, cpu_lanes),
-    );
+    editor.set_indexing_resource_policy(crate::utils::admission::IndexingResourcePolicy::new(
+        cpu_lanes, cpu_lanes,
+    ));
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
     let workspace = server.add_workspace(root_uri.clone());

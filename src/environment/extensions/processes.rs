@@ -23,7 +23,7 @@ use crate::environment::extensions::{
     MAX_PROCESS_ARGUMENT_BYTES, MAX_PROCESS_OUTPUT_BYTES, MAX_PROCESS_REQUESTS_PER_EVENT,
     MAX_PROCESS_STDIN_BYTES, MAX_PROCESS_TIMEOUT,
 };
-use crate::loader::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 

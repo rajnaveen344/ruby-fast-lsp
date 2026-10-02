@@ -77,8 +77,8 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn cpu_indexing_task_does_not_block_the_async_reactor() {
-    let resources = crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-        crate::loader::scheduling::resources::IndexingResourcePolicy::new(2, 2),
+    let resources = crate::utils::admission::IndexingResourceGovernor::new(
+        crate::utils::admission::IndexingResourcePolicy::new(2, 2),
     );
     let started = Arc::new(tokio::sync::Notify::new());
     let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -200,8 +200,8 @@ fn dynamic_dependency_demand_moves_only_the_exact_remaining_locked_gem() {
 #[tokio::test(flavor = "current_thread")]
 async fn scheduler_bounds_parallel_cpu_workers_without_blocking_the_reactor() {
     let scheduler = crate::loader::scheduling::scheduler::IndexingScheduler::new(2);
-    let resources = crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-        crate::loader::scheduling::resources::IndexingResourcePolicy::new(2, 2),
+    let resources = crate::utils::admission::IndexingResourceGovernor::new(
+        crate::utils::admission::IndexingResourcePolicy::new(2, 2),
     );
     let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let maximum = Arc::new(std::sync::atomic::AtomicUsize::new(0));

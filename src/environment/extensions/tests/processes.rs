@@ -125,13 +125,8 @@ async fn extension_process_host_captures_bounded_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn extension_process_waits_for_weighted_admission_and_releases_exact_lease() {
-    let governor = crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-        crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
-            1,
-            1,
-            128 * 1024 * 1024,
-            1,
-        ),
+    let governor = crate::utils::admission::IndexingResourceGovernor::new(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 128 * 1024 * 1024, 1),
     );
     let (holder_started_tx, holder_started_rx) = tokio::sync::oneshot::channel();
     let holder_release = Arc::new(tokio::sync::Notify::new());
@@ -141,9 +136,9 @@ async fn extension_process_waits_for_weighted_admission_and_releases_exact_lease
         holder_governor
             .run_async_with_resources(
                 "extension process contention holder",
-                crate::loader::scheduling::resources::IndexingWorkSpec::new(
+                crate::utils::admission::IndexingWorkSpec::new(
                     Some(crate::test::harness::fixture_path("/workspace/background")),
-                    crate::loader::scheduling::resources::IndexingResourcePriority::Background,
+                    crate::utils::admission::IndexingResourcePriority::Background,
                     1,
                     128 * 1024 * 1024,
                     1,

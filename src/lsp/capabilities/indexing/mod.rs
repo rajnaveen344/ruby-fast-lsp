@@ -60,9 +60,9 @@ async fn process_interactive_file(
     let server = server.clone();
     let uri = uri.clone();
     let content = content.to_string();
-    let spec = crate::loader::scheduling::resources::IndexingWorkSpec::new(
+    let spec = crate::utils::admission::IndexingWorkSpec::new(
         project_root,
-        crate::loader::scheduling::resources::IndexingResourcePriority::OpenDocument,
+        crate::utils::admission::IndexingResourcePriority::OpenDocument,
         1,
         INTERACTIVE_SEMANTIC_TRANSIENT_MEMORY_BYTES,
         1,

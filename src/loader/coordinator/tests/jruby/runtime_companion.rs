@@ -41,8 +41,8 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
     let mut server = RubyLanguageServer::default();
     server
         .indexing
-        .set_resources(resources::IndexingResourceGovernor::new(
-            resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
+        .set_resources(admission::IndexingResourceGovernor::new(
+            admission::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
         ));
     server
         .indexing
@@ -121,8 +121,8 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
     let mut server = RubyLanguageServer::default();
     server
         .indexing
-        .set_resources(resources::IndexingResourceGovernor::new(
-            resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
+        .set_resources(admission::IndexingResourceGovernor::new(
+            admission::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
         ));
     server
         .indexing

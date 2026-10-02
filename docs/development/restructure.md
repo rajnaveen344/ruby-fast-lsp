@@ -288,8 +288,8 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C2a. Move `ProjectRuntimeStatus` and its use of
         `ProjectIndexingSnapshot` from `environment/runtime/catalog.rs` to
         `server/products.rs`.
-  - [ ] C2b. Move `loader/scheduling/resources` to `src/utils/admission/` with
-        no other change.
+  - [x] C2b. Move `loader/scheduling/resources` to `src/utils/admission/` with
+        no other change. The inner `admission.rs` keeps its name.
   - [ ] C2c. Make the persistent cache generic over a `PersistentProduct`
         trait (kind, key, encode, decode). Keep the namespace and magic
         constants so existing caches stay valid. `GemDependencyProduct` and

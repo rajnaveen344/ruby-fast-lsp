@@ -19,6 +19,9 @@ reference candidates, resolved references, and diagnostics.
   produces parser syntax, unreachable-code, and inconsistent-return
   diagnostics for one parsed file
 - `require_paths/`: require-path resolution
+- `scheduling/`: the project indexing queue, progress status, and
+  navigation demand; the resource governor it admits work through lives in
+  `src/utils/admission/`
 - `sources/project/`: project root discovery, project file discovery,
   navigation-demand collection, and dependency scan
 - `sources/stdlib/`: standard library file discovery and exact runtime load paths

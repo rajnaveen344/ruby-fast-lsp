@@ -1,12 +1,12 @@
 //! Indexing admission and process-wide status publication; no semantic store.
 use super::RubyLanguageServer;
 use crate::invariant::ExpectInvariant;
-use crate::loader::scheduling::resources::IndexingResourceGovernor;
 use crate::loader::scheduling::scheduler::IndexingScheduler;
 use crate::loader::scheduling::status::{
     IndexingAggregateSnapshot, IndexingPhase, IndexingReuseSnapshot, IndexingStatusNotification,
     IndexingStatusParams, IndexingStatusSnapshot,
 };
+use crate::utils::admission::IndexingResourceGovernor;
 use log::warn;
 #[cfg(test)]
 use parking_lot::Mutex;
@@ -181,21 +181,17 @@ impl RubyLanguageServer {
     /// Select the resource budget before starting work or sharing the server.
     pub fn set_indexing_resource_policy(
         &mut self,
-        policy: crate::loader::scheduling::resources::IndexingResourcePolicy,
+        policy: crate::utils::admission::IndexingResourcePolicy,
     ) {
         self.indexing
             .set_resources(IndexingResourceGovernor::new(policy));
     }
 
-    pub fn indexing_resource_policy(
-        &self,
-    ) -> crate::loader::scheduling::resources::IndexingResourcePolicy {
+    pub fn indexing_resource_policy(&self) -> crate::utils::admission::IndexingResourcePolicy {
         self.indexing.resources().policy()
     }
 
-    pub fn indexing_resource_snapshot(
-        &self,
-    ) -> crate::loader::scheduling::resources::IndexingResourceSnapshot {
+    pub fn indexing_resource_snapshot(&self) -> crate::utils::admission::IndexingResourceSnapshot {
         self.indexing.resources().snapshot()
     }
 

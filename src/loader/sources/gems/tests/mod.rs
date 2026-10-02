@@ -8,9 +8,9 @@ use super::vendor_cache::{
     CACHED_GEM_PROJECT_DIGEST_MARKER, CACHED_GEM_PROJECT_DIGEST_PREFIX_CHARS,
 };
 use super::*;
-use crate::loader::scheduling::resources::IndexingResourcePriority;
-use crate::loader::scheduling::resources::IndexingWorkSpec;
 use crate::server::RubyLanguageServer;
+use crate::utils::admission::IndexingResourcePriority;
+use crate::utils::admission::IndexingWorkSpec;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use ruby_analysis::core::{

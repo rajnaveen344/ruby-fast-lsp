@@ -56,8 +56,8 @@ mod workspace_indexing;
 use crate::invariant::ExpectInvariant;
 use devtools::metrics::ProductionBudget;
 use log::info;
-use ruby_fast_lsp::loader::scheduling::resources;
 use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::utils::admission;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tower_lsp::lsp_types::Url;
@@ -151,7 +151,7 @@ fn main() -> anyhow::Result<()> {
                     )
                 })
                 .unwrap_or_else(|| default_policy.transient_memory_limit_bytes());
-            server.set_indexing_resource_policy(resources::IndexingResourcePolicy::with_limits(
+            server.set_indexing_resource_policy(admission::IndexingResourcePolicy::with_limits(
                 config
                     .resource_cpu_lanes
                     .unwrap_or_else(|| default_policy.cpu_lanes()),

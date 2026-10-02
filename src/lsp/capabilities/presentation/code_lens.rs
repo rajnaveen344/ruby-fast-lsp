@@ -101,16 +101,16 @@ mod tests {
     async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_reactor() {
         let uri = crate::test::harness::fixture_uri("/tmp/governed_code_lenses.rb");
         let mut server = RubyLanguageServer::default();
-        server.indexing.set_resources(
-            crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-                crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+        server
+            .indexing
+            .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
+                crate::utils::admission::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     256 * 1024 * 1024,
                     1,
                 ),
-            ),
-        );
+            ));
         server.extensions.registry().configure_from_config(
             &crate::environment::config::RubyFastLspConfig {
                 extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -140,9 +140,9 @@ mod tests {
             holder_governor
                 .run_async_with_resources(
                     "code lens contention holder",
-                    crate::loader::scheduling::resources::IndexingWorkSpec::new(
+                    crate::utils::admission::IndexingWorkSpec::new(
                         None,
-                        crate::loader::scheduling::resources::IndexingResourcePriority::Background,
+                        crate::utils::admission::IndexingResourcePriority::Background,
                         1,
                         256 * 1024 * 1024,
                         1,

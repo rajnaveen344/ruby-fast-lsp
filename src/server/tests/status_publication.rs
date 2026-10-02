@@ -1,8 +1,8 @@
-use crate::loader::scheduling::resources;
 use crate::server::indexing::{
     IndexingStatusPublicationDecision, IndexingStatusPublicationState,
     INDEXING_COUNTER_PUBLICATION_INTERVAL,
 };
+use crate::utils::admission;
 
 use crate::loader::scheduling::status::{
     IndexingPhase, IndexingStatusParams, IndexingStatusSnapshot,
@@ -353,8 +353,8 @@ async fn saturated_indexing_keeps_status_switch_and_queued_cancellation_responsi
     let mut language_server = RubyLanguageServer::default();
     language_server
         .indexing
-        .set_resources(resources::IndexingResourceGovernor::new(
-            resources::IndexingResourcePolicy::with_limits(1, 1, 100, 1),
+        .set_resources(admission::IndexingResourceGovernor::new(
+            admission::IndexingResourcePolicy::with_limits(1, 1, 100, 1),
         ));
     language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
     language_server.add_workspace(Url::from_directory_path(&server_project).unwrap());
@@ -381,9 +381,9 @@ async fn saturated_indexing_keeps_status_switch_and_queued_cancellation_responsi
         cancelled_resources
             .run_with_resources(
                 "cancelled saturated waiter",
-                resources::IndexingWorkSpec::new(
+                admission::IndexingWorkSpec::new(
                     Some(cancelled_root),
-                    resources::IndexingResourcePriority::Background,
+                    admission::IndexingResourcePriority::Background,
                     1,
                     1,
                     0,

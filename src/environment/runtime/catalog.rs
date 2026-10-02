@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
-use crate::loader::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 
@@ -848,8 +848,8 @@ mod tests {
         with_process_clock(async {
             use std::os::unix::fs::PermissionsExt;
 
-            let governor = crate::loader::scheduling::resources::IndexingResourceGovernor::new(
-                crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
+            let governor = crate::utils::admission::IndexingResourceGovernor::new(
+                crate::utils::admission::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     64 * 1024 * 1024,
@@ -864,9 +864,9 @@ mod tests {
                 holder_governor
                     .run_async_with_resources(
                         "runtime probe contention holder",
-                        crate::loader::scheduling::resources::IndexingWorkSpec::new(
+                        crate::utils::admission::IndexingWorkSpec::new(
                             None,
-                            crate::loader::scheduling::resources::IndexingResourcePriority::Background,
+                            crate::utils::admission::IndexingResourcePriority::Background,
                             1,
                             64 * 1024 * 1024,
                             1,

@@ -1,9 +1,8 @@
-//! Server-wide work admission and indexing progress: the CPU/task/memory/I/O
-//! governor, the indexing queue, status reporting, and demand-driven navigation
-//! indexing.
+//! Indexing progress: the indexing queue, status reporting, and demand-driven
+//! navigation indexing. The CPU/task/memory/I/O governor lives in
+//! `crate::utils::admission`.
 
 pub(crate) mod navigation_demand;
-pub mod resources;
 pub mod scheduler;
 pub mod status;
 

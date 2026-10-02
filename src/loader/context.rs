@@ -20,9 +20,9 @@ use crate::loader::cache::dependency_product::{
 use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
-use crate::loader::scheduling::resources::IndexingResourceGovernor;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
+use crate::utils::admission::IndexingResourceGovernor;
 use crate::utils::single_flight::BoundedSingleFlightCache;
 use anyhow::Result;
 use log::warn;

@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod ast;
 pub mod cache;
 pub mod file_ops;

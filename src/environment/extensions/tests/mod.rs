@@ -62,10 +62,10 @@ use crate::environment::extensions::{ProjectContextSeed, MAX_EXTENSION_WASM_BYTE
 use crate::loader::cache::persistent::{
     CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
 };
-use crate::loader::scheduling::resources::{
+use crate::server::RubyLanguageServer;
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
-use crate::server::RubyLanguageServer;
 
 mod execution_contexts;
 mod lifecycle;

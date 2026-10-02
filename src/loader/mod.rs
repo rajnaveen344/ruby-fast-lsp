@@ -17,7 +17,7 @@
 //! - **`context`**: `LoadContext`, the owner-supplied inputs the loader reads
 //! - **`require_paths`**: Require-path resolution and unresolved-require diagnostics
 //! - **`version`**: Ruby version detection and management
-//! - **`scheduling`**: Work admission, the indexing queue, and progress status
+//! - **`scheduling`**: The indexing queue and progress status
 //! - **`cache`**: Persisted dependency products and their producer identity
 
 pub mod cache;

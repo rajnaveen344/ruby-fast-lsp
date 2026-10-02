@@ -29,7 +29,7 @@ use crate::environment::extensions::{
     EXTENSION_RESPONSE_TRANSIENT_MEMORY_BYTES,
 };
 use crate::loader::cache::persistent::PersistentDerivedProductCache;
-use crate::loader::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 

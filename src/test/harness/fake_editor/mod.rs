@@ -114,7 +114,7 @@ impl FakeEditor {
     /// Choose the production resource policy before starting or sharing work.
     pub fn set_indexing_resource_policy(
         &mut self,
-        policy: crate::loader::scheduling::resources::IndexingResourcePolicy,
+        policy: crate::utils::admission::IndexingResourcePolicy,
     ) {
         assert!(
             self.buffers.is_empty() && self.workspace_count() == 0,

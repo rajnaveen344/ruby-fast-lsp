@@ -189,12 +189,7 @@ async fn extension_reconfiguration_waits_for_weighted_admission_without_blocking
     };
     let registry = ExtensionRegistryHandle::from_config(&RubyFastLspConfig::default());
     let governor = IndexingResourceGovernor::new(
-        crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
-            1,
-            1,
-            256 * 1024 * 1024,
-            1,
-        ),
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
     );
     let holder_release = Arc::new(tokio::sync::Notify::new());
     let holder_release_task = holder_release.clone();
@@ -269,7 +264,7 @@ async fn extension_reconfiguration_waits_for_weighted_admission_without_blocking
 async fn response_requests_without_loaded_capability_bypass_resource_admission() {
     let registry = ExtensionRegistryHandle::empty();
     let governor = IndexingResourceGovernor::new(
-        crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(1, 1, 1, 1),
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 1, 1),
     );
 
     assert!(registry
