@@ -13,6 +13,7 @@ use crate::core::{
 use crate::invariant::ExpectInvariant;
 
 use super::Project;
+use crate::engine::View;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StoredTypeInferenceOutcome {
@@ -437,20 +438,34 @@ impl TypeTable {
     }
 }
 
-impl Project {
+impl View<'_> {
     pub fn type_at(
         &self,
         subject: &TypeSubject,
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> TypeResolution {
-        self.types.store().type_at(subject, file_id, byte_offset)
+        self.engine
+            .types
+            .store()
+            .type_at(subject, file_id, byte_offset)
     }
 
     pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        self.types.store().facts_for(subject)
+        self.engine.types.store().facts_for(subject)
     }
 
+    /// All stored type facts, detached from the engine's internal indexes.
+    pub fn all_type_facts(&self) -> Vec<TypeFact> {
+        self.engine.types.store().all_facts()
+    }
+
+    pub fn type_facts_in_file(&self, file_id: SourceFileId) -> Vec<TypeFact> {
+        self.engine.types.store().facts_in_file(file_id)
+    }
+}
+
+impl Project {
     pub(crate) fn type_store(&self) -> &TypeStore {
         self.types.store()
     }

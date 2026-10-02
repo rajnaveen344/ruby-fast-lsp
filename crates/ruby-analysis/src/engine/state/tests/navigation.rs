@@ -179,7 +179,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.reference_facts_for(&user).is_empty());
+    assert!(engine.view().reference_facts_for(&user).is_empty());
     assert!(engine
         .diagnostic_facts_in_file(ref_file)
         .iter()
@@ -203,7 +203,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&user).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&user).len(), 1);
     assert!(engine
         .diagnostic_facts_in_file(ref_file)
         .iter()
@@ -338,6 +338,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
     );
     assert_eq!(
         engine
+            .view()
             .reference_facts_for(&FullyQualifiedName::method(user.namespace_parts(), method))
             .len(),
         1,
@@ -602,7 +603,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&method_fqn).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&method_fqn).len(), 1);
     assert!(engine
         .diagnostic_facts_in_file(ref_file)
         .iter()
@@ -629,7 +630,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&method_fqn).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&method_fqn).len(), 1);
     assert!(engine
         .diagnostic_facts_in_file(ref_file)
         .iter()

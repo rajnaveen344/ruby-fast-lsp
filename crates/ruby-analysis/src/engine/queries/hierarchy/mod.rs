@@ -40,7 +40,7 @@ impl<'a> View<'a> {
 
     pub fn incoming_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<IncomingCall> {
         let mut grouped = Vec::<(FullyQualifiedName, Vec<TextRange>)>::new();
-        for fact in self.engine.reference_facts_for(method_fqn) {
+        for fact in self.reference_facts_for(method_fqn) {
             let Some(caller_id) = fact.caller else {
                 continue;
             };

@@ -48,7 +48,6 @@ impl<'a> View<'a> {
             .resolve_constant_in_context(parts, context)
             .unwrap_or_else(|| FullyQualifiedName::constant(parts.to_vec()));
         let mut runtime_targets = self
-            .engine
             .type_facts_for(&TypeSubject::Constant(fqn.clone()))
             .into_iter()
             .filter(|fact| fact.provenance == crate::core::TypeProvenance::Runtime)

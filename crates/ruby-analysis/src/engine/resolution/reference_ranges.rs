@@ -17,8 +17,7 @@ use crate::engine::queries::View;
 
 impl<'a> View<'a> {
     pub fn reference_ranges_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
-        self.engine
-            .reference_facts_for(fqn)
+        self.reference_facts_for(fqn)
             .iter()
             .map(|fact| fact.range)
             .collect()
@@ -138,29 +137,23 @@ impl<'a> View<'a> {
             if non_public_target && !allow_private && !protected_query_allowed {
                 continue;
             }
-            ranges.extend(
-                self.engine
-                    .reference_facts_for(&target)
-                    .iter()
-                    .filter_map(|fact| {
-                        if target_non_public
-                            && fact.access == MethodReferenceAccess::ExplicitReceiver
-                        {
-                            if target_visibility_owner.as_ref().is_some_and(
-                                |(visibility, owner)| {
-                                    *visibility == MethodVisibility::Protected
-                                        && self.reference_caller_can_see_protected(fact, owner)
-                                },
-                            ) {
-                                Some(fact.range)
-                            } else {
-                                None
-                            }
-                        } else {
-                            Some(fact.range)
-                        }
-                    }),
-            );
+            ranges.extend(self.reference_facts_for(&target).iter().filter_map(|fact| {
+                if target_non_public && fact.access == MethodReferenceAccess::ExplicitReceiver {
+                    if target_visibility_owner
+                        .as_ref()
+                        .is_some_and(|(visibility, owner)| {
+                            *visibility == MethodVisibility::Protected
+                                && self.reference_caller_can_see_protected(fact, owner)
+                        })
+                    {
+                        Some(fact.range)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(fact.range)
+                }
+            }));
         }
         for candidate in self
             .engine
@@ -295,8 +288,7 @@ impl<'a> View<'a> {
         let Some(target) = self.super_method_reference_target(namespace_fqn, method) else {
             return Vec::new();
         };
-        self.engine
-            .reference_facts_for(&target)
+        self.reference_facts_for(&target)
             .iter()
             .map(|fact| fact.range)
             .collect()

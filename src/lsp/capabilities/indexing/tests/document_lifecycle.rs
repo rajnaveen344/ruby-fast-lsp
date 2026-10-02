@@ -574,7 +574,7 @@ async fn did_open_mirrors_reference_facts_into_analysis_engine() {
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let engine = server.orphan_engine().read();
     let query = AnalysisQuery::new(&engine);
-    assert_eq!(query.references_for_fqn(&user_fqn).len(), 2);
+    assert_eq!(query.reference_facts_for(&user_fqn).len(), 2);
 }
 
 #[tokio::test]

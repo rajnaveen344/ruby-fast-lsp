@@ -168,7 +168,7 @@ Delete this file when the last task is done. Git history keeps the record.
     - [x] B4e3. Hierarchy: the `graph_*` node and edge reads,
           `proven_superclass_edge`, `superclass_is_ambiguous`, and
           `unresolved_graph_edges`.
-    - [ ] B4e4. Uses and types: `reference_facts_for` (folding
+    - [x] B4e4. Uses and types: `reference_facts_for` (folding
           `references_for_fqn`), `type_at`, `type_facts_for`.
     - [ ] B4e5. Diagnostics: `diagnostic_facts_in_file`,
           `all_diagnostic_facts`.

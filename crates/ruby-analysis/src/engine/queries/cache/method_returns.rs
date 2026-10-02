@@ -147,7 +147,7 @@ impl<'a> View<'a> {
             return None;
         }
 
-        match self.engine.type_at(
+        match self.type_at(
             &TypeSubject::MethodReturn(fact.fqn.clone()),
             fact.range.file_id,
             fact.range.end_byte,
@@ -180,7 +180,7 @@ impl<'a> View<'a> {
             .collect::<Vec<_>>();
         if !signatures.is_empty() {
             return RubyType::union_from_proven(signatures, |signature| {
-                match self.engine.type_at(
+                match self.type_at(
                     &TypeSubject::MethodReturn(signature.fqn),
                     signature.range.file_id,
                     signature.range.end_byte,

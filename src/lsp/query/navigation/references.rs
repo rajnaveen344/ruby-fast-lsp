@@ -885,7 +885,7 @@ fn same_file_reference_ranges(
     file_id: SourceFileId,
 ) -> Vec<TextRange> {
     query
-        .references_for_fqn(fqn)
+        .reference_facts_for(fqn)
         .iter()
         .map(|fact| fact.range)
         .filter(|range| range.file_id == file_id)

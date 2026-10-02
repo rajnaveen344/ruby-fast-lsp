@@ -82,7 +82,7 @@ impl Semantics for View<'_> {
     }
 
     fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        self.engine.type_facts_for(subject)
+        View::type_facts_for(self, subject)
     }
 
     fn method_fqns_in_file(&self, file_id: SourceFileId) -> Vec<FullyQualifiedName> {

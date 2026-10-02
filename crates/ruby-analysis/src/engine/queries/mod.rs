@@ -14,8 +14,8 @@ use crate::invariant::ExpectInvariant;
 
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
-    DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, ReferenceFact, RubyType,
-    SourceFileId, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
+    DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, RubyType, SourceFileId, TextRange,
+    UnknownReason,
 };
 
 use crate::engine::{AnalysisQueryCache, Project};
@@ -50,36 +50,6 @@ impl<'a> View<'a> {
     ) -> Option<Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>>
     {
         self.engine.constant_callable_body(constant)
-    }
-
-    pub fn type_at(
-        &self,
-        subject: &TypeSubject,
-        file_id: SourceFileId,
-        byte_offset: u32,
-    ) -> TypeResolution {
-        self.engine.type_at(subject, file_id, byte_offset)
-    }
-
-    pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        self.engine.type_facts_for(subject)
-    }
-
-    /// All stored type facts, detached from the engine's internal indexes.
-    pub fn all_type_facts(&self) -> Vec<TypeFact> {
-        self.engine.type_store().all_facts()
-    }
-
-    pub fn type_facts_in_file(&self, file_id: SourceFileId) -> Vec<TypeFact> {
-        self.engine.type_store().facts_in_file(file_id)
-    }
-
-    pub fn references_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [ReferenceFact] {
-        self.engine.reference_facts_for(fqn)
-    }
-
-    pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {
-        self.engine.uses.resolved().facts_in_file(file_id)
     }
 
     /// A module call's references follow its proven concrete receiver identity.

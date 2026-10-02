@@ -260,8 +260,8 @@ fn references_and_callees_no_longer_reach_removed_methods() {
         ResolveMode::Immediate,
     );
     let parent = namespace("Parent");
-    assert_eq!(engine.reference_facts_for(&greet_fqn()).len(), 1);
-    assert_eq!(engine.reference_facts_for(&parent).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&greet_fqn()).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&parent).len(), 1);
     assert_eq!(
         ask_any(&engine.view(), &parent, &greet(), MethodWant::Callees)
             .into_callees()
@@ -271,8 +271,8 @@ fn references_and_callees_no_longer_reach_removed_methods() {
 
     assert!(engine.remove(parent_file, ResolveMode::Immediate));
 
-    assert!(engine.reference_facts_for(&greet_fqn()).is_empty());
-    assert!(engine.reference_facts_for(&parent).is_empty());
+    assert!(engine.view().reference_facts_for(&greet_fqn()).is_empty());
+    assert!(engine.view().reference_facts_for(&parent).is_empty());
     assert!(engine.view().references_in_file(child_file).is_empty());
     assert!(
         ask_any(&engine.view(), &parent, &greet(), MethodWant::Callees)
@@ -312,7 +312,7 @@ fn stale_snapshots_are_rejected_after_removal() {
         None
     );
     assert_eq!(engine.view().file_count(), 0);
-    assert!(engine.reference_facts_for(&greet_fqn()).is_empty());
+    assert!(engine.view().reference_facts_for(&greet_fqn()).is_empty());
     assert!(engine.view().method_facts_in_file(parent_file).is_empty());
 }
 

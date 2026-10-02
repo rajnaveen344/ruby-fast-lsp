@@ -23,7 +23,7 @@ fn type_at_reads_engine_owned_store() {
         ResolveMode::Immediate,
     );
 
-    match engine.type_at(&subject, file_id, 4) {
+    match engine.view().type_at(&subject, file_id, 4) {
         TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
         other => panic!("expected resolved type fact, got {other:?}"),
     }
@@ -185,7 +185,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
     assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheMisses), 1);
     assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheHits), 1);
     assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheUniqueKeys), 1);
-    assert_eq!(engine.reference_facts_for(&user).len(), 2);
+    assert_eq!(engine.view().reference_facts_for(&user).len(), 2);
 }
 
 #[test]

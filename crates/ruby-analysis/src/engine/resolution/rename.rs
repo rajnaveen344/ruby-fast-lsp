@@ -392,8 +392,7 @@ impl<'a> View<'a> {
             .into_iter()
             .map(|fact| fact.name_range)
             .chain(
-                self.engine
-                    .reference_facts_for(&fqn)
+                self.reference_facts_for(&fqn)
                     .iter()
                     .filter(|fact| {
                         self.file(fact.range.file_id)

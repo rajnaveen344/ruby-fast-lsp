@@ -175,10 +175,10 @@ fn replace_facts_removes_stale_type_facts() {
     );
 
     assert_eq!(
-        engine.type_at(&subject, file_id, 4),
+        engine.view().type_at(&subject, file_id, 4),
         TypeResolution::Unresolved
     );
-    match engine.type_at(&subject, file_id, 12) {
+    match engine.view().type_at(&subject, file_id, 12) {
         TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
         other => panic!("expected replacement fact, got {other:?}"),
     }

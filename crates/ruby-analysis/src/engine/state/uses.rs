@@ -9,7 +9,7 @@ use crate::core::storage::reference_store::{
 use crate::core::{FullyQualifiedName, ReferenceCandidate, ReferenceCandidateKind, SourceFileId};
 
 use super::names::Names;
-use super::Project;
+use crate::engine::View;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct UseIndex {
@@ -116,9 +116,13 @@ impl UseIndex {
     }
 }
 
-impl Project {
-    pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &[ReferenceFact] {
-        self.uses.facts_for(&self.names, target)
+impl<'a> View<'a> {
+    pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &'a [ReferenceFact] {
+        self.engine.uses.facts_for(&self.engine.names, target)
+    }
+
+    pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {
+        self.engine.uses.resolved().facts_in_file(file_id)
     }
 }
 

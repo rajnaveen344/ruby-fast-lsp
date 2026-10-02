@@ -112,7 +112,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&status).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&status).len(), 1);
     assert!(engine
         .diagnostic_facts_in_file(ref_file)
         .iter()
@@ -197,9 +197,12 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&nested_class).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&nested_class).len(), 1);
     assert!(
-        engine.reference_facts_for(&outer_constant).is_empty(),
+        engine
+            .view()
+            .reference_facts_for(&outer_constant)
+            .is_empty(),
         "lexical Inner::C must win over Outer::C"
     );
 }
@@ -267,5 +270,5 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&outer_constant).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&outer_constant).len(), 1);
 }
