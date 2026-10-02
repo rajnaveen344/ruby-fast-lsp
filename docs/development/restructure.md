@@ -576,9 +576,8 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] D1. Merge the three declaration walkers into one `Walk`.
 
   The three walkers that track declaration scope:
-  1. `lowering::AnalysisIndexer` builds the declaration seed. It keeps its own
-     namespace, `Instance`/`Singleton`, method, eval-depth, module_function,
-     and visibility stacks.
+  1. `lowering::AnalysisIndexer` builds the declaration seed. Since D1d it
+     tracks scope with `ScopeTracker`.
   2. `fact_collector::FactCollector` records the same declarations through
      `ScopeTracker`. `compose_file_analysis` then replaces them with the seed,
      except for generated-owner and runtime facts.
@@ -672,8 +671,28 @@ Delete this file when the last task is done. Git history keeps the record.
         declaration sink in the same walk. Delete the collector's declaration
         recording (`collection/declarations.rs`, the `nodes/declarations`
         emission) and the replace step in `compose_file_analysis`.
+        Not started; no clean prefix exists. What blocks it:
+    - Both file processor paths (`file_processor/mod.rs` and
+      `collection.rs`) commit the seed to the engine before the collector
+      walks. Body inference then sees declarations later in the same file
+      through `Semantics`. If the seed comes from a sink in the same walk,
+      those forward declarations are not visible yet. First decide how the
+      body sink sees them: either keep a declaration-only pre-pass, or defer
+      the queries that need forward declarations to equations the engine
+      solves. Write a forward-reference test before choosing.
+    - `collection/declarations.rs` is also the write API for extension and
+      runtime hosts: generated-owner methods and runtime-provenance types.
+      It also holds collector-local lookup state (`public_method_candidates`,
+      `namespace_is_known`, `direct_ancestry_path_exists`, expression facts).
+      The seed sink must accept host writes before the file can go, and the
+      lookups must read the sink.
+    - Dependency sources (`resolve_references == false`) build no seed, so
+      the collector's declarations are the only ones there.
+    - Take option 2 of the `initialize` decision above at the same time.
   - [ ] D1f. Run the cursor walk and document symbols on the `Walk` scope with
-        pruning sinks, then delete the remaining copies.
+        pruning sinks, then delete the remaining copies. Depends on the `Walk`
+        and sink interface that D1e introduces. Until then, the cursor walk
+        and the seed already share `ScopeTracker` and `scope_rules`.
 - [ ] D2. Merge collector flow inference and `TypeTracker` into one `Flow`.
       Compare the profiler output before and after.
 - [ ] D3. Rewrite `src/ARCHITECTURE.md`, the analysis README, and `AGENTS.md`
