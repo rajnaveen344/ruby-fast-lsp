@@ -469,7 +469,6 @@ fn wrong_installed_platform_uses_exact_vendor_archive_fallback() {
         RubyImplementation::JRuby,
         Some(crate::test::harness::fixture_path("/jdks/17")),
     );
-    indexer.detect_active_ruby_engine().unwrap();
     indexer.discovered_gems.insert(
         "example".to_string(),
         vec![GemInfo {

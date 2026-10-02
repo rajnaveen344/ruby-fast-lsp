@@ -111,7 +111,6 @@ pub struct IndexerGem {
     discovered_gems: HashMap<String, Vec<GemInfo>>,
     locked_gems: HashMap<String, LockedGemIdentity>,
     active_ruby_engine: ActiveRubyEngine,
-    active_ruby_engine_override: Option<ActiveRubyEngine>,
     ruby_executable: Option<PathBuf>,
     java_home: Option<PathBuf>,
     cached_gem_root_override: Option<PathBuf>,
@@ -136,7 +135,6 @@ impl IndexerGem {
             discovered_gems: HashMap::new(),
             locked_gems: HashMap::new(),
             active_ruby_engine: ActiveRubyEngine::Other,
-            active_ruby_engine_override: None,
             ruby_executable: None,
             java_home: None,
             cached_gem_root_override: None,
@@ -207,10 +205,10 @@ impl IndexerGem {
         );
         self.ruby_executable = Some(executable);
         self.java_home = java_home;
-        self.active_ruby_engine_override = Some(match implementation {
+        self.active_ruby_engine = match implementation {
             RubyImplementation::JRuby => ActiveRubyEngine::JRuby,
             RubyImplementation::Mri | RubyImplementation::TruffleRuby => ActiveRubyEngine::Other,
-        });
+        };
     }
 
     // ========================================================================

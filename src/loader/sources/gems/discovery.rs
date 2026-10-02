@@ -1,7 +1,6 @@
 //! Installed, Bundler, global, and navigation gem discovery through the selected runtime.
 
 use super::lockfile::locked_version_for;
-use super::ActiveRubyEngine;
 use super::GemDiscoveryRecord;
 use super::GemDiscoveryStage;
 use super::GemInfo;
@@ -44,7 +43,6 @@ impl IndexerGem {
                 self.discovery_stage = GemDiscoveryStage::Complete;
                 return Ok(0);
             }
-            self.detect_active_ruby_engine()?;
             self.discover_global_gems()?;
             self.resolve_gem_lib_paths();
             info!(
@@ -61,9 +59,6 @@ impl IndexerGem {
             return Ok(self.discovered_gems.len());
         }
 
-        let engine_started = Instant::now();
-        self.detect_active_ruby_engine()?;
-        let engine_wall = engine_started.elapsed();
         let lockfile_started = Instant::now();
         self.load_locked_gems()?;
         let lockfile_wall = lockfile_started.elapsed();
@@ -81,7 +76,7 @@ impl IndexerGem {
         let resolution_wall = resolution_started.elapsed();
 
         info!(
-            "[PERF][gem discovery] project={} total={:?} engine={:?} lockfile={:?} \
+            "[PERF][gem discovery] project={} total={:?} lockfile={:?} \
              installed={:?} vendor_git={:?} vendor_archives={:?} \
              resolve_paths={:?} unique_gems={}",
             self.workspace_root
@@ -90,7 +85,6 @@ impl IndexerGem {
                 .map(|path| path.to_string())
                 .unwrap_or_else(|| "<none>".to_string()),
             total_started.elapsed(),
-            engine_wall,
             lockfile_wall,
             installed_wall,
             git_wall,
@@ -134,9 +128,6 @@ impl IndexerGem {
             return Ok(0);
         }
 
-        let engine_started = Instant::now();
-        self.detect_active_ruby_engine()?;
-        let engine_wall = engine_started.elapsed();
         let lockfile_started = Instant::now();
         self.load_locked_gems()?;
         let lockfile_wall = lockfile_started.elapsed();
@@ -155,7 +146,7 @@ impl IndexerGem {
         self.discovery_stage = GemDiscoveryStage::NavigationInputs;
 
         info!(
-            "[PERF][priority gem discovery] project={} total={:?} engine={:?} lockfile={:?} \
+            "[PERF][priority gem discovery] project={} total={:?} lockfile={:?} \
              installed={:?} vendor_git={:?} priority_vendor_archives={:?} \
              resolve_paths={:?} unique_gems={}",
             self.workspace_root
@@ -164,7 +155,6 @@ impl IndexerGem {
                 .map(|path| path.to_string())
                 .unwrap_or_else(|| "<none>".to_string()),
             total_started.elapsed(),
-            engine_wall,
             lockfile_wall,
             installed_wall,
             git_wall,
@@ -223,30 +213,6 @@ impl IndexerGem {
                 .workspace_root
                 .as_ref()
                 .is_some_and(|root| !root.join("Gemfile").is_file())
-    }
-
-    pub(super) fn detect_active_ruby_engine(&mut self) -> Result<()> {
-        if let Some(active) = self.active_ruby_engine_override {
-            self.active_ruby_engine = active;
-            return Ok(());
-        }
-        let output = self
-            .ruby_command()?
-            .args(["-e", "print RUBY_ENGINE"])
-            .output()
-            .map_err(|error| anyhow!("Failed to detect active Ruby engine: {error}"))?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "Active Ruby engine detection failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        self.active_ruby_engine = if String::from_utf8_lossy(&output.stdout).trim() == "jruby" {
-            ActiveRubyEngine::JRuby
-        } else {
-            ActiveRubyEngine::Other
-        };
-        Ok(())
     }
 
     /// Discover the exact Bundler environment when available, otherwise the

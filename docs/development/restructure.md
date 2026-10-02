@@ -396,6 +396,55 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
 - [ ] C7. Use one Ruby version detector and one RSpec implementation.
+  - [x] C7a. Take gem discovery's active engine from the selected runtime
+        descriptor and delete its `RUBY_ENGINE` probe. Survivor: the runtime
+        catalog, which already classified the executable from its `-v`
+        output. The probe ran only when no descriptor engine was set, and gem
+        discovery cannot run without a descriptor, so it was unreachable.
+  - [ ] C7b. Bug: a project whose own runtime selection is `auto` and has no
+        installed match still picks the global legacy `rubyVersion` stubs,
+        because the version step re-reads the global setting instead of the
+        project's effective selection. Fix with a failing test first.
+  - [ ] C7c. One parser and one version type. `RubyVersion` moves from
+        `loader/version` to `environment/runtime/version.rs` and uses the
+        catalog's `RuntimeImplementation` instead of a second
+        implementation enum. `RubyVersion::parse_family` replaces
+        `Config::get_ruby_version`, `config::runtime::parse_family`, and the
+        coordinator's `ruby_version_for_runtime`. The version step reads the
+        legacy family from `EffectiveRuntimeSelection`. Survivor: the
+        `u16` parse that selection already used; families that do not fit a
+        `u8` keep today's bundled fallback. Not merged: the catalog's
+        `clean_version`/`version_family`, which parse free-form `ruby -v`
+        output rather than a family string.
+  - [ ] C7d. RSpec (blocked on a product decision). There are two
+        implementations of the same patch contract: the native fallback
+        `crates/extension-rspec`, which the extension host runs in process
+        whenever no loaded Wasm package claims the call, and the
+        `extensions/rspec-ruby` package. Differences:
+    - The npm server package ships no extension packages, so the native
+      fallback is its only RSpec support. The VSIX ships the package, which
+      then takes precedence.
+    - The native fallback ignores the package's applicability gate
+      (`rspec-core >= 3, < 4` in the lockfile) and runs in every project.
+    - Only the package provides RSpec document symbols and code lenses.
+    - 15 library integration tests in `src/test/integration/sources/extensions.rs`
+      exercise RSpec only through the native fallback.
+
+    Deleting either one removes a feature or changes output, so it is not
+    done here. Options:
+    1. Keep the package (the plan's direction): ship the RSpec package in the
+       npm package and load bundled packages by default, port the 15 tests to
+       load the package, then delete `crates/extension-rspec` and its host
+       special case. Projects without a locked `rspec-core` stop getting
+       RSpec facts.
+    2. Keep the native crate: move document symbols and code lenses into it
+       and drop the Ruby package. This keeps a privileged in-process
+       extension, against the plan's direction.
+    3. Keep both and add a parity test that runs each RSpec integration case
+       through both, so they cannot drift.
+
+    Recommendation: option 1, preceded by option 3's parity test so the
+    switch is proven case by case.
 
 ## Phase D: one walk, one flow engine
 
