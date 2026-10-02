@@ -1,8 +1,7 @@
 //! Process-wide immutable products. Projects bind results into isolated engines.
 use super::RubyLanguageServer;
 use crate::environment::runtime::catalog::{
-    DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
-    RuntimeStatusParams,
+    DiscoveredRuntime, RuntimeCatalog, RuntimeDiscoverParams, RuntimeImplementation,
 };
 #[cfg(test)]
 use crate::invariant::ExpectInvariant;
@@ -10,8 +9,10 @@ use crate::loader::cache::dependency_product::GemBindingStat;
 use crate::loader::cache::persistent::PersistentProductStat;
 use crate::loader::context::{RuntimeDiscovery, SharedProducts};
 use crate::loader::scheduling::resources::IndexingResourceGovernor;
+use crate::loader::scheduling::status::ProjectIndexingSnapshot;
 use crate::utils::single_flight::SingleFlightStat;
 use ruby_analysis::stats::StatsSnapshot;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -28,6 +29,39 @@ pub struct RuntimeProductSnapshot {
     pub persistent_java: StatsSnapshot<PersistentProductStat>,
     pub compiled_wasm: StatsSnapshot<PersistentProductStat>,
     pub gem_bindings: StatsSnapshot<GemBindingStat>,
+}
+
+/// One project's runtime selection and indexing state for
+/// `ruby-fast-lsp/runtime/status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRuntimeStatus {
+    pub root: PathBuf,
+    pub mode: String,
+    pub implementation: Option<RuntimeImplementation>,
+    pub family: Option<String>,
+    pub engine_version: Option<String>,
+    pub compatibility_version: Option<String>,
+    pub executable: Option<PathBuf>,
+    pub java_home: Option<PathBuf>,
+    pub stub_overlay: Option<String>,
+    pub classpath_fingerprint_sha256: Option<String>,
+    pub indexing: ProjectIndexingSnapshot,
+    /// Backward-compatible projection for clients predating structured
+    /// indexing state. New clients must use `indexing`.
+    pub indexing_complete: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub projects: Vec<ProjectRuntimeStatus>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatusParams {
+    pub project_root: Option<PathBuf>,
 }
 
 /// Server-held products: the loader-visible shared products plus the
@@ -151,7 +185,7 @@ impl RubyLanguageServer {
                 ) = match selection {
                     crate::environment::config::runtime::EffectiveRuntimeSelection::Explicit(runtime) => {
                         let stub_overlay = (runtime.implementation
-                            == crate::environment::runtime::catalog::RuntimeImplementation::Jruby)
+                            == RuntimeImplementation::Jruby)
                             .then(|| runtime.family.clone());
                         (
                             "explicit".to_string(),
@@ -167,7 +201,7 @@ impl RubyLanguageServer {
                     crate::environment::config::runtime::EffectiveRuntimeSelection::Auto => {
                         if let Some(runtime) = workspace.runtime.selected().read().clone() {
                             let stub_overlay = (runtime.implementation
-                                == crate::environment::runtime::catalog::RuntimeImplementation::Jruby)
+                                == RuntimeImplementation::Jruby)
                                 .then(|| runtime.family.clone());
                             (
                                 "auto".to_string(),
@@ -190,7 +224,7 @@ impl RubyLanguageServer {
                         let compatibility = format!("{major}.{minor}");
                         (
                             "legacy".to_string(),
-                            Some(crate::environment::runtime::catalog::RuntimeImplementation::Mri),
+                            Some(RuntimeImplementation::Mri),
                             Some(compatibility.clone()),
                             None,
                             Some(compatibility),

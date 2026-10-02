@@ -93,39 +93,8 @@ pub struct RuntimeCatalog {
     pub projects: Vec<ProjectRuntimeCatalog>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectRuntimeStatus {
-    pub root: PathBuf,
-    pub mode: String,
-    pub implementation: Option<RuntimeImplementation>,
-    pub family: Option<String>,
-    pub engine_version: Option<String>,
-    pub compatibility_version: Option<String>,
-    pub executable: Option<PathBuf>,
-    pub java_home: Option<PathBuf>,
-    pub stub_overlay: Option<String>,
-    pub classpath_fingerprint_sha256: Option<String>,
-    pub indexing: crate::loader::scheduling::status::ProjectIndexingSnapshot,
-    /// Backward-compatible projection for clients predating structured
-    /// indexing state. New clients must use `indexing`.
-    pub indexing_complete: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeStatus {
-    pub projects: Vec<ProjectRuntimeStatus>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct RuntimeDiscoverParams {}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeStatusParams {
-    pub project_root: Option<PathBuf>,
-}
 
 #[derive(Debug)]
 pub enum RuntimeMarkerError {

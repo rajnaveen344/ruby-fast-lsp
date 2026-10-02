@@ -13,8 +13,10 @@ pub(crate) use documents::OpenDocuments;
 pub(crate) use extensions::ExtensionServices;
 pub(crate) use indexing::IndexingServices;
 use namespace_tree::NamespaceTreeCache;
-pub use products::RuntimeProductSnapshot;
 pub(crate) use products::RuntimeProducts;
+pub use products::{
+    ProjectRuntimeStatus, RuntimeProductSnapshot, RuntimeStatus, RuntimeStatusParams,
+};
 use projects::ProjectRegistry;
 pub use projects::Workspace;
 use watched_files::WatchedFileChanges;

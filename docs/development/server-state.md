@@ -18,7 +18,7 @@ project, with a separate orphan engine for unowned documents.
 | `documents` | Open buffers, versions, document handles, and per-URI lifecycle locks. | [documents.rs](../../src/server/documents.rs) |
 | `projects` | Longest-root routing, isolated project engines, orphan engine, and retained external-document provenance. | [projects](../../src/server/projects/mod.rs), [load sink](../../src/server/projects/load_sink.rs) |
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
-| `products` | Runtime discovery and shared immutable dependency products. | [products.rs](../../src/server/products.rs) |
+| `products` | Runtime discovery, shared immutable dependency products, and the `runtime/status` projection (`ProjectRuntimeStatus`). | [products.rs](../../src/server/products.rs) |
 | `extensions` | Extension registry and dynamic watcher registration lifecycle. | [extensions.rs](../../src/server/extensions.rs) |
 | `diagnostics` | Latest-per-URI outbound queue, exact-source retained linter output, and open-project diagnostic publication after a load. | [diagnostics.rs](../../src/server/diagnostics.rs) |
 | `file_changes` | Latest filesystem events and debounce generation. | [watched_files.rs](../../src/server/watched_files.rs) |

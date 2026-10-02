@@ -6,11 +6,10 @@ use crate::environment::config::runtime::{
 };
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::{
-    DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeStatusParams,
-    RuntimeSupportStatus,
+    DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeSupportStatus,
 };
 use crate::loader::scheduling::status::{IndexingPhase, IndexingSingleFlightReuseSnapshot};
-use crate::server::RubyLanguageServer;
+use crate::server::{RubyLanguageServer, RuntimeStatusParams};
 use tower_lsp::lsp_types::Url;
 
 #[test]

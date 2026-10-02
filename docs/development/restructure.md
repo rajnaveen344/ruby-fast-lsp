@@ -280,7 +280,7 @@ Delete this file when the last task is done. Git history keeps the record.
   replaces the loader's reads of the server; `LoadSink` replaces its writes.
 - [ ] C2. Break the indexer ↔ server, lsp ↔ server, and indexer ↔ environment
       cycles.
-  - [ ] C2a. Move `ProjectRuntimeStatus` and its use of
+  - [x] C2a. Move `ProjectRuntimeStatus` and its use of
         `ProjectIndexingSnapshot` from `environment/runtime/catalog.rs` to
         `server/products.rs`.
   - [ ] C2b. Move `loader/scheduling/resources` to `src/utils/admission/` with
