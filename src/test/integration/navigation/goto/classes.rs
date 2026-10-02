@@ -103,6 +103,29 @@ end
     .await;
 }
 
+/// A method called inside a module reopened through a constant alias resolves
+/// on the aliased module.
+#[tokio::test]
+async fn call_inside_module_reopened_through_alias_resolves_on_target() {
+    check(
+        r#"
+module Toolkit
+  <def>def self.version
+  end</def>
+end
+
+Kit = Toolkit
+
+module Kit
+  def self.describe
+    version$0
+  end
+end
+"#,
+    )
+    .await;
+}
+
 /// A method defined in a module reopened through an alias belongs to the
 /// aliased module.
 #[tokio::test]

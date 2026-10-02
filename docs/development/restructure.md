@@ -612,8 +612,9 @@ Delete this file when the last task is done. Git history keeps the record.
       the lexical scope. The seed put them in the receiver; it now keeps a
       lexical stack and a separate definition-owner stack.
     - [x] `const_get` eval receivers were accepted by the cursor walk only.
-    - Module alias reopening is followed by the seed only. Class alias
-      reopening is followed by everything except the cursor walk
+    - [x] Module alias reopening was followed by the seed only; the collector
+      now follows it too.
+    - Class and module alias reopening is not followed by the cursor walk
       (`identifiers/declarations/class_node.rs` pushes the syntactic name).
     - The seed turns every `initialize` into singleton `new`, including in
       modules. The collector requires a proven class. Decide what a module's
