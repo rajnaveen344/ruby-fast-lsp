@@ -8,7 +8,7 @@ use super::{
     ProjectFileCollectionTiming,
 };
 use crate::environment::extensions::{ExtensionSemanticSeed, ProjectContextSnapshot};
-use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
+use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadSink;
 use anyhow::{anyhow, Context, Result};
@@ -22,6 +22,7 @@ use ruby_analysis::engine::{
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
+use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use ruby_prism::Visit;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

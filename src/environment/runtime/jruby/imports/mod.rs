@@ -6,8 +6,6 @@ mod declarations;
 mod java_methods;
 mod java_types;
 mod navigation;
-mod static_scan;
-mod syntax;
 
 pub(crate) use call_host::log_jruby_call_host_probe;
 pub use call_host::{
@@ -15,10 +13,6 @@ pub use call_host::{
     CallHostStat,
 };
 pub(crate) use java_types::ruby_type_for_jvm;
-pub use static_scan::{
-    source_semantics_depend_on_jruby_catalog, static_java_dependencies, static_java_import_names,
-    static_java_proxy_references, StaticJavaDependency,
-};
 
 use super::{
     decompiler::{JavaDecompiler, JavaDecompilerError},
@@ -27,11 +21,11 @@ use super::{
 };
 use parking_lot::RwLock;
 use ruby_analysis::core::TextRange;
-use ruby_fast_lsp_jruby_support::JavaClassName;
+use ruby_fast_lsp_jruby_support::syntax::java_package_prefix;
+use ruby_fast_lsp_jruby_support::{JavaClassName, StaticJavaSourceHint};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use syntax::java_package_prefix;
 
 const MAX_INCLUDED_PACKAGE_CLASSES: usize = 4_096;
 
@@ -45,66 +39,6 @@ pub enum JavaImplementationResolutionError {
 pub struct StaticJavaNavigationPlan {
     pub signature_class_names: Vec<String>,
     pub implementation_class_names: Vec<String>,
-}
-
-/// Compact, catalog-independent evidence retained by the first project pass.
-///
-/// The exact JRuby catalog may still be under construction while ordinary Ruby
-/// facts are collected. Keeping only definite Java DSL/canonical-proxy markers
-/// and dotted receiver roots lets the owning project later replay the bounded
-/// subset whose semantics depend on that catalog without retaining source
-/// buffers or reading every project file a second time.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StaticJavaSourceHint {
-    definite_catalog_semantics: bool,
-    dotted_roots: Vec<String>,
-}
-
-impl StaticJavaSourceHint {
-    pub fn from_source(source: &str) -> Self {
-        let mut definite_catalog_semantics = [
-            "java_import",
-            "include_package",
-            "java_implements",
-            "java_package",
-            "java_alias",
-            "java_send",
-            "java_method",
-            "to_java",
-        ]
-        .iter()
-        .any(|marker| source.contains(marker));
-
-        let mut dotted_roots = Vec::new();
-        let mut characters = source.char_indices().peekable();
-        while let Some((start, character)) = characters.next() {
-            if !(character.is_alphabetic() || character == '_' || character == '$') {
-                continue;
-            }
-            let mut end = start + character.len_utf8();
-            while let Some(&(offset, next)) = characters.peek() {
-                if !(next.is_alphanumeric() || next == '_' || next == '$') {
-                    break;
-                }
-                characters.next();
-                end = offset + next.len_utf8();
-            }
-            let identifier = &source[start..end];
-            let suffix = source[end..].trim_start_matches(char::is_whitespace);
-            if identifier == "Java" && suffix.starts_with("::") {
-                definite_catalog_semantics = true;
-            }
-            if suffix.starts_with('.') {
-                dotted_roots.push(source[start..end].to_string());
-            }
-        }
-        dotted_roots.sort();
-        dotted_roots.dedup();
-        Self {
-            definite_catalog_semantics,
-            dotted_roots,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -209,8 +143,8 @@ impl JrubyImportProvider {
     }
 
     pub fn source_hint_may_reference_static_java(&self, hint: &StaticJavaSourceHint) -> bool {
-        hint.definite_catalog_semantics
-            || hint.dotted_roots.iter().any(|root| {
+        hint.definite_catalog_semantics()
+            || hint.dotted_roots().iter().any(|root| {
                 root == "Java" || self.static_top_level_packages.contains(root.as_str())
             })
     }

@@ -1,9 +1,6 @@
 //! Class-body Java declarations: `java_import`, `import`, `include_package`,
 //! Java interface inclusion, and `java_package`, with static import aliases.
 
-use super::syntax::{
-    dotted_call_name, is_java_class_name, java_package_prefix, static_symbol_or_string,
-};
 use super::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
@@ -11,11 +8,13 @@ use ruby_analysis::core::{
     SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::indexer::fact_collector::FactCollector;
+use ruby_fast_lsp_jruby_support::syntax::{
+    dotted_call_name, evaluate_static_import_alias, is_java_class_name, java_package_prefix,
+    static_symbol_or_string,
+};
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::ClassKind;
 use ruby_prism::{CallNode, Node};
-
-const MAX_STATIC_IMPORT_ALIAS_BYTES: usize = 256;
 
 impl JrubyImportProvider {
     pub(super) fn process_import_call(&self, visitor: &mut FactCollector, node: &CallNode<'_>) {
@@ -440,94 +439,4 @@ fn imported_name_length(name: &str) -> usize {
         .next()
         .map(str::len)
         .unwrap_or(name.len())
-}
-
-pub(super) fn evaluate_static_import_alias(
-    block: &ruby_prism::BlockNode<'_>,
-    package: &str,
-    class_name: &str,
-) -> Option<String> {
-    let parameters = block
-        .parameters()?
-        .as_block_parameters_node()?
-        .parameters()?;
-    if parameters.requireds().iter().count() != 2
-        || parameters.optionals().iter().next().is_some()
-        || parameters.rest().is_some()
-        || parameters.posts().iter().next().is_some()
-        || parameters.keywords().iter().next().is_some()
-        || parameters.keyword_rest().is_some()
-        || parameters.block().is_some()
-    {
-        return None;
-    }
-    let names = parameters
-        .requireds()
-        .iter()
-        .map(|parameter| {
-            parameter
-                .as_required_parameter_node()
-                .map(|parameter| String::from_utf8_lossy(parameter.name().as_slice()).to_string())
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let expression = single_expression(block.body()?)?;
-    let alias = evaluate_static_alias_expression(
-        expression,
-        (&names[0], package),
-        (&names[1], class_name),
-    )?;
-    (alias.len() <= MAX_STATIC_IMPORT_ALIAS_BYTES).then_some(alias)
-}
-
-fn single_expression(node: Node<'_>) -> Option<Node<'_>> {
-    if let Some(statements) = node.as_statements_node() {
-        let mut body = statements.body().iter();
-        let expression = body.next()?;
-        if body.next().is_some() {
-            return None;
-        }
-        return Some(expression);
-    }
-    if let Some(embedded) = node.as_embedded_statements_node() {
-        let statements = embedded.statements()?;
-        let mut body = statements.body().iter();
-        let expression = body.next()?;
-        if body.next().is_some() {
-            return None;
-        }
-        return Some(expression);
-    }
-    Some(node)
-}
-
-fn evaluate_static_alias_expression(
-    node: Node<'_>,
-    first: (&str, &str),
-    second: (&str, &str),
-) -> Option<String> {
-    if let Some(string) = node.as_string_node() {
-        return Some(String::from_utf8_lossy(string.unescaped()).to_string());
-    }
-    if let Some(local) = node.as_local_variable_read_node() {
-        let name = String::from_utf8_lossy(local.name().as_slice());
-        return match name.as_ref() {
-            name if name == first.0 => Some(first.1.to_string()),
-            name if name == second.0 => Some(second.1.to_string()),
-            _ => None,
-        };
-    }
-    let interpolated = node.as_interpolated_string_node()?;
-    let mut output = String::new();
-    for part in interpolated.parts().iter() {
-        let value = if let Some(string) = part.as_string_node() {
-            String::from_utf8_lossy(string.unescaped()).to_string()
-        } else {
-            evaluate_static_alias_expression(single_expression(part)?, first, second)?
-        };
-        if output.len().saturating_add(value.len()) > MAX_STATIC_IMPORT_ALIAS_BYTES {
-            return None;
-        }
-        output.push_str(&value);
-    }
-    Some(output)
 }

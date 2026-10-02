@@ -303,7 +303,11 @@ source prefilter recognizes only supported Java DSL entry points, canonical
 catalog; ordinary Ruby files therefore avoid another AST traversal. Interactive
 edits use the same plan and materialization path after their ordinary parse.
 Java inputs remain file-owned facts in the isolated engine rather than a
-parallel semantic store.
+parallel semantic store. The catalog-independent Java DSL syntax scans (the
+static navigation scan, gem prefilter, import-alias evaluator, and
+`StaticJavaSourceHint`) live in the `jruby-support` crate, which reads Prism
+trees only; catalog lookup and fact lowering stay in
+`environment/runtime/jruby/imports/`.
 
 Retained-memory accounting still requires completion before resource governance
 is considered production complete.

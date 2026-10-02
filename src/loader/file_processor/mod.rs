@@ -15,9 +15,7 @@
 //! the actual processing to `FileProcessor` with appropriate options.
 
 use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
-use crate::environment::runtime::jruby::imports::{
-    JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
-};
+use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
 use crate::loader::jruby_add_on::JrubyAddOn;
@@ -33,6 +31,7 @@ use ruby_analysis::engine::{ProjectNeutralFileFactsTemplate, SemanticChange};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb};
+use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use ruby_prism::Visit;
 use std::borrow::Cow;
 use std::collections::HashSet;

@@ -1,12 +1,14 @@
 //! Fact-collector call host: name dispatch for Java DSL calls, static proxy
 //! seeding, and the process-wide call-host cost probe.
 
-use super::syntax::{canonical_java_constant_path, dotted_call_name, dotted_call_root};
 use super::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyType, TypeProvenance};
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::stats::{StatsRegistry, StatsSnapshot};
+use ruby_fast_lsp_jruby_support::syntax::{
+    canonical_java_constant_path, dotted_call_name, dotted_call_root,
+};
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_prism::{CallNode, Node};
 use std::path::Path;

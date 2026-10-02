@@ -1,11 +1,13 @@
 //! Static Java type expressions, `to_java` conversions, and JVM-to-Ruby type
 //! mapping.
 
-use super::syntax::{collect_ruby_constant_path, dotted_call_name, static_symbol_or_string};
 use super::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyType, TypeProvenance};
 use ruby_analysis::indexer::fact_collector::FactCollector;
+use ruby_fast_lsp_jruby_support::syntax::{
+    collect_ruby_constant_path, dotted_call_name, static_symbol_or_string,
+};
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::JvmType;
 use ruby_prism::{CallNode, Node};

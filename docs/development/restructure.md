@@ -409,7 +409,7 @@ Delete this file when the last task is done. Git history keeps the record.
         into the handle's state. Remove `Workspace::analysis_engine` and
         `analysis_engine_for_uri`. Update `docs/development/server-state.md`.
 - [ ] C5. Reduce the server to `Server { client, config, documents, projects }`.
-- [ ] C6. Put JRuby support behind the existing `jruby-support` crate boundary
+- [x] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
   - [x] C6a. Bug: the persisted gem product identity hashed the JRuby import
         producers but not the workspace crates they and the fact collector
@@ -444,7 +444,7 @@ Delete this file when the last task is done. Git history keeps the record.
         visible only inside `crate::loader`, so the compiler keeps
         `server` and `lsp` off the import provider. Provider and
         fingerprint now change in one write instead of two ordered ones.
-  - [ ] C6c. Move the catalog-independent Java DSL syntax scans (dotted
+  - [x] C6c. Move the catalog-independent Java DSL syntax scans (dotted
         Java calls, canonical `Java::` paths, static `java_import` /
         `include_package` dependencies, the static import-alias block
         evaluator, the gem prefilter, and `StaticJavaSourceHint`) from

@@ -481,7 +481,7 @@ impl IndexerGem {
         let runtime_provider_fingerprint =
             self.runtime_provider_fingerprint.as_deref().filter(|_| {
                 sources.iter().any(|source| {
-                    crate::environment::runtime::jruby::imports::source_semantics_depend_on_jruby_catalog(
+                    ruby_fast_lsp_jruby_support::source_semantics_depend_on_jruby_catalog(
                         source.content.as_str(),
                     )
                 })

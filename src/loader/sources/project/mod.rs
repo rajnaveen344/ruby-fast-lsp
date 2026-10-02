@@ -1,7 +1,5 @@
 use crate::environment::config::IndexingConfig;
-use crate::environment::runtime::jruby::imports::{
-    JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
-};
+use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use anyhow::{anyhow, Context, Result};
@@ -9,6 +7,7 @@ use navigation::project_file_matches_navigation_key;
 use parking_lot::Mutex;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
+use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;

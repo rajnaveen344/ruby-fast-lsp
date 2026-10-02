@@ -3,7 +3,7 @@
 use super::IndexerProject;
 use super::ProjectFileInput;
 use super::RegisteredProjectFileInput;
-use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
+use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadContext, LoadSink};
 use crate::loader::file_processor::ProjectFileCollectionTiming;
@@ -12,6 +12,7 @@ use log::{info, warn};
 use rayon::prelude::*;
 use ruby_analysis::core::{FileAnalysis, FullyQualifiedName, SourceKind};
 use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileSnapshot};
+use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;

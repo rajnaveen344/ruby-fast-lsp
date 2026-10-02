@@ -1,8 +1,10 @@
 //! Catalog-independent static scans of Ruby source for Java dependencies,
 //! canonical proxy references, and catalog-sensitive JRuby semantics.
 
-use super::declarations::evaluate_static_import_alias;
-use super::syntax::{canonical_java_constant_path, dotted_call_name, is_java_class_name};
+use crate::syntax::{
+    canonical_java_constant_path, dotted_call_name, evaluate_static_import_alias,
+    is_java_class_name,
+};
 use ruby_prism::{
     visit_call_node, visit_constant_path_node, visit_constant_read_node, CallNode,
     ConstantPathNode, ConstantReadNode, Node, Visit,
@@ -10,7 +12,7 @@ use ruby_prism::{
 
 #[cfg(test)]
 std::thread_local! {
-    pub(super) static SEMANTIC_PREFILTER_PARSE_COUNT: std::cell::Cell<usize> = const {
+    static SEMANTIC_PREFILTER_PARSE_COUNT: std::cell::Cell<usize> = const {
         std::cell::Cell::new(0)
     };
 }
@@ -87,11 +89,37 @@ struct StaticProxyVisitor {
 }
 
 #[derive(Default)]
-pub(super) struct StaticNavigationVisitor {
-    pub(super) dependencies: Vec<StaticJavaDependency>,
-    pub(super) proxy_references: Vec<String>,
-    pub(super) constant_references: Vec<String>,
+struct StaticNavigationVisitor {
+    dependencies: Vec<StaticJavaDependency>,
+    proxy_references: Vec<String>,
+    constant_references: Vec<String>,
     catalog_sensitive: bool,
+}
+
+/// Static Java evidence of one syntax tree, each list sorted and deduplicated:
+/// declared dependencies, dotted or canonical proxy references, and every bare
+/// constant read (a candidate `include_package` constant).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaticNavigationScan {
+    pub dependencies: Vec<StaticJavaDependency>,
+    pub proxy_references: Vec<String>,
+    pub constant_references: Vec<String>,
+}
+
+pub fn static_navigation_scan(node: &Node<'_>) -> StaticNavigationScan {
+    let mut visitor = StaticNavigationVisitor::default();
+    visitor.visit(node);
+    visitor.dependencies.sort();
+    visitor.dependencies.dedup();
+    visitor.proxy_references.sort();
+    visitor.proxy_references.dedup();
+    visitor.constant_references.sort();
+    visitor.constant_references.dedup();
+    StaticNavigationScan {
+        dependencies: visitor.dependencies,
+        proxy_references: visitor.proxy_references,
+        constant_references: visitor.constant_references,
+    }
 }
 
 impl<'pr> Visit<'pr> for StaticNavigationVisitor {
@@ -202,5 +230,61 @@ fn collect_static_import_names(node: &Node<'_>, imports: &mut Vec<String>) {
         if call.contains('.') {
             imports.push(call);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preflight_import_scan_uses_the_same_static_forms_and_ignores_dynamic_aliases() {
+        assert_eq!(
+            static_java_import_names(
+                "java_import 'java.util.Map$Entry'\n\
+                     import ['java.lang.String', dynamic_name]\n\
+                     java_import(java.lang.Thread) { |_package, name| \"J#{name}\" }\n"
+            ),
+            vec![
+                "java.lang.String".to_string(),
+                "java.lang.Thread".to_string(),
+                "java.util.Map$Entry".to_string(),
+            ]
+        );
+        assert_eq!(
+            static_java_dependencies(
+                "include_package 'java.util'\nimport 'java.lang'\nimport 'java.time.Instant'\n"
+            ),
+            vec![
+                StaticJavaDependency::Class("java.time.Instant".to_string()),
+                StaticJavaDependency::Package("java.lang".to_string()),
+                StaticJavaDependency::Package("java.util".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn preflight_proxy_scan_finds_dotted_and_canonical_java_proxy_forms() {
+        let references = static_java_proxy_references(
+            "DOTTED = java.lang.String.new\n\
+                 CANONICAL = Java::JavaUtil::Map::Entry\n",
+        );
+        assert!(references.contains(&"java.lang.String".to_string()));
+        assert!(references.contains(&"Java::JavaUtil::Map::Entry".to_string()));
+    }
+
+    #[test]
+    fn gem_semantic_prefilter_parses_each_source_once() {
+        SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.set(0));
+
+        assert!(!source_semantics_depend_on_jruby_catalog(
+            "class PlainRuby\n  def value\n    42\n  end\nend\n"
+        ));
+
+        let parse_count = SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.get());
+        assert_eq!(
+            parse_count, 1,
+            "the gem cache-key prefilter must derive all JRuby semantic evidence from one Prism parse"
+        );
     }
 }

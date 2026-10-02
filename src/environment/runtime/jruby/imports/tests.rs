@@ -1,6 +1,5 @@
 use super::super::java_catalog::JavaClassDeclaration;
 use super::navigation::supplemental_implementation_location;
-use super::static_scan::SEMANTIC_PREFILTER_PARSE_COUNT;
 use super::*;
 use parking_lot::RwLock;
 use ruby_analysis::core::{
@@ -668,57 +667,6 @@ fn include_package_and_import_package_add_bounded_lazy_constant_types() {
         "include_package constants are runtime const_missing results, not source declarations"
     );
     assert!(collector.diagnostics().is_empty());
-}
-
-#[test]
-fn preflight_import_scan_uses_the_same_static_forms_and_ignores_dynamic_aliases() {
-    assert_eq!(
-        static_java_import_names(
-            "java_import 'java.util.Map$Entry'\n\
-                 import ['java.lang.String', dynamic_name]\n\
-                 java_import(java.lang.Thread) { |_package, name| \"J#{name}\" }\n"
-        ),
-        vec![
-            "java.lang.String".to_string(),
-            "java.lang.Thread".to_string(),
-            "java.util.Map$Entry".to_string(),
-        ]
-    );
-    assert_eq!(
-        static_java_dependencies(
-            "include_package 'java.util'\nimport 'java.lang'\nimport 'java.time.Instant'\n"
-        ),
-        vec![
-            StaticJavaDependency::Class("java.time.Instant".to_string()),
-            StaticJavaDependency::Package("java.lang".to_string()),
-            StaticJavaDependency::Package("java.util".to_string()),
-        ]
-    );
-}
-
-#[test]
-fn preflight_proxy_scan_finds_dotted_and_canonical_java_proxy_forms() {
-    let references = static_java_proxy_references(
-        "DOTTED = java.lang.String.new\n\
-             CANONICAL = Java::JavaUtil::Map::Entry\n",
-    );
-    assert!(references.contains(&"java.lang.String".to_string()));
-    assert!(references.contains(&"Java::JavaUtil::Map::Entry".to_string()));
-}
-
-#[test]
-fn gem_semantic_prefilter_parses_each_source_once() {
-    SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.set(0));
-
-    assert!(!source_semantics_depend_on_jruby_catalog(
-        "class PlainRuby\n  def value\n    42\n  end\nend\n"
-    ));
-
-    let parse_count = SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.get());
-    assert_eq!(
-        parse_count, 1,
-        "the gem cache-key prefilter must derive all JRuby semantic evidence from one Prism parse"
-    );
 }
 
 #[test]

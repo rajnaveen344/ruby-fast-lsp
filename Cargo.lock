@@ -2229,6 +2229,7 @@ name = "ruby-fast-lsp-jruby-support"
 version = "0.1.0"
 dependencies = [
  "ruby-fast-lsp-jvm-metadata",
+ "ruby-prism",
 ]
 
 [[package]]

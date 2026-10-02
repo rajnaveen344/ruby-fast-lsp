@@ -3,7 +3,6 @@
 
 use super::call_host::{CallHostStat, CALL_HOST_STATS};
 use super::java_types::{display_java_signature, ruby_type_for_jvm};
-use super::syntax::static_symbol_or_string;
 use super::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
@@ -12,6 +11,7 @@ use ruby_analysis::core::{
     RubyConstant, RubyMethod, RubyType, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::indexer::fact_collector::FactCollector;
+use ruby_fast_lsp_jruby_support::syntax::static_symbol_or_string;
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::{
     parse_method_descriptor, JvmType, MemberInfo, MethodDescriptor, Visibility,
