@@ -1,5 +1,4 @@
 use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant};
-use crate::indexer::documents::scope_rules::resolve_lexical_namespace;
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{BlockNode, CallNode, NumberedParametersNode, ParametersNode};
@@ -133,16 +132,7 @@ impl FactCollector {
                 (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
                     .then_some(namespace)?
             }
-            Some(receiver) => {
-                let eval_ref = crate::indexer::mixin_ref_from_node(&receiver)?;
-                resolve_lexical_namespace(
-                    &eval_ref.parts,
-                    eval_ref.absolute,
-                    &self.scope_tracker.get_ns_stack(),
-                    |fqn| self.namespace_is_known(fqn),
-                )?
-                .namespace_parts()
-            }
+            Some(receiver) => self.resolve_constant_receiver_namespace(&receiver)?,
         };
         Some((namespace, implicit_receiver_kind, method_definition_kind))
     }

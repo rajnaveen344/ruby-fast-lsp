@@ -176,10 +176,7 @@ impl AnalysisIndexer {
                 (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
                     .then(|| self.namespace_stack.clone())?
             }
-            Some(receiver) => {
-                let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
-                self.resolve_namespace(&parts, absolute)?.namespace_parts()
-            }
+            Some(receiver) => self.resolve_constant_receiver_namespace(&receiver)?,
         };
         Some((namespace, definition_scope))
     }
