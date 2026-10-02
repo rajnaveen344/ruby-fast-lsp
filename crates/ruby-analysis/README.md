@@ -19,9 +19,12 @@ submit domain facts and read query results; they cannot obtain storage handles.
 ## Reading the code
 
 Follow a file through `indexer` (collection), `inference` (type derivation), and
-`engine` (replacement, resolution, queries). The engine coordinates cross-file
-constant and method-return equation solvers in `inference`; those solvers may
-consult engine queries. These are cooperating modules in one crate. The engine
+`engine` (replacement, resolution, queries). Code dependencies point the
+other way, `core` <- `inference` <- `indexer` <- `engine`, and a crate
+architecture test rejects an upward `crate::` path outside tests. The engine
+coordinates cross-file constant and method-return equation solvers in
+`inference`; those solvers read project state through `Semantics`, which the
+engine implements. These are cooperating modules in one crate. The engine
 owns the solved state and Ruby lookup policy; inference owns the type rules.
 Inside the engine, each kind of state is a component (`Files`, `Names`,
 `DeclIndex`, `Hierarchy`, `UseIndex`, `Diagnostics`, `TypeTable`, `Solver`);

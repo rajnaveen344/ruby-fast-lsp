@@ -5,6 +5,11 @@
 //! [`fact_collector::FactCollector`] adds body, reference, diagnostic, and
 //! extension evidence. The caller composes the resulting file facts and owns
 //! scheduling and publication. This module does not own project truth.
+//!
+//! The indexer depends on `core` and `inference` only. It reads project state
+//! through [`crate::inference::semantics::Semantics`], which a caller supplies
+//! as a `View` or the shared engine; outside tests it names no engine type
+//! (enforced by `architecture_tests::analysis_layers_depend_only_downward`).
 
 pub(crate) mod documents;
 pub mod fact_collector;

@@ -224,7 +224,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] B7e. One composition function for syntax, engine, and linter
         diagnostics; replace the hand-assembled publish sites.
   - [ ] B7f. Move composition with C3e; the linter stays a runner.
-- [ ] B8. Break the indexer ↔ inference ↔ engine cycle so dependencies point
+- [x] B8. Break the indexer ↔ inference ↔ engine cycle so dependencies point
       one way: core ← inference ← indexer ← engine.
   - [x] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.
   - [x] B8b. Move `inference/completion/` to `engine/queries/completion/`.
@@ -235,7 +235,7 @@ Delete this file when the last task is done. Git history keeps the record.
         Profiler comparison; use generics if dispatch costs show.
   - [x] B8f. The fact collector and receiver queries take `dyn Semantics`.
         Profiler comparison.
-  - [ ] B8g. Architecture test: no upward `crate::` edges in non-test files.
+  - [x] B8g. Architecture test: no upward `crate::` edges in non-test files.
 
   Notes: inference and the fact collector also take `AnalysisQueryCache`
   (an engine type) directly; B8e–f must hide it behind `Semantics` (the

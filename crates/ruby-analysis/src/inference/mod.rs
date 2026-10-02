@@ -23,14 +23,21 @@
 //!    candidates, local-flow evidence, and compact value-constant and
 //!    method-return equations.
 //! 2. This module derives expression, flow, method-return, block/proc, and RBS
-//!    types. It may ask semantic questions through domain query APIs, but it
-//!    does not own a workspace, parse files, or use editor protocol types.
+//!    types. It asks project questions only through [`semantics::Semantics`],
+//!    which the engine implements; it does not own a workspace, parse files,
+//!    or use editor protocol types.
 //! 3. [`crate::engine`] owns the complete project graph, the sole Ruby
 //!    method/MRO/visibility/ambiguity policy, file replacement, cross-file
 //!    resolution, and stored solved outcomes.
 //! 4. Root LSP and CLI adapters project those same engine-owned domain results
 //!    into hover, inlay, completion, navigation, diagnostics, or terminal/JSON
 //!    output.
+//!
+//! The list is pipeline order. Code dependencies point the other way:
+//! `core` <- `inference` <- `indexer` <- `engine`. Outside tests this module
+//! names neither the indexer nor the engine, and the crate's
+//! `architecture_tests::analysis_layers_depend_only_downward` enforces that;
+//! the doc links above are the only mentions.
 //!
 //! This direction is intentional. Moving AST traversal into the engine would
 //! couple persistent semantic state to Prism. Moving lookup into inference or
