@@ -696,8 +696,33 @@ Delete this file when the last task is done. Git history keeps the record.
       The seed sink must accept host writes before the file can go, and the
       lookups must read the sink.
     - Dependency sources (`resolve_references == false`) build no seed, so
-      the collector's declarations are the only ones there.
-    - Take option 2 of the `initialize` decision above at the same time.
+      the collector's declarations are the only ones there. Measured
+      building a seed for them (perf-d1e): indexing core +12.5% and user CPU
+      +20% on the sample, +10-20% on a 343-file gem workspace, and the gem
+      fingerprint changed because the two walks disagree. Not landed;
+      dependencies keep collector declarations until the walks agree.
+    - The two walks disagree in five ways (found by diffing their
+      declarations on a gem workspace). Project files take the seed's
+      declarations, so each is a seed bug:
+      1. `initialize` in a module or unproven class: the seed emits
+         singleton `new`, the collector keeps instance `initialize`
+         (option 2 of the `initialize` decision above).
+      2. Visibility calls (`protected`, ...) in a reopened core class give
+         different visibility overrides and methods.
+      3. Multi-write constants (`A, B = ...`) produce no constant symbols in
+         the seed.
+      4. Some `def`s are singleton in one walk and instance in the other.
+      5. Same-file superclass and include targets: the collector resolves
+         them and the seed leaves them unresolved; `class
+         Outer::Inner::Err < Error` binds `Outer::Error` in the seed and
+         `Outer::Inner::Error` in the collector.
+  - [ ] D1e1. Fix the five disagreements, each with a generic failing test
+        and its own commit, then diff the two walks again on the gem
+        workspace until the declaration sets match.
+  - [ ] D1e2. Dependencies build a seed (profiler pair; the indexing cost
+        above must be paid back by D1e3), the hosts write through the seed
+        sink, collector lookups read the sink, and the collector's
+        declaration recording is deleted.
   - [ ] D1f. Run the cursor walk and document symbols on the `Walk` scope with
         pruning sinks, then delete the remaining copies. Depends on the `Walk`
         and sink interface that D1e introduces. Until then, the cursor walk
