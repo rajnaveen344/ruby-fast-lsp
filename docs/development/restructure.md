@@ -246,7 +246,7 @@ Delete this file when the last task is done. Git history keeps the record.
         request.
   - [x] B6b. Definition, implementation, and the shared method module.
   - [x] B6c. References and document highlights.
-  - [ ] B6d. Hover.
+  - [x] B6d. Hover.
   - [ ] B6e. Completion. Profiler comparison after B6b–e, including writer
         wait time.
   - [ ] B6f. Inlay hints, signature help, rename, hierarchies, code lens,

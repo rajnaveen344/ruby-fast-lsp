@@ -3,26 +3,23 @@
 //! Ruby target classification and reusable semantic lookup live in
 //! `ruby-analysis`; this module builds the protocol-facing hover text.
 
+use crate::features::cursor::Cursor;
 use crate::invariant::ExpectInvariant;
-use parking_lot::RwLock;
 use ruby_analysis::core::RubyType;
 use ruby_analysis::core::{
     FullyQualifiedName, MethodReceiver, NamespaceKind, RubyConstant, RubyMethod, UnknownReason,
     VariableTypeKind,
 };
 use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind};
+use ruby_analysis::engine::{ConstantHover, ConstantHoverKind};
 use ruby_analysis::indexer::yard::parser::YardParser;
-use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{resolve_receiver_type, HoverTarget, ReceiverResolutionContext};
 use ruby_analysis::inference::method::return_type::method_call_return_type_with_visibility;
-use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
-/// Context for hover generation (provides access to necessary data).
+/// One hover request's cursor and identifier context.
 pub struct HoverContext<'a> {
-    pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
-    pub analysis_engine: Option<&'a Arc<RwLock<AnalysisEngine>>>,
+    pub cursor: Cursor<'a>,
     pub current_namespace: &'a [RubyConstant],
     pub namespace_kind: NamespaceKind,
     pub position: Position,
@@ -139,12 +136,8 @@ fn local_binding_hover(
 }
 
 fn local_read_type_from_analysis(context: &HoverContext, byte_offset: u32) -> Option<RubyType> {
-    let doc = context.document?.read();
-    let file_id = doc.analysis_file_id();
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    AnalysisQuery::new(&engine).local_read_type_at(file_id, byte_offset)
+    let file_id = context.cursor.file_id()?;
+    context.cursor.view.local_read_type_at(file_id, byte_offset)
 }
 
 /// Get a local variable type from engine type facts.
@@ -153,7 +146,7 @@ fn get_type_from_type_query(
     name: &str,
     byte_offset: u32,
 ) -> Option<RubyType> {
-    let doc = context.document?.read();
+    let doc = context.cursor.document?;
     let file_id = doc.analysis_file_id();
     let position = doc.offset_to_position(byte_offset as usize);
     let scope_id = doc.find_scope_for_variable_at(name, position)?;
@@ -162,10 +155,10 @@ fn get_type_from_type_query(
         "analysis TypeSubject stores scope ids as u32",
         "widen TypeSubject scope ids before storing more than u32::MAX scopes",
     );
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    AnalysisQuery::new(&engine).local_variable_type_at(name, scope_id, file_id, byte_offset)
+    context
+        .cursor
+        .view
+        .local_variable_type_at(name, scope_id, file_id, byte_offset)
 }
 
 /// Get type from VariableScopes tree (unified type info).
@@ -174,8 +167,7 @@ fn get_type_from_variable_scopes(
     name: &str,
     byte_offset: u32,
 ) -> Option<RubyType> {
-    let doc_arc = context.document?;
-    let doc = doc_arc.read();
+    let doc = context.cursor.document?;
     let position = doc.offset_to_position(byte_offset as usize);
     let scope_id = doc
         .find_scope_for_variable_at(name, position)
@@ -403,13 +395,9 @@ fn variable_type_from_analysis(
         return Some(outcome);
     }
 
-    let doc = context.document?.read();
-    let file_id = doc.analysis_file_id();
+    let file_id = context.cursor.file_id()?;
     let byte_offset = context.byte_offset;
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    let query = AnalysisQuery::new(&engine);
+    let query = context.cursor.view;
     let owner = FullyQualifiedName::namespace_with_kind(
         context.current_namespace.to_vec(),
         context.namespace_kind,
@@ -429,12 +417,8 @@ fn expression_type_from_analysis(
     context: &HoverContext,
     byte_offset: u32,
 ) -> Option<(RubyType, Option<UnknownReason>)> {
-    let doc = context.document?.read();
-    let file_id = doc.analysis_file_id();
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    let query = AnalysisQuery::new(&engine);
+    let file_id = context.cursor.file_id()?;
+    let query = context.cursor.view;
     match query.expression_type_at(file_id, byte_offset) {
         Some(ruby_type) if ruby_type != RubyType::Unknown => Some((ruby_type, None)),
         Some(RubyType::Unknown) => Some((
@@ -457,13 +441,11 @@ fn call_expression_outcome_from_analysis(
     context: &HoverContext,
     byte_offset: u32,
 ) -> Option<(RubyType, Option<UnknownReason>)> {
-    let doc = context.document?.read();
-    let file_id = doc.analysis_file_id();
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    let query = AnalysisQuery::new(&engine);
-    let outcome = query.call_expression_outcome_at_position(file_id, byte_offset)?;
+    let file_id = context.cursor.file_id()?;
+    let outcome = context
+        .cursor
+        .view
+        .call_expression_outcome_at_position(file_id, byte_offset)?;
     match (outcome.proven_type(), outcome.unknown_reason()) {
         (Some(ruby_type), None) => Some((ruby_type.clone(), None)),
         (None, Some(reason)) => Some((RubyType::Unknown, Some(reason))),
@@ -490,9 +472,11 @@ fn constant_hover_from_analysis(
     context: &HoverContext,
     path: &[RubyConstant],
 ) -> Option<HoverInfo> {
-    let engine = context.analysis_engine?.read();
-    let query = AnalysisQuery::new(&engine);
-    query.constant_hover(path).map(format_constant_hover)
+    context
+        .cursor
+        .view
+        .constant_hover(path)
+        .map(format_constant_hover)
 }
 
 fn format_constant_hover(hover: ConstantHover) -> HoverInfo {
@@ -529,41 +513,33 @@ fn method_call_return_type_from_receiver(
         );
     }
 
-    let doc_guard = context.document.map(|document| document.read());
-    let byte_offset = doc_guard.as_ref().map(|_| byte_offset).unwrap_or(0);
-    let method_return_type = {
-        let engine_guard = context.analysis_engine.map(|engine| engine.read());
-        let analysis_query = engine_guard
-            .as_ref()
-            .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));
-
-        let resolution_context = ReceiverResolutionContext {
-            query: analysis_query.as_ref(),
-            document: doc_guard.as_deref(),
-            current_namespace: namespace,
-            namespace_kind,
-            byte_offset,
-        };
-        let ruby_type = resolve_receiver_type(receiver, &resolution_context);
-        if ruby_type == RubyType::Unknown {
-            None
-        } else {
-            let allow_private = matches!(receiver, MethodReceiver::None)
-                || doc_guard.as_ref().is_some_and(|document| {
-                    static_send_symbol_at_position(&document.content, context.position)
-                });
-            let caller_namespace =
-                FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
-            let protected_caller = (!allow_private).then_some(&caller_namespace);
-            method_call_return_type_with_visibility(
-                analysis_query.as_ref(),
-                &ruby_type,
-                method_name,
-                allow_private,
-                protected_caller,
-            )
-        }
+    let document = context.cursor.document;
+    let view = context.cursor.view;
+    let resolution_context = ReceiverResolutionContext {
+        query: Some(view),
+        document,
+        current_namespace: namespace,
+        namespace_kind,
+        byte_offset: document.map_or(0, |_| byte_offset),
     };
+    let ruby_type = resolve_receiver_type(receiver, &resolution_context);
+    if ruby_type == RubyType::Unknown {
+        return None;
+    }
+    let allow_private = matches!(receiver, MethodReceiver::None)
+        || document.is_some_and(|document| {
+            static_send_symbol_at_position(&document.content, context.position)
+        });
+    let caller_namespace =
+        FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
+    let protected_caller = (!allow_private).then_some(&caller_namespace);
+    let method_return_type = method_call_return_type_with_visibility(
+        Some(view),
+        &ruby_type,
+        method_name,
+        allow_private,
+        protected_caller,
+    );
 
     method_return_type.filter(|return_type| *return_type != RubyType::Unknown)
 }
@@ -585,21 +561,20 @@ fn super_method_return_type_from_analysis(
     namespace_kind: NamespaceKind,
 ) -> Option<RubyType> {
     let method = RubyMethod::new(method_name).ok()?;
-    let engine = context.analysis_engine?.read();
-    let view = engine.view();
+    let view = context.cursor.view;
     let owner = FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
     let super_request = MethodRequest::new(
         LookupReceiver::Super { owner: &owner },
         method,
         MethodWant::Callees,
     );
-    let callee = lookup::method(&view, super_request).into_callees()?.pop()?;
+    let callee = lookup::method(view, super_request).into_callees()?.pop()?;
     let request = MethodRequest::new(
         LookupReceiver::Namespace(&callee.owner),
         method,
         MethodWant::Return,
     );
-    lookup::method(&view, request).into_return_type()
+    lookup::method(view, request).into_return_type()
 }
 
 fn generate_method_definition_hover(
@@ -622,9 +597,6 @@ fn generate_method_definition_hover(
     if let Some(hover) = method_definition_hover_from_yard(method_name, position, context) {
         return Some(hover);
     }
-    if context.analysis_engine.is_some() {
-        return Some(HoverInfo::ruby_code(format!("def {}", method_name)));
-    }
     Some(HoverInfo::ruby_code(format!("def {}", method_name)))
 }
 
@@ -633,12 +605,9 @@ fn method_definition_hover_from_yard(
     position: Position,
     context: &HoverContext,
 ) -> Option<HoverInfo> {
-    let doc = context.document?.read();
-    let content = doc.content.clone();
-    drop(doc);
-
-    let method_start_offset = line_start_byte_offset(&content, position.line)?;
-    let doc = YardParser::extract_from_source(&content, method_start_offset)?;
+    let content = &context.cursor.document?.content;
+    let method_start_offset = line_start_byte_offset(content, position.line)?;
+    let doc = YardParser::extract_from_source(content, method_start_offset)?;
     let return_type = doc
         .returns
         .iter()
@@ -673,12 +642,8 @@ fn method_definition_hover_from_analysis(
     byte_offset: u32,
     context: &HoverContext,
 ) -> Option<HoverInfo> {
-    let doc = context.document?.read();
-    let file_id = doc.analysis_file_id();
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let file_id = context.cursor.file_id()?;
+    let query = context.cursor.view;
     let return_type = query
         .method_return_type_at_with_kind(method_name, namespace_kind, file_id, byte_offset)
         .or_else(|| {
@@ -689,7 +654,7 @@ fn method_definition_hover_from_analysis(
                 method,
                 MethodWant::Return,
             );
-            lookup::method(&query, request).into_return_type()
+            lookup::method(query, request).into_return_type()
         })?;
     if return_type == RubyType::Unknown {
         return None;

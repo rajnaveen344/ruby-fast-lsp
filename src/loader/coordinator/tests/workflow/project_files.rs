@@ -106,7 +106,14 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         Url::from_file_path(signature_path).unwrap()
     );
     let hover = query
-        .get_hover_at_position(&usage_uri, tower_lsp::lsp_types::Position::new(1, 9), usage)
+        .with_view(|cursor| {
+            crate::features::presentation::hover::hover_at(
+                cursor,
+                &usage_uri,
+                tower_lsp::lsp_types::Position::new(1, 9),
+                usage,
+            )
+        })
         .expect("RBS method return must produce hover information");
     assert!(hover.content.contains("String"));
 }

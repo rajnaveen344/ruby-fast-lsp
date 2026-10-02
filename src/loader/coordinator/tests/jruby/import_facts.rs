@@ -337,14 +337,17 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         .find("combine")
         .unwrap();
     let hover = query
-        .get_hover_at_position(
-            &uri,
-            tower_lsp::lsp_types::Position::new(
-                u32::try_from(direct_line).unwrap(),
-                u32::try_from(direct_character + 1).unwrap(),
-            ),
-            source,
-        )
+        .with_view(|cursor| {
+            crate::features::presentation::hover::hover_at(
+                cursor,
+                &uri,
+                tower_lsp::lsp_types::Position::new(
+                    u32::try_from(direct_line).unwrap(),
+                    u32::try_from(direct_character + 1).unwrap(),
+                ),
+                source,
+            )
+        })
         .expect("a Java proxy method call must produce hover information");
     assert!(
         hover.content.contains("Java::JavaUtil::List"),
