@@ -273,3 +273,51 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
 
     assert_eq!(engine.view().reference_facts_for(&outer_constant).len(), 1);
 }
+
+#[test]
+fn method_facts_alone_do_not_prove_a_missing_method_on_their_owner() {
+    let mut engine = Project::new();
+    let stub_file = engine.register_file(SourceFileInput {
+        path: PathBuf::from("/stubs/seeded.rb"),
+        content: String::new(),
+        kind: SourceKind::Stub,
+    });
+    let ref_file = register_project_file(&mut engine, "app/use_seeded.rb", "Seeded.run");
+    let seeded = vec![RubyConstant::new("Seeded").unwrap()];
+    let run = RubyMethod::new("run").unwrap();
+    engine.update(
+        stub_file,
+        FileAnalysis {
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(seeded.clone(), run),
+                FullyQualifiedName::singleton_namespace(seeded.clone()),
+                TextRange::new(stub_file, 0, 0),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.update(
+        ref_file,
+        FileAnalysis {
+            reference_candidates: vec![explicit_method_call_candidate(
+                TextRange::new(ref_file, 7, 10),
+                TextRange::new(ref_file, 0, 10),
+                seeded,
+                NamespaceKind::Singleton,
+                run,
+                None,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let diagnostics = engine.view().diagnostic_facts_in_file(ref_file);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|fact| fact.code != "unresolved-method"),
+        "a receiver namespace without a declaration leaves method absence unknown: {diagnostics:?}"
+    );
+}

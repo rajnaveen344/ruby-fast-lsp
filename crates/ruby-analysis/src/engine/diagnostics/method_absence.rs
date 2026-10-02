@@ -55,6 +55,5 @@ impl Project {
             || self
                 .view()
                 .has_symbol_facts(&FullyQualifiedName::constant(parts))
-            || !self.view().method_facts_matching_owner(fqn, "").is_empty()
     }
 }
