@@ -6,7 +6,7 @@ use crate::core::MethodReceiver;
 use crate::core::{
     ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind,
     ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject,
-    UnknownReason,
+    UnknownReason, VariableTypeKind,
 };
 use crate::engine::{AnalysisQueryCache, Project, View};
 use crate::inference::higher_order::PreparedCallableSet;
@@ -270,6 +270,43 @@ impl Semantics for View<'_> {
     fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
         self.engine.has_method_return_equation(method)
     }
+
+    fn namespace_type(&self, namespace: &FullyQualifiedName) -> Option<RubyType> {
+        View::namespace_type(self, namespace)
+    }
+
+    fn constant_value_type(&self, constant: &FullyQualifiedName) -> Option<RubyType> {
+        View::constant_value_type(self, constant)
+    }
+
+    fn resolve_constant_receiver(
+        &self,
+        path: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> FullyQualifiedName {
+        View::resolve_constant_receiver(self, path, current_namespace)
+    }
+
+    fn local_variable_type_at(
+        &self,
+        name: &str,
+        scope_id: u32,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        View::local_variable_type_at(self, name, scope_id, file_id, byte_offset)
+    }
+
+    fn variable_type_before_in_owner(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        owner: &FullyQualifiedName,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        View::variable_type_before_in_owner(self, kind, name, owner, file_id, byte_offset)
+    }
 }
 
 /// A source of project views: each read takes its own short read guard and
@@ -532,6 +569,47 @@ impl<T: ProjectReads> Semantics for T {
 
     fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
         self.with_view(|view| Semantics::has_method_return_equation(view, method))
+    }
+
+    fn namespace_type(&self, namespace: &FullyQualifiedName) -> Option<RubyType> {
+        self.with_view(|view| Semantics::namespace_type(view, namespace))
+    }
+
+    fn constant_value_type(&self, constant: &FullyQualifiedName) -> Option<RubyType> {
+        self.with_view(|view| Semantics::constant_value_type(view, constant))
+    }
+
+    fn resolve_constant_receiver(
+        &self,
+        path: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> FullyQualifiedName {
+        self.with_view(|view| Semantics::resolve_constant_receiver(view, path, current_namespace))
+    }
+
+    fn local_variable_type_at(
+        &self,
+        name: &str,
+        scope_id: u32,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        self.with_view(|view| {
+            Semantics::local_variable_type_at(view, name, scope_id, file_id, byte_offset)
+        })
+    }
+
+    fn variable_type_before_in_owner(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        owner: &FullyQualifiedName,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        self.with_view(|view| {
+            Semantics::variable_type_before_in_owner(view, kind, name, owner, file_id, byte_offset)
+        })
     }
 }
 

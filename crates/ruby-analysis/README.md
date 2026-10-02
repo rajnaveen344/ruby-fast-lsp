@@ -29,7 +29,9 @@ the `Solver` plans a solve from read-only engine queries, then applies it to the
 `TypeTable`. While a file is walked, the collector and `TypeTracker` read other
 files only through the read-only `inference::semantics::Semantics` trait, which
 the engine implements with one short read guard per question; any new mid-walk
-read must become an equation or be added to `Semantics` with a reason.
+read must become an equation or be added to `Semantics` with a reason. Indexer
+receiver resolution reads through the same trait, so callers pass either a
+`View` or the shared engine.
 
 Use the [core guide](src/core/README.md) for contracts and compact stores,
 the [indexer guide](src/indexer/README.md) for documents and parser queries,

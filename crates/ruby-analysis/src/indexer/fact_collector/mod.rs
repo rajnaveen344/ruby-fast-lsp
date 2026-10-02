@@ -6,9 +6,8 @@
 
 use crate::core::MethodReceiver;
 use crate::core::{FullyQualifiedName, ResolvedMethodCallee, RubyMethod, TypeFact, TypeSubject};
-use crate::engine::Project;
 use crate::indexer::{RubyDocument, ScopeTracker};
-use parking_lot::RwLock;
+use crate::inference::semantics::Semantics;
 use std::sync::Arc;
 
 mod collection;
@@ -52,9 +51,10 @@ impl FactCollector {
     pub fn analysis_only(
         document: RubyDocument,
         extension_host: Arc<dyn FactCollectorExtensionHost>,
-        analysis_engine: Arc<RwLock<Project>>,
+        analysis_engine: Arc<dyn Semantics>,
     ) -> Self {
-        // Each mid-walk read takes its own short read guard on the shared engine.
+        // Each mid-walk read goes through the walk handle; the shared engine
+        // takes its own short read guard per read.
         let semantics = SemanticContext::new(&document, analysis_engine);
         Self {
             document,

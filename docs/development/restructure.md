@@ -233,7 +233,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `inference/semantics.rs`; the engine keeps the impls.
   - [x] B8e. Inference takes `&dyn Semantics` instead of `AnalysisQuery`.
         Profiler comparison; use generics if dispatch costs show.
-  - [ ] B8f. The fact collector and receiver queries take `dyn Semantics`.
+  - [x] B8f. The fact collector and receiver queries take `dyn Semantics`.
         Profiler comparison.
   - [ ] B8g. Architecture test: no upward `crate::` edges in non-test files.
 

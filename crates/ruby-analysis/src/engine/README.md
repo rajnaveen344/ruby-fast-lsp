@@ -69,7 +69,8 @@ contracts, higher-order block parameters, callable constant bodies, dispatched
 method returns, `super`, and constructors). Everything else crosses files as an
 equation solved after replacement. Any new mid-walk read must become an
 equation or be added to `Semantics` with a reason. The walk never writes the
-engine.
+engine. A third, small group serves editor receiver resolution
+(`indexer::resolve_receiver_type`), which a server query runs over a `View`.
 
 Every directory stays within the ten-entry ceiling. The split does not merge
 stores, change locks, or alter the file-owned lifecycle.

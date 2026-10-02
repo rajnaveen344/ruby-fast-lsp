@@ -28,7 +28,7 @@ use crate::core::MethodReceiver;
 use crate::core::{
     ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind,
     ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject,
-    UnknownReason,
+    UnknownReason, VariableTypeKind,
 };
 use crate::inference::higher_order::PreparedCallableSet;
 use crate::inference::method::constructor::ConstructorResult;
@@ -249,4 +249,42 @@ pub trait Semantics: Send + Sync {
     /// Whether the engine holds a return equation for `method`; local flow
     /// records it as a dependency instead of trusting its current type.
     fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool;
+
+    // Reads for receiver resolution. Editor queries resolve a call's receiver
+    // through `indexer::resolve_receiver_type` and
+    // `indexer::resolve_receiver_to_namespace` over these reads.
+
+    /// The class or module type a namespace's `self` has.
+    fn namespace_type(&self, namespace: &FullyQualifiedName) -> Option<RubyType>;
+
+    /// A constant's installed value type.
+    fn constant_value_type(&self, constant: &FullyQualifiedName) -> Option<RubyType>;
+
+    /// The namespace a constant receiver dispatches through, resolved
+    /// lexically from `current_namespace`.
+    fn resolve_constant_receiver(
+        &self,
+        path: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> FullyQualifiedName;
+
+    /// The type of local `name` in scope `scope_id` at `byte_offset`.
+    fn local_variable_type_at(
+        &self,
+        name: &str,
+        scope_id: u32,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType>;
+
+    /// The type of an instance, class, or global variable owned by `owner`
+    /// before `byte_offset`.
+    fn variable_type_before_in_owner(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        owner: &FullyQualifiedName,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType>;
 }

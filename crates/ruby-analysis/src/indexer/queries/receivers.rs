@@ -5,22 +5,23 @@
 use crate::core::MethodReceiver;
 use crate::core::VariableTypeKind;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType};
-use crate::engine::View;
 use crate::indexer::RubyDocument;
 use crate::inference::method::return_type::method_call_return_type;
+use crate::inference::semantics::{ReceiverAccess, Semantics};
 use crate::invariant::ExpectInvariant;
 
-pub struct ReceiverResolutionContext<'a, 'q> {
-    pub query: Option<&'q View<'a>>,
+/// Where a receiver is resolved, and the project reads that may resolve it.
+pub struct ReceiverResolutionContext<'q, S: Semantics + ?Sized> {
+    pub query: Option<&'q S>,
     pub document: Option<&'q RubyDocument>,
     pub current_namespace: &'q [RubyConstant],
     pub namespace_kind: NamespaceKind,
     pub byte_offset: u32,
 }
 
-pub fn resolve_receiver_to_namespace(
+pub fn resolve_receiver_to_namespace<S: Semantics + ?Sized>(
     receiver: &MethodReceiver,
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> Option<FullyQualifiedName> {
     match receiver {
         MethodReceiver::Constant(path) => resolve_constant_receiver(path, context),
@@ -58,9 +59,9 @@ pub fn resolve_receiver_to_namespace(
     }
 }
 
-pub fn resolve_receiver_type(
+pub fn resolve_receiver_type<S: Semantics + ?Sized>(
     receiver: &MethodReceiver,
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> RubyType {
     match receiver {
         MethodReceiver::None | MethodReceiver::SelfReceiver | MethodReceiver::Super => {
@@ -130,16 +131,16 @@ pub fn resolve_receiver_type(
     }
 }
 
-fn resolve_constant_receiver(
+fn resolve_constant_receiver<S: Semantics + ?Sized>(
     path: &[RubyConstant],
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> Option<FullyQualifiedName> {
     if let Some(query) = context.query {
         if let Some(resolved) = query.resolve_constant_in_context(path, context.current_namespace) {
             let resolved_constant =
                 FullyQualifiedName::constant(resolved.namespace_parts().to_vec());
             if let Some(ruby_type) = query.constant_value_type(&resolved_constant) {
-                return query.type_to_namespace(&ruby_type);
+                return query.type_namespace(&ruby_type);
             }
         }
         return Some(query.resolve_constant_receiver(path, context.current_namespace));
@@ -151,9 +152,9 @@ fn resolve_constant_receiver(
     ))
 }
 
-fn variable_receiver_type(
+fn variable_receiver_type<S: Semantics + ?Sized>(
     var_name: &str,
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> Option<RubyType> {
     if let Some(document) = context.document {
         let file_id = document.analysis_file_id();
@@ -187,10 +188,10 @@ fn variable_receiver_type(
     None
 }
 
-fn variable_type_before(
+fn variable_type_before<S: Semantics + ?Sized>(
     name: &str,
     kind: VariableTypeKind,
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> Option<RubyType> {
     let document = context.document?;
     let query = context.query?;
@@ -207,10 +208,10 @@ fn variable_type_before(
     )
 }
 
-fn method_call_receiver_type(
+fn method_call_receiver_type<S: Semantics + ?Sized>(
     inner_receiver: &MethodReceiver,
     method_name: &str,
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> Option<RubyType> {
     let inner_namespace = resolve_receiver_to_namespace(inner_receiver, context)?;
     if method_name == "new" && inner_namespace.namespace_kind() == Some(NamespaceKind::Singleton) {
@@ -221,15 +222,15 @@ fn method_call_receiver_type(
 
     let method = RubyMethod::new(method_name).ok()?;
     let query = context.query?;
-    query.method_return_type_for_receiver(&inner_namespace, &method)
+    query.receiver_method_return_type(&inner_namespace, &method, ReceiverAccess::Any)
 }
 
-fn type_to_namespace(
+fn type_to_namespace<S: Semantics + ?Sized>(
     ruby_type: &RubyType,
-    context: &ReceiverResolutionContext<'_, '_>,
+    context: &ReceiverResolutionContext<'_, S>,
 ) -> Option<FullyQualifiedName> {
     if let Some(query) = context.query {
-        return query.type_to_namespace(ruby_type);
+        return query.type_namespace(ruby_type);
     }
 
     fallback_type_to_namespace(ruby_type)

@@ -22,6 +22,9 @@ another lookup policy. Identifier-related domain types live in `identifiers/type
 `queries/mod.rs` owns `RubyPrismAnalyzer`. Its `syntax` helpers handle Prism
 names and locations; other query modules emit reusable domain results. They do
 not construct LSP responses. Keep engine-owned resolution in the engine.
+Receiver resolution (`queries/receivers.rs`) and the fact collector read project
+state only through `inference::semantics::Semantics`; outside tests the indexer
+names no engine type, and callers pass a `View` or the shared engine.
 
 All directories meet the ten-entry limit. The query folder is at the limit;
 another query file needs a meaningful subdivision. For collector state and
