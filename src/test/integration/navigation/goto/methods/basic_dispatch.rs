@@ -225,3 +225,45 @@ Registry.lookup$0
     )
     .await;
 }
+
+#[tokio::test]
+async fn goto_singleton_method_defined_with_qualified_constant_receiver() {
+    check(
+        r#"
+module Catalog
+  class Registry
+  end
+end
+
+class Loader
+  <def>def (Catalog::Registry).lookup
+    "found"
+  end</def>
+end
+
+Catalog::Registry.lookup$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn singleton_method_with_qualified_constant_receiver_does_not_join_enclosing_class() {
+    check(
+        r#"
+module Catalog
+  class Registry
+  end
+end
+
+class Loader
+  def (Catalog::Registry).lookup
+    "found"
+  end
+end
+
+Loader.lookup$0<def none>
+"#,
+    )
+    .await;
+}

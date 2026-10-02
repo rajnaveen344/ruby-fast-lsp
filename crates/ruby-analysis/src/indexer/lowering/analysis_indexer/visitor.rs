@@ -177,8 +177,12 @@ impl Visit<'_> for AnalysisIndexer {
             ScopeKind::Instance => NamespaceKind::Instance,
             ScopeKind::Singleton => NamespaceKind::Singleton,
         };
+        let mut owner_namespace = self.owner_stack.clone();
         if let Some(receiver) = node.receiver() {
-            if receiver.as_self_node().is_some() || self.names_enclosing_namespace(&receiver) {
+            if receiver.as_self_node().is_some() {
+                owner_kind = NamespaceKind::Singleton;
+            } else if let Some(namespace) = self.resolve_constant_receiver_namespace(&receiver) {
+                owner_namespace = namespace;
                 owner_kind = NamespaceKind::Singleton;
             } else {
                 visit_def_node(self, node);
@@ -194,8 +198,8 @@ impl Visit<'_> for AnalysisIndexer {
             owner_kind = NamespaceKind::Singleton;
         }
 
-        let fqn = FullyQualifiedName::method(self.owner_stack.clone(), method);
-        let owner = FullyQualifiedName::namespace_with_kind(self.owner_stack.clone(), owner_kind);
+        let fqn = FullyQualifiedName::method(owner_namespace.clone(), method);
+        let owner = FullyQualifiedName::namespace_with_kind(owner_namespace.clone(), owner_kind);
         let range = self.range(&node.location());
         let name_range = self.range(&node.name_loc());
         let yard_doc = self.source.as_deref().and_then(|source| {
@@ -259,10 +263,8 @@ impl Visit<'_> for AnalysisIndexer {
                 .copied()
                 .unwrap_or(false)
         {
-            let owner = FullyQualifiedName::namespace_with_kind(
-                self.owner_stack.clone(),
-                NamespaceKind::Singleton,
-            );
+            let owner =
+                FullyQualifiedName::namespace_with_kind(owner_namespace, NamespaceKind::Singleton);
             self.facts.methods.push(
                 MethodFact::with_param_facts(fqn.clone(), owner, range, params)
                     .with_name_range(name_range)

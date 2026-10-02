@@ -115,6 +115,23 @@ pub fn resolve_receiver_namespace(
     if receiver.as_self_node().is_some() {
         return self_namespace.map(<[RubyConstant]>::to_vec);
     }
+    // `def (A::B).x` needs parentheses around a qualified receiver.
+    if let Some(parentheses) = receiver.as_parentheses_node() {
+        let body = parentheses.body()?;
+        let expression = match body.as_statements_node() {
+            Some(statements) => {
+                let [expression] = statements
+                    .body()
+                    .iter()
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .ok()?;
+                expression
+            }
+            None => body,
+        };
+        return resolve_receiver_namespace(&expression, self_namespace, lexical_context, is_known);
+    }
     if let Some(call) = receiver.as_call_node() {
         if call.name().as_slice() != b"const_get" {
             return None;

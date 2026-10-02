@@ -1,8 +1,9 @@
-use crate::core::{FullyQualifiedName, NamespaceKind, RubyMethod};
+use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
 use log::warn;
-use ruby_prism::DefNode;
+use ruby_prism::{DefNode, Node};
 
 use crate::core::MethodReceiver;
+use crate::indexer::documents::scope_rules;
 use crate::indexer::{queries::syntax, Identifier, LVScopeKind};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
@@ -25,15 +26,22 @@ impl IdentifierVisitor {
                 }
                 (namespace, NamespaceKind::Singleton)
             }
-            Some(_) => {
-                let mut kind = syntax::get_method_namespace_kind_simple(node.receiver().as_ref());
-                // Account for `class << self` context — get_method_namespace_kind_simple
-                // only checks for explicit `self.` receiver, not the singleton class scope.
-                if self.scope_tracker.in_singleton() && kind == NamespaceKind::Instance {
-                    kind = NamespaceKind::Singleton;
+            // A receiver this file does not declare keeps the enclosing
+            // namespace so the body still has a method scope.
+            Some(receiver) => match self.def_receiver_namespace(&receiver) {
+                Some(namespace) => (namespace, NamespaceKind::Singleton),
+                None => {
+                    let kind = match syntax::get_method_namespace_kind_simple(Some(&receiver)) {
+                        NamespaceKind::Instance if !self.scope_tracker.in_singleton() => {
+                            NamespaceKind::Instance
+                        }
+                        NamespaceKind::Instance | NamespaceKind::Singleton => {
+                            NamespaceKind::Singleton
+                        }
+                    };
+                    (self.scope_tracker.get_ns_stack(), kind)
                 }
-                (self.scope_tracker.get_ns_stack(), kind)
-            }
+            },
         };
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
@@ -83,6 +91,20 @@ impl IdentifierVisitor {
             );
         }
         true
+    }
+
+    /// The class or module a constant `def` receiver names, resolved
+    /// against declarations earlier in this file.
+    fn def_receiver_namespace(&self, receiver: &Node<'_>) -> Option<Vec<RubyConstant>> {
+        scope_rules::resolve_receiver_namespace(
+            receiver,
+            scope_rules::implicit_singleton_namespace(&self.scope_tracker).as_deref(),
+            &self.scope_tracker.get_ns_stack(),
+            &|fqn| {
+                self.file_constant_types
+                    .contains_key(fqn.namespace_parts_slice())
+            },
+        )
     }
 
     pub fn process_def_node_exit(&mut self, node: &DefNode) {

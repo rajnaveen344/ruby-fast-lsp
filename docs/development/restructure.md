@@ -634,9 +634,14 @@ Delete this file when the last task is done. Git history keeps the record.
       `self`, so `scope_rules::class_methods_block` now targets the namespace
       `self` names and opens a block context that keeps the lexical scope.
     - [x] The seed accepted only `self` as a `def` receiver and dropped
-      `def Name.x` inside `class Name`. A constant-path receiver
-      (`def A::B.x`) is still skipped by the seed; the collector attaches it
-      to the current namespace, which is wrong unless the path names it.
+      `def Name.x` inside `class Name`.
+    - [x] A qualified `def` receiver. Ruby reads `def A::B.x` as
+      `def A.B` followed by a syntax error, so the valid spelling is
+      `def (A::B).x`. The seed skipped it, the collector attached constant
+      receivers to the enclosing namespace, and the cursor walk did the same.
+      All three now resolve a constant `def` receiver, parenthesized or not,
+      through `resolve_receiver_namespace`; an unresolved receiver is skipped
+      by the seed and the collector.
     - [x] The superclass-equals-reopen-target check existed in the collector
       only, so the seed reopened `X = Y; class X < Y` as `Y` with a
       self-superclass edge. Both walks now share

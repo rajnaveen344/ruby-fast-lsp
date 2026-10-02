@@ -22,9 +22,8 @@ pub mod yard;
 pub use documents::erb::{is_erb_path, mask_erb, EmbeddedRuby};
 pub use documents::ruby_document::RubyDocument;
 pub use documents::scope_tracker::{
-    build_constant_path_name, collect_namespaces, constant_path_is_absolute,
-    get_method_namespace_kind, mixin_ref_from_node, utf8_str, LocalScopeKind, MixinRef, ScopeFrame,
-    ScopeTracker,
+    build_constant_path_name, collect_namespaces, constant_path_is_absolute, mixin_ref_from_node,
+    utf8_str, LocalScopeKind, MixinRef, ScopeFrame, ScopeTracker,
 };
 pub use documents::source_document::{mask_shebang, SourceDocument};
 pub use documents::variable_scopes::{

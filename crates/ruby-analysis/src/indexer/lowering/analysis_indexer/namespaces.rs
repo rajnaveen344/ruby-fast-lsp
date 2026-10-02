@@ -169,19 +169,6 @@ impl AnalysisIndexer {
             .then_some(self.owner_stack.as_slice())
     }
 
-    /// Whether `receiver` is the bare name of the enclosing class or module,
-    /// as in `def Registry.lookup` inside `class Registry`.
-    pub(super) fn names_enclosing_namespace(&self, receiver: &Node<'_>) -> bool {
-        let Some(read) = receiver.as_constant_read_node() else {
-            return false;
-        };
-        self.owner_stack == self.lexical_stack
-            && self
-                .lexical_stack
-                .last()
-                .is_some_and(|last| last.as_str().as_bytes() == read.name().as_slice())
-    }
-
     pub(super) fn static_eval_block_context(
         &self,
         node: &CallNode<'_>,

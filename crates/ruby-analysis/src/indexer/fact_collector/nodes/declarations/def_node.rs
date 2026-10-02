@@ -3,7 +3,7 @@ use crate::core::{
     MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, NamespaceKind,
     RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
-use crate::indexer::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
+use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
 use log::warn;
 use ruby_prism::*;
@@ -42,10 +42,8 @@ impl FactCollector {
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
 
-        // Determine namespace kind based on receiver and scope. Only support:
-        //   * `def self.foo`            (receiver: self)
-        //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
-        // Otherwise skip indexing.
+        // A receiver must be `self` or a constant this walk resolves;
+        // otherwise the method is skipped.
         let (definition_namespace, namespace_kind, skip_method) = match node.receiver() {
             None => {
                 let (namespace, kind) = self.scope_tracker.method_definition_context();
@@ -59,15 +57,10 @@ impl FactCollector {
                     receiver_kind != NamespaceKind::Singleton,
                 )
             }
-            Some(_) => {
-                let namespace = self.scope_tracker.get_ns_stack();
-                let (kind, skip) = get_method_namespace_kind(
-                    node.receiver(),
-                    &namespace,
-                    self.scope_tracker.in_singleton(),
-                );
-                (namespace, kind, skip)
-            }
+            Some(receiver) => match self.resolve_constant_receiver_namespace(&receiver) {
+                Some(namespace) => (namespace, NamespaceKind::Singleton, false),
+                None => (Vec::new(), NamespaceKind::Singleton, true),
+            },
         };
 
         if skip_method {

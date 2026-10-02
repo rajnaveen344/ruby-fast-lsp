@@ -190,3 +190,26 @@ Toolkit.<ref>version</ref>
     )
     .await;
 }
+
+/// A method defined on a qualified constant receiver belongs to that
+/// constant, not to the enclosing class.
+#[tokio::test]
+async fn references_singleton_method_defined_with_qualified_constant_receiver() {
+    check(
+        r#"
+module Catalog
+  class Registry
+  end
+end
+
+class Loader
+  def (Catalog::Registry).lookup$0
+    "found"
+  end
+end
+
+Catalog::Registry.<ref>lookup</ref>
+"#,
+    )
+    .await;
+}
