@@ -606,7 +606,7 @@ Delete this file when the last task is done. Git history keeps the record.
         receiver resolution passed in. The seed keeps its own eval classifier
         until D1d, and the framework instance block test stays a one-line
         name check in both walks.
-  - [ ] D1c. Fix the scope disagreements, each with a failing generic test
+  - [x] D1c. Fix the scope disagreements, each with a failing generic test
         first:
     - [x] Constants assigned and classes opened inside an eval block belong to
       the lexical scope. The seed put them in the receiver; it now keeps a
@@ -620,9 +620,24 @@ Delete this file when the last task is done. Git history keeps the record.
       declares or assigns, and applies the shared alias rule. An alias
       declared in another file is still not followed there: the walk has no
       project knowledge until the query adapter passes it in (D1f).
-    - The seed turns every `initialize` into singleton `new`, including in
-      modules. The collector requires a proven class. Decide what a module's
-      `initialize` should navigate to before writing the test.
+    - [x] Decision recorded, no test yet: the seed turns every `initialize`
+      into singleton `new`, including in modules and on `def self.initialize`.
+      The collector converts only a receiverless `initialize` in a proven
+      class. In Ruby, `Klass.new` allocates and then sends `initialize`
+      through the instance ancestors, so a module's `initialize` runs for a
+      class that includes it and has no `initialize` of its own. A module
+      has no `new` of its own to define. Options:
+      1. Keep the seed rule: `Mod.new` resolves to code that never runs for
+         it, and `Includer.new` misses the module.
+      2. Adopt the collector rule in the seed: a module keeps a private
+         instance `initialize`, and `Includer.new` still misses it.
+      3. Record `initialize` as an instance method everywhere and resolve
+         `Klass.new` at query time to the first `initialize` in `Klass`'s
+         instance ancestors.
+      Recommendation: take option 2 in D1e, where the seed becomes the only
+      producer and the two rules must agree. Then move to option 3 in the
+      query layer (B6b) with a test of `Includer.new` navigating to the
+      module's `initialize`.
     - [x] `self.define_singleton_method(:x) { }` and
       `self.send(:define_method, :x) { }` opened a block context only in the
       cursor walk, and neither the seed nor the collector defined the
