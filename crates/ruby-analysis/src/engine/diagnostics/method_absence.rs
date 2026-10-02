@@ -4,7 +4,7 @@
 use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
-use super::helpers::{levenshtein, suggestion_threshold};
+use super::policy::{levenshtein, suggestion_threshold};
 use super::MethodChainCompletenessCache;
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod,

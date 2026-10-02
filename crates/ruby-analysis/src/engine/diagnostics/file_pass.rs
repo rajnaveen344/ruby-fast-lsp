@@ -5,12 +5,13 @@ use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use super::grouped_methods::grouped_method_targets;
+use super::policy::{UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
 use super::{constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache};
 use crate::core::storage::reference_store::ConstLookup;
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
-    ConstantPath, DiagnosticFact, FullyQualifiedName, MethodReferenceAccess, ReferenceFact,
-    RubyMethod, RubyType, SourceFileId, TypeInferenceOutcome, UnknownReason,
+    ConstantPath, FullyQualifiedName, MethodReferenceAccess, ReferenceFact, RubyMethod, RubyType,
+    SourceFileId, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
 use crate::engine::{Project, View};
@@ -68,10 +69,8 @@ impl Project {
                         unresolved
                             .entry(file_id)
                             .or_default()
-                            .push(DiagnosticFact::new(
+                            .push(UNRESOLVED_CONSTANT.fact(
                                 candidate.range,
-                                crate::core::DiagnosticSeverity::Error,
-                                "unresolved-constant",
                                 format!("Unresolved constant `{}`", constant_name(&parts)),
                             ));
                     }
@@ -369,15 +368,9 @@ impl Project {
                             if let Some(suggestion) = suggestion {
                                 message.push_str(&format!(". Did you mean `{}`?", suggestion));
                             }
-                            unresolved
-                                .entry(file_id)
-                                .or_default()
-                                .push(DiagnosticFact::new(
-                                    diagnostics.diagnostic_range,
-                                    crate::core::DiagnosticSeverity::Warning,
-                                    "unresolved-method",
-                                    message,
-                                ));
+                            unresolved.entry(file_id).or_default().push(
+                                UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message),
+                            );
                         }
                     }
                 }

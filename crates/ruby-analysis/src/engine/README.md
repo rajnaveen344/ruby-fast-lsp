@@ -26,7 +26,7 @@ Implementation folders are private to the engine.
 | `queries/hierarchy/` | Call/type hierarchy queries and result types |
 | `queries/namespace_tree/` | Namespace-tree projections and their result types |
 | `queries/workspace_symbols/` | Workspace symbol matching and its result type |
-| `diagnostics/` | The `Diagnostics` store of diagnostic candidates and resolved diagnostics with its require swap and resolve rebuild (`store`), reference-candidate resolution passes (`workspace_pass`, `file_pass`), call outcomes, grouped (union-receiver) dispatch, unresolved-method absence proof, resolved-method availability and signature checks, indexer diagnostic candidates, and diagnostic helpers |
+| `diagnostics/` | The `Diagnostics` store of diagnostic candidates and resolved diagnostics with its require swap and resolve rebuild (`store`), reference-candidate resolution passes (`workspace_pass`, `file_pass`), call outcomes, grouped (union-receiver) dispatch, unresolved-method absence proof, resolved-method availability and signature checks, and indexer diagnostic candidates. `policy` owns every engine-derived diagnostic code and severity (`DiagnosticRule::fact` builds each fact), the resolve-derived set a rebuild replaces, the public `UNRESOLVED_REQUIRE_CODE` the loader produces, and the claim rules (exception classes, arity, keyword and spelling suggestions) |
 | `debug/` | Introspection and storage-size projections |
 
 ## State components

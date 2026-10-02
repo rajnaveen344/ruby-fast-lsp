@@ -4,6 +4,7 @@
 use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
+use super::policy::UNRESOLVED_METHOD;
 use super::MethodChainCompletenessCache;
 use crate::core::names::fqn_id::FqnId;
 use crate::core::{
@@ -181,12 +182,7 @@ impl Project {
         diagnostics_by_file
             .entry(diagnostics.diagnostic_range.file_id)
             .or_default()
-            .push(DiagnosticFact::new(
-                diagnostics.diagnostic_range,
-                crate::core::DiagnosticSeverity::Warning,
-                "unresolved-method",
-                message,
-            ));
+            .push(UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message));
     }
 }
 

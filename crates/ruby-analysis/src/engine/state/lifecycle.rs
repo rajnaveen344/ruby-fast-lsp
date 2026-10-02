@@ -11,6 +11,7 @@ use crate::core::{DiagnosticFact, FileAnalysis, SourceFileId};
 
 use super::types::TypeTable;
 use super::{Project, ResolveMode, ResolveStat, SourceFileSnapshot};
+use crate::engine::diagnostics::policy::UNRESOLVED_REQUIRE_CODE;
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
 impl Project {
@@ -263,7 +264,7 @@ impl Project {
             );
             invariant_eq!(
                 fact.code,
-                "unresolved-require",
+                UNRESOLVED_REQUIRE_CODE,
                 what = "replace_unresolved_require_diagnostics received code `{}`",
                 why = "this API only swaps unresolved-require facts",
                 fix = "filter non-require diagnostics before calling this method",

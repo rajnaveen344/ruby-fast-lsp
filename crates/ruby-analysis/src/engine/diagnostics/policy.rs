@@ -1,4 +1,76 @@
-use crate::core::{MethodCallSignatureCandidate, MethodParamFact, MethodParamKind};
+//! Diagnostic policy: the code and severity of every diagnostic the engine
+//! derives, and the rules that decide when a diagnostic may be claimed
+//! (exception classes, arity, keyword suggestions, and spelling distance).
+
+use crate::core::{
+    DiagnosticFact, DiagnosticSeverity, MethodCallSignatureCandidate, MethodParamFact,
+    MethodParamKind, TextRange,
+};
+
+/// The stable code and severity of one engine-derived diagnostic family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine) struct DiagnosticRule {
+    code: &'static str,
+    severity: DiagnosticSeverity,
+}
+
+impl DiagnosticRule {
+    const fn new(code: &'static str, severity: DiagnosticSeverity) -> Self {
+        Self { code, severity }
+    }
+
+    /// A diagnostic of this family at `range`.
+    pub(in crate::engine) fn fact(
+        self,
+        range: TextRange,
+        message: impl Into<String>,
+    ) -> DiagnosticFact {
+        DiagnosticFact::new(range, self.severity, self.code, message)
+    }
+}
+
+pub(in crate::engine) const UNRESOLVED_CONSTANT: DiagnosticRule =
+    DiagnosticRule::new("unresolved-constant", DiagnosticSeverity::Error);
+pub(in crate::engine) const UNRESOLVED_METHOD: DiagnosticRule =
+    DiagnosticRule::new("unresolved-method", DiagnosticSeverity::Warning);
+pub(in crate::engine) const UNSUPPORTED_RUNTIME_API: DiagnosticRule =
+    DiagnosticRule::new("unsupported-runtime-api", DiagnosticSeverity::Warning);
+pub(in crate::engine) const WRONG_ARITY: DiagnosticRule =
+    DiagnosticRule::new("wrong-arity", DiagnosticSeverity::Warning);
+pub(in crate::engine) const UNKNOWN_KWARG: DiagnosticRule =
+    DiagnosticRule::new("unknown-kwarg", DiagnosticSeverity::Warning);
+pub(in crate::engine) const MISSING_KWARG: DiagnosticRule =
+    DiagnosticRule::new("missing-kwarg", DiagnosticSeverity::Warning);
+pub(in crate::engine) const RAISE_NON_EXCEPTION: DiagnosticRule =
+    DiagnosticRule::new("raise-non-exception", DiagnosticSeverity::Warning);
+pub(in crate::engine) const BAD_SPLAT: DiagnosticRule =
+    DiagnosticRule::new("bad-splat", DiagnosticSeverity::Warning);
+pub(in crate::engine) const NIL_CALL: DiagnosticRule =
+    DiagnosticRule::new("nil-call", DiagnosticSeverity::Warning);
+
+/// Families that resolve passes derive from candidates. A rebuild drops
+/// these and keeps every other resolved fact.
+const RESOLVE_DERIVED: [DiagnosticRule; 9] = [
+    UNRESOLVED_CONSTANT,
+    UNRESOLVED_METHOD,
+    UNSUPPORTED_RUNTIME_API,
+    WRONG_ARITY,
+    UNKNOWN_KWARG,
+    MISSING_KWARG,
+    RAISE_NON_EXCEPTION,
+    BAD_SPLAT,
+    NIL_CALL,
+];
+
+/// Whether a resolve pass derives diagnostics with `code`.
+pub(in crate::engine) fn is_resolve_derived(code: &str) -> bool {
+    RESOLVE_DERIVED.iter().any(|rule| rule.code == code)
+}
+
+/// Code of a static `require` or `require_relative` the loader cannot
+/// resolve. The loader produces these facts; the engine stores them apart
+/// from resolve-derived diagnostics and swaps them on their own.
+pub const UNRESOLVED_REQUIRE_CODE: &str = "unresolved-require";
 
 pub(in crate::engine) const EXCEPTION_WHITELIST: &[&str] = &[
     "Exception",

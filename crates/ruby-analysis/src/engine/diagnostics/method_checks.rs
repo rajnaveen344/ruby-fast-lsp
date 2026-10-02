@@ -5,7 +5,10 @@ use std::collections::HashMap;
 
 use log::debug;
 
-use super::helpers::{arity_mismatch, closest_keyword, MethodArity};
+use super::policy::{
+    arity_mismatch, closest_keyword, MethodArity, MISSING_KWARG, UNKNOWN_KWARG,
+    UNSUPPORTED_RUNTIME_API, WRONG_ARITY,
+};
 use crate::core::{
     DiagnosticFact, FullyQualifiedName, MethodAvailability, MethodCallSignatureCandidate,
     MethodFact, SourceFileId, TextRange,
@@ -27,10 +30,8 @@ impl Project {
         diagnostics_by_file
             .entry(diagnostic_range.file_id)
             .or_default()
-            .push(DiagnosticFact::new(
+            .push(UNSUPPORTED_RUNTIME_API.fact(
                 diagnostic_range,
-                crate::core::DiagnosticSeverity::Warning,
-                "unsupported-runtime-api",
                 format!(
                     "Runtime API `{}` is unavailable: {}",
                     method.as_str(),
@@ -126,10 +127,8 @@ impl Project {
             diagnostics_by_file
                 .entry(diagnostic_range.file_id)
                 .or_default()
-                .push(DiagnosticFact::new(
+                .push(WRONG_ARITY.fact(
                     diagnostic_range,
-                    crate::core::DiagnosticSeverity::Warning,
-                    "wrong-arity",
                     format!(
                         "Wrong number of arguments for `{}` (expected {}, got {})",
                         method.as_str(),
@@ -162,12 +161,7 @@ impl Project {
                 diagnostics_by_file
                     .entry(kwarg.range.file_id)
                     .or_default()
-                    .push(DiagnosticFact::new(
-                        kwarg.range,
-                        crate::core::DiagnosticSeverity::Warning,
-                        "unknown-kwarg",
-                        message,
-                    ));
+                    .push(UNKNOWN_KWARG.fact(kwarg.range, message));
             }
         }
 
@@ -197,10 +191,8 @@ impl Project {
                 diagnostics_by_file
                     .entry(diagnostic_range.file_id)
                     .or_default()
-                    .push(DiagnosticFact::new(
+                    .push(MISSING_KWARG.fact(
                         diagnostic_range,
-                        crate::core::DiagnosticSeverity::Warning,
-                        "missing-kwarg",
                         format!(
                             "Missing required keyword argument(s) for `{}`: {}",
                             method.as_str(),

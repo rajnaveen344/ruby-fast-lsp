@@ -257,7 +257,7 @@ Delete this file when the last task is done. Git history keeps the record.
   Notes: B6 changes signatures and C3 moves files; never mix them in one
   commit. Do B6 for a feature before its C3 move, or after it lands.
 - [ ] B7. Gather diagnostic policy into one module.
-  - [ ] B7a. `engine/diagnostics/policy.rs` absorbs `helpers.rs` and owns the
+  - [x] B7a. `engine/diagnostics/policy.rs` absorbs `helpers.rs` and owns the
         code constants and severities.
   - [ ] B7b. Move the suppression predicates (incomplete chain, explicit
         contract, dynamic mixin hook) into `policy.rs`; rename uses the same

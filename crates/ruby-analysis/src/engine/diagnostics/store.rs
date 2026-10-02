@@ -2,26 +2,11 @@
 //! diagnostic facts. Resolve passes read candidates and rebuild the derived
 //! diagnostics; indexer and require diagnostics survive the rebuild.
 
+use super::policy::{is_resolve_derived, UNRESOLVED_REQUIRE_CODE};
 use crate::core::storage::diagnostic_candidate_store::DiagnosticCandidateStore;
 use crate::core::storage::diagnostic_store::DiagnosticStore;
 use crate::core::{DiagnosticCandidate, DiagnosticFact, SourceFileId};
 use crate::engine::View;
-
-/// Diagnostic codes that resolve passes derive from candidates. A rebuild
-/// drops these and keeps every other resolved fact.
-const RESOLVE_DERIVED_CODES: [&str; 9] = [
-    "unresolved-constant",
-    "unresolved-method",
-    "unsupported-runtime-api",
-    "wrong-arity",
-    "unknown-kwarg",
-    "missing-kwarg",
-    "raise-non-exception",
-    "bad-splat",
-    "nil-call",
-];
-
-const UNRESOLVED_REQUIRE: &str = "unresolved-require";
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct Diagnostics {
@@ -58,7 +43,7 @@ impl Diagnostics {
             .resolved
             .facts_in_file(file_id)
             .into_iter()
-            .filter(|fact| fact.code != UNRESOLVED_REQUIRE)
+            .filter(|fact| fact.code != UNRESOLVED_REQUIRE_CODE)
             .collect::<Vec<_>>();
         diagnostics.extend(require_diagnostics);
         self.resolved.replace_file(file_id, diagnostics);
@@ -75,7 +60,7 @@ impl Diagnostics {
             .resolved
             .facts_in_file(file_id)
             .into_iter()
-            .filter(|fact| !RESOLVE_DERIVED_CODES.contains(&fact.code.as_str()))
+            .filter(|fact| !is_resolve_derived(&fact.code))
             .collect::<Vec<_>>();
         diagnostics.extend(derived);
         self.resolved.replace_file(file_id, diagnostics);

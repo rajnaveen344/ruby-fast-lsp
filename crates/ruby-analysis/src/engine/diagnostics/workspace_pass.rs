@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::grouped_methods::grouped_method_targets;
+use super::policy::{UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
 use super::{
     constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache, MethodReferenceCacheKey,
 };
@@ -14,8 +15,8 @@ use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::reference_store::ConstLookup;
 use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
-    ConstantPath, DiagnosticFact, FullyQualifiedName, MethodReferenceAccess, NamespaceKind,
-    ReferenceFact, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
+    ConstantPath, FullyQualifiedName, MethodReferenceAccess, NamespaceKind, ReferenceFact,
+    RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
 use crate::engine::state::ResolveStat;
@@ -100,10 +101,8 @@ impl Project {
                         unresolved_constants
                             .entry(candidate.range.file_id)
                             .or_default()
-                            .push(DiagnosticFact::new(
+                            .push(UNRESOLVED_CONSTANT.fact(
                                 candidate.range,
-                                crate::core::DiagnosticSeverity::Error,
-                                "unresolved-constant",
                                 format!("Unresolved constant `{}`", constant_name(&parts)),
                             ));
                     }
@@ -428,12 +427,9 @@ impl Project {
                             unresolved_constants
                                 .entry(diagnostics.diagnostic_range.file_id)
                                 .or_default()
-                                .push(DiagnosticFact::new(
-                                    diagnostics.diagnostic_range,
-                                    crate::core::DiagnosticSeverity::Warning,
-                                    "unresolved-method",
-                                    message,
-                                ));
+                                .push(
+                                    UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message),
+                                );
                         }
                     }
                 }

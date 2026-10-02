@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use super::helpers::{EXCEPTION_WHITELIST, NON_EXCEPTION_TYPES};
+use super::policy::{
+    BAD_SPLAT, EXCEPTION_WHITELIST, NIL_CALL, NON_EXCEPTION_TYPES, RAISE_NON_EXCEPTION,
+};
 use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FullyQualifiedName,
     RaiseArgCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId,
@@ -52,10 +54,8 @@ impl Project {
                 if ruby_type != RubyType::nil_class() {
                     return None;
                 }
-                Some(DiagnosticFact::new(
+                Some(NIL_CALL.fact(
                     candidate.range,
-                    crate::core::DiagnosticSeverity::Warning,
-                    "nil-call",
                     format!("Calling `{method}` on `{variable}` which is `nil` here."),
                 ))
             }
@@ -63,10 +63,8 @@ impl Project {
                 operator,
                 arg_repr,
                 expected,
-            } => Some(DiagnosticFact::new(
+            } => Some(BAD_SPLAT.fact(
                 candidate.range,
-                crate::core::DiagnosticSeverity::Warning,
-                "bad-splat",
                 format!(
                     "`{}{}` expected {} but got non-{} value",
                     operator, arg_repr, expected, expected
@@ -76,10 +74,8 @@ impl Project {
                 if self.raise_arg_is_exception(arg.clone()) {
                     None
                 } else {
-                    Some(DiagnosticFact::new(
+                    Some(RAISE_NON_EXCEPTION.fact(
                         candidate.range,
-                        crate::core::DiagnosticSeverity::Warning,
-                        "raise-non-exception",
                         format!(
                             "`raise` argument `{}` is not an Exception subclass",
                             arg_repr
