@@ -173,7 +173,7 @@ Delete this file when the last task is done. Git history keeps the record.
         against the legacy functions per want × access × receiver.
   - [x] B5b. Fold `MethodLookupResult` and `EffectiveMethodFactMatch` into
         `MethodAnswer`.
-  - [ ] B5c. Make the public/protected/`_for_type`/`_cached` wrappers
+  - [x] B5c. Make the public/protected/`_for_type`/`_cached` wrappers
         one-liners over `lookup::method`; delete those with no callers.
   - [ ] B5d. Make the return-type walk consume `MethodAnswer` instead of
         `method_facts_in_chain`. Profiler comparison.

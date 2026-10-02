@@ -423,6 +423,12 @@ impl MethodAnswer {
         }
     }
 
+    /// [`Self::into_signatures`] as an owned list, cloned only when the
+    /// facts are shared with a cache.
+    pub fn into_signature_vec(self) -> Vec<MethodFact> {
+        Arc::unwrap_or_clone(self.into_signatures())
+    }
+
     /// The outcome of a [`MethodWant::Reference`] lookup.
     pub fn into_reference(self) -> MethodAnswer<Arc<MethodFact>> {
         self.map_found(|found| match found {

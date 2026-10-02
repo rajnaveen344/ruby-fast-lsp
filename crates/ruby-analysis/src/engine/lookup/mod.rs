@@ -14,8 +14,11 @@
 //! report or act on absence must do so only for `Missing`, and must fail
 //! closed on `Unknown`.
 //!
-//! Requests delegate to the engine's existing resolution functions; equality
-//! with the legacy `View` wrappers is tested per want, access, and receiver.
+//! Requests delegate to the engine's resolution functions. The
+//! access-flavoured callee, return-type, and signature wrappers on `View` are
+//! one-line views of [`method`] and [`method_cached`]; the tests compare
+//! answers with those wrappers and the remaining legacy paths per want,
+//! access, and receiver.
 
 mod method;
 #[cfg(test)]

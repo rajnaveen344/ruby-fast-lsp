@@ -7,6 +7,7 @@ use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, ResolvedMethodCallee, RubyMethod, RubyType,
     SourceFileId, TypeResolution, TypeSubject,
 };
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::queries::View;
 use crate::engine::resolution::{
     chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
@@ -202,9 +203,17 @@ impl<'a> View<'a> {
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-    ) -> Option<crate::core::RubyType> {
-        let mut seen = HashSet::new();
-        self.method_return_type_for_receiver_inner(namespace_fqn, method, true, None, &mut seen)
+    ) -> Option<RubyType> {
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Return,
+            },
+        )
+        .into_return_type()
     }
 
     pub fn method_return_type_for_receiver_cached(
@@ -212,24 +221,35 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         cache: &AnalysisQueryCache,
-    ) -> Option<crate::core::RubyType> {
-        let key = MethodReturnQueryKey {
-            namespace: namespace_fqn.clone(),
-            method: *method,
-            access: MethodReturnQueryAccess::Private,
-        };
-        cache.method_return(self.engine.query_cache_identity(), key, || {
-            self.method_return_type_for_receiver(namespace_fqn, method)
-        })
+    ) -> Option<RubyType> {
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Return,
+            },
+            cache,
+        )
+        .into_return_type()
     }
 
     pub fn method_return_type_for_public_receiver(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-    ) -> Option<crate::core::RubyType> {
-        let mut seen = HashSet::new();
-        self.method_return_type_for_receiver_inner(namespace_fqn, method, false, None, &mut seen)
+    ) -> Option<RubyType> {
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Public,
+                want: MethodWant::Return,
+            },
+        )
+        .into_return_type()
     }
 
     pub fn method_return_type_for_public_receiver_cached(
@@ -237,15 +257,18 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         cache: &AnalysisQueryCache,
-    ) -> Option<crate::core::RubyType> {
-        let key = MethodReturnQueryKey {
-            namespace: namespace_fqn.clone(),
-            method: *method,
-            access: MethodReturnQueryAccess::Public,
-        };
-        cache.method_return(self.engine.query_cache_identity(), key, || {
-            self.method_return_type_for_public_receiver(namespace_fqn, method)
-        })
+    ) -> Option<RubyType> {
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Public,
+                want: MethodWant::Return,
+            },
+            cache,
+        )
+        .into_return_type()
     }
 
     pub fn method_return_type_for_protected_receiver(
@@ -253,15 +276,19 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<crate::core::RubyType> {
-        let mut seen = HashSet::new();
-        self.method_return_type_for_receiver_inner(
-            namespace_fqn,
-            method,
-            false,
-            Some(caller_namespace_fqn),
-            &mut seen,
+    ) -> Option<RubyType> {
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Protected {
+                    caller: caller_namespace_fqn,
+                },
+                want: MethodWant::Return,
+            },
         )
+        .into_return_type()
     }
 
     pub fn method_return_type_for_protected_receiver_cached(
@@ -270,29 +297,20 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
         cache: &AnalysisQueryCache,
-    ) -> Option<crate::core::RubyType> {
-        let identity = self.engine.query_cache_identity();
-        if !thread_receiver_has_non_public(identity, namespace_fqn, *method, || {
-            self.receiver_method_has_non_public(namespace_fqn, method)
-        }) {
-            return self.method_return_type_for_public_receiver_cached(
-                namespace_fqn,
-                method,
-                cache,
-            );
-        }
-        let key = MethodReturnQueryKey {
-            namespace: namespace_fqn.clone(),
-            method: *method,
-            access: MethodReturnQueryAccess::Protected(caller_namespace_fqn.clone()),
-        };
-        cache.method_return(identity, key, || {
-            self.method_return_type_for_protected_receiver(
-                namespace_fqn,
-                method,
-                caller_namespace_fqn,
-            )
-        })
+    ) -> Option<RubyType> {
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Protected {
+                    caller: caller_namespace_fqn,
+                },
+                want: MethodWant::Return,
+            },
+            cache,
+        )
+        .into_return_type()
     }
 
     /// A return type through receiver dispatch with the given visibility.

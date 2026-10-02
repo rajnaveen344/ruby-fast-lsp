@@ -13,9 +13,11 @@ use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, ResolvedMethodCallee,
     RubyMethod, RubyType,
 };
-use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
+use crate::engine::queries::cache::AnalysisQueryCache;
 use crate::engine::queries::definitions::DefinitionLookupChains;
 use crate::engine::queries::View;
+use crate::engine::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 
 impl<'a> View<'a> {
@@ -194,7 +196,16 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, true, None, None)
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Callees,
+            },
+        )
+        .into_callees()
     }
 
     pub fn resolve_method_callees_cached(
@@ -203,13 +214,17 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         cache: &AnalysisQueryCache,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        cache.method_callees(
-            self.engine.query_cache_identity(),
-            namespace_fqn,
-            *method,
-            MethodReturnQueryAccess::Private,
-            || self.resolve_method_callees(namespace_fqn, method),
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Callees,
+            },
+            cache,
         )
+        .into_callees()
     }
 
     pub fn resolve_public_method_callees(
@@ -217,7 +232,16 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, false, None, None)
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Public,
+                want: MethodWant::Callees,
+            },
+        )
+        .into_callees()
     }
 
     pub fn resolve_protected_method_callees(
@@ -226,13 +250,18 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(
-            namespace_fqn,
-            method,
-            false,
-            Some(caller_namespace_fqn),
-            None,
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Protected {
+                    caller: caller_namespace_fqn,
+                },
+                want: MethodWant::Callees,
+            },
         )
+        .into_callees()
     }
 
     pub fn resolve_method_callees_for_type(
@@ -240,7 +269,16 @@ impl<'a> View<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(receiver_type, method, true, None, None)
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Type(receiver_type),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Callees,
+            },
+        )
+        .into_callees()
     }
 
     pub fn resolve_public_method_callees_for_type(
@@ -248,7 +286,16 @@ impl<'a> View<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(receiver_type, method, false, None, None)
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Type(receiver_type),
+                method: *method,
+                access: ReceiverAccess::Public,
+                want: MethodWant::Callees,
+            },
+        )
+        .into_callees()
     }
 
     pub fn resolve_protected_method_callees_for_type(
@@ -257,13 +304,18 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(
-            receiver_type,
-            method,
-            false,
-            Some(caller_namespace_fqn),
-            None,
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Type(receiver_type),
+                method: *method,
+                access: ReceiverAccess::Protected {
+                    caller: caller_namespace_fqn,
+                },
+                want: MethodWant::Callees,
+            },
         )
+        .into_callees()
     }
 
     pub(in crate::engine) fn resolve_method_callees_for_type_inner(

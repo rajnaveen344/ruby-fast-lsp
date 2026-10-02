@@ -2,9 +2,12 @@
 
 use super::receiver_type_members;
 use crate::core::{FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, RubyType};
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::View;
+use crate::engine::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
+use std::sync::Arc;
 
 impl<'a> View<'a> {
     pub fn resolve_method_signature_facts(
@@ -12,7 +15,16 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_inner(namespace_fqn, method, true, None)
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Signatures,
+            },
+        )
+        .into_signature_vec()
     }
 
     pub fn resolve_method_signature_facts_cached(
@@ -21,9 +33,17 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         cache: &AnalysisQueryCache,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_cached_arc(namespace_fqn, method, cache)
-            .as_ref()
-            .clone()
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Signatures,
+            },
+            cache,
+        )
+        .into_signature_vec()
     }
 
     pub(crate) fn resolve_method_signature_facts_cached_arc(
@@ -31,14 +51,18 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         cache: &AnalysisQueryCache,
-    ) -> std::sync::Arc<Vec<MethodFact>> {
-        self.resolve_method_signature_facts_maybe_cached(
-            namespace_fqn,
-            method,
-            true,
-            None,
-            Some(cache),
+    ) -> Arc<Vec<MethodFact>> {
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Signatures,
+            },
+            cache,
         )
+        .into_signatures()
     }
 
     pub fn resolve_protected_method_signature_facts(
@@ -47,12 +71,18 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_inner(
-            namespace_fqn,
-            method,
-            false,
-            Some(caller_namespace_fqn),
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Namespace(namespace_fqn),
+                method: *method,
+                access: ReceiverAccess::Protected {
+                    caller: caller_namespace_fqn,
+                },
+                want: MethodWant::Signatures,
+            },
         )
+        .into_signature_vec()
     }
 
     pub fn resolve_protected_method_signature_facts_for_type(
@@ -61,13 +91,18 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_for_type_inner(
-            receiver_type,
-            method,
-            false,
-            Some(caller_namespace_fqn),
-            None,
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Type(receiver_type),
+                method: *method,
+                access: ReceiverAccess::Protected {
+                    caller: caller_namespace_fqn,
+                },
+                want: MethodWant::Signatures,
+            },
         )
+        .into_signature_vec()
     }
 
     pub fn resolve_method_signature_facts_for_type(
@@ -75,7 +110,16 @@ impl<'a> View<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, true, None, None)
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Type(receiver_type),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Signatures,
+            },
+        )
+        .into_signature_vec()
     }
 
     pub fn resolve_method_signature_facts_for_type_cached(
@@ -84,13 +128,17 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         cache: &AnalysisQueryCache,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_for_type_inner(
-            receiver_type,
-            method,
-            true,
-            None,
-            Some(cache),
+        lookup::method_cached(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Type(receiver_type),
+                method: *method,
+                access: ReceiverAccess::Any,
+                want: MethodWant::Signatures,
+            },
+            cache,
         )
+        .into_signature_vec()
     }
 
     pub(in crate::engine) fn resolve_method_signature_facts_for_type_inner(
