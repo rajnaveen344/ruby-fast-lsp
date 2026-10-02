@@ -411,6 +411,61 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] C5. Reduce the server to `Server { client, config, documents, projects }`.
 - [ ] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
+  - [x] C6a. Bug: the persisted gem product identity hashed the JRuby import
+        producers but not the workspace crates they and the fact collector
+        call (`jruby-support` proxy names, `jvm-metadata` class parsing, and
+        the `extension-api` contract), so a change there could reuse stale
+        gem facts. `build.rs` lists those trees, and
+        `loader/cache/producer_identity_tests.rs` fails when a listed
+        producer calls a workspace crate whose tree is not listed. Expect one
+        cold gem reindex.
+  - [ ] C6b. One add-on value. The server holds `Option<JrubyAddOn>` per
+        project instead of an import provider and a separate classpath
+        fingerprint lock, and the loader hands it over through one
+        `LoadSink` write:
+
+        ```rust
+        // src/loader/jruby_add_on.rs
+        #[derive(Clone, Debug)]
+        pub struct JrubyAddOn { /* Arc<JrubyImportProvider> */ }
+        impl JrubyAddOn {
+            pub(in crate::loader) fn new(imports: Arc<JrubyImportProvider>) -> Self;
+            pub fn classpath_fingerprint(&self) -> &str;
+            pub(in crate::loader) fn import_provider(&self) -> &Arc<JrubyImportProvider>;
+        }
+        // LoadSink (replaces clear_/install_jruby_import_provider)
+        fn set_jruby_add_on(&self, root: &Path, add_on: Option<JrubyAddOn>);
+        // loader entry point for interactive processors
+        FileProcessor::with_jruby_add_on(self, add_on: &JrubyAddOn) -> Self;
+        ```
+
+        The server reads only the fingerprint (runtime status, profiler)
+        and passes the add-on back to the loader; the provider accessor is
+        visible only inside `crate::loader`, so the compiler keeps
+        `server` and `lsp` off the import provider. Provider and
+        fingerprint now change in one write instead of two ordered ones.
+  - [ ] C6c. Move the catalog-independent Java DSL syntax scans (dotted
+        Java calls, canonical `Java::` paths, static `java_import` /
+        `include_package` dependencies, the static import-alias block
+        evaluator, the gem prefilter, and `StaticJavaSourceHint`) from
+        `environment/runtime/jruby/imports/{syntax,static_scan}.rs` to
+        `jruby-support`. They depend only on Prism, so the crate gains a
+        `ruby-prism` dependency; it still has no LSP, filesystem, or
+        `ruby-analysis` dependency. C6a already hashes the crate tree, so
+        the gem producer identity keeps covering them.
+
+  Notes: what stays in `src/environment/runtime/jruby/` and why. The import
+  provider's fact-collector extension (`imports/` call host, declarations,
+  Java methods and types, navigation) lowers into `ruby_analysis` facts
+  through `FactCollector`, which the crate's charter excludes. Classpath
+  discovery, the Java artifact catalog, runtime source materialization, and
+  source navigation read the filesystem and use the server's
+  `persistent_cache` and `single_flight` utilities. The decompiler runs
+  child processes under the server's CPU/memory/time limits. Moving any of
+  them would drag `src/` types into the crate, so they stay behind the
+  add-on. The loader keeps its JRuby orchestration
+  (`coordinator/jruby.rs`, catalog-sensitive replay, Java navigation
+  demand) because those are load steps, not server state.
 - [ ] C7. Use one Ruby version detector and one RSpec implementation.
   - [x] C7a. Take gem discovery's active engine from the selected runtime
         descriptor and delete its `RUBY_ENGINE` probe. Survivor: the runtime

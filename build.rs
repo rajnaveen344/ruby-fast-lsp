@@ -7,6 +7,9 @@ const GEM_FACT_PRODUCER_TREES: &[&str] = &[
     "crates/ruby-analysis/src",
     "crates/rbs-parser/src",
     "crates/rbs-parser/rbs_types",
+    "crates/extension-api/src",
+    "crates/jruby-support/src",
+    "crates/jvm-metadata/src",
     "src/loader/file_processor",
 ];
 const GEM_FACT_PRODUCER_FILES: &[&str] = &[

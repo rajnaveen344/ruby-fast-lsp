@@ -407,7 +407,10 @@ file-owned lifecycle; a production invariant rejects project, excluded, and
 previously bound gem sources from the reusable seed. The product key includes
 the exact selected gem identity, its declared dependency context, logical
 source paths and checksums, the clean semantic seed, and the JRuby provider
-identity only when the gem source is catalog-sensitive. Each consumer supplies
+identity only when the gem source is catalog-sensitive. It also hashes the
+producer sources that `build.rs` lists, which must include every workspace
+crate those producers call (`loader/cache/producer_identity_tests.rs` checks
+this). Each consumer supplies
 its own physical paths. Concurrent identical requests join one producer. The
 gem product is currently an
 **ephemeral flight**, not a completed-value memory cache: completion wakes all

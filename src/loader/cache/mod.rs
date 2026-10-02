@@ -6,3 +6,5 @@ pub(crate) mod dependency_product;
 
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(test)]
+mod producer_identity_tests;
