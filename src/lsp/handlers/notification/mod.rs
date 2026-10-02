@@ -695,7 +695,7 @@ pub async fn handle_did_change_workspace_folders(
 
     for text_document in open_documents_to_rehome {
         let owner = server.analysis_engine_for_uri(&text_document.uri);
-        server.clear_file_from_other_engines(&text_document.uri, &owner);
+        server.remove_file_from_other_engines(&text_document.uri, &owner);
         indexing::handle_did_open(server, DidOpenTextDocumentParams { text_document }).await;
     }
 

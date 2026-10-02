@@ -313,6 +313,8 @@ impl FileProcessor {
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
+            // The file exists but is too broken to analyze: keep it
+            // registered with no facts rather than removing it.
             let semantic_change = replace_file_analysis(
                 &analysis_engine,
                 analysis_file_id,

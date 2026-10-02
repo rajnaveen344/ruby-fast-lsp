@@ -43,6 +43,13 @@ above. When a project's facts are resolved the loader calls
 project's open documents from `diagnostics.rs` and reports whether the indexing
 run is still current.
 
+A file leaves its project through `Project::remove`: a closed file that is
+deleted or falls outside the source policy, a closed excluded document, and a
+rehomed open document in every project except its new owner. Other files stop
+resolving into it, a deleted closed file is published an empty diagnostic
+clear, and its id is never reused. A file that still exists but cannot be read
+or parsed stays registered with no facts, so require resolution still finds it.
+
 Separate executable targets use operations such as `configuration_snapshot()`,
 `configure_embedded()`, `register_indexing_run()`, and
 `runtime_product_snapshot()`. Configuration and telemetry snapshots are detached

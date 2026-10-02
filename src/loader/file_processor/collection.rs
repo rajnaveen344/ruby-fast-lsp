@@ -178,6 +178,8 @@ impl FileProcessor {
         let facts = match ruby_analysis::indexer::index_rbs(analysis_file_id, content) {
             Ok(facts) => facts,
             Err(error) => {
+                // The signature file exists but does not parse: keep it
+                // registered with no facts rather than removing it.
                 replace_file_analysis(
                     &analysis_engine,
                     analysis_file_id,

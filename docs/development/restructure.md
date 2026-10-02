@@ -160,10 +160,15 @@ Delete this file when the last task is done. Git history keeps the record.
         fingerprints, stale snapshots rejected, re-register does not resurrect
         facts, edges into the removed file become unresolved, unknown id is a
         no-op.
-  - [ ] B4g. Replace clear-by-empty-facts with `remove` in the server
+  - [x] B4g. Replace clear-by-empty-facts with `remove` in the server
         (`clear_file_facts_if_kind`, project collection, semantic context),
         routed through `LoadSink` (after C1e). Server test: a deleted watched
-        file drops its diagnostics and references.
+        file drops its diagnostics and references. Done for deletion,
+        policy exclusion, closed excluded documents, and rehomed documents.
+        The project collection and semantic context sites stay empty updates:
+        they withhold facts on a private snapshot whose seed addresses the
+        same files by path, and no file leaves the project there. Unreadable
+        or unparsable files that still exist also stay registered and empty.
   - [ ] B4h. Remove the aliases; update the engine and crate READMEs.
 - [ ] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
       the method-lookup variants with it.

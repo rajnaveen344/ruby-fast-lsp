@@ -10,6 +10,8 @@ mod commit_interleavings;
 mod dependency_refresh;
 // Consumer diagnostics after a definition is deleted and restored.
 mod diagnostic_edits;
+// Deleted watched files leave diagnostics, navigation, and fingerprints.
+mod file_removal;
 // Method targets across ancestor edits, partial opens, and closed buffers.
 mod hierarchy_edits;
 // Complete navigation and rename results that survive edit recovery.

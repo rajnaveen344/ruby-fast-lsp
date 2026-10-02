@@ -1,9 +1,10 @@
 //! Buffer lifecycle and editing operations routed through the real handlers.
 
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, VersionedTextDocumentIdentifier, WorkspaceEdit,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, FileChangeType, FileEvent,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    VersionedTextDocumentIdentifier, WorkspaceEdit,
 };
 
 use super::FakeEditor;
@@ -116,6 +117,27 @@ impl FakeEditor {
             text_document: TextDocumentIdentifier { uri },
         };
         indexing::handle_did_close(&self.server, params).await;
+    }
+
+    /// Report a file-system change to a closed file.
+    ///
+    /// Routes through the real `handle_watched_files_changed` handler, which
+    /// reads created and changed files from disk. Panics if the file is open.
+    pub async fn watched_file_changed(&mut self, filename: &str, typ: FileChangeType) {
+        invariant!(
+            !self.buffers.contains_key(filename),
+            what = "watched change reported for open file '{}'",
+            why = "open buffers are authoritative, so the handler ignores their disk events",
+            fix = "close the file before reporting a disk change",
+            filename,
+        );
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Self::filename_to_uri(filename),
+                typ,
+            }],
+        };
+        indexing::handle_watched_files_changed(&self.server, params).await;
     }
 
     // ─── Editing Helpers ───────────────────────────────────────────────

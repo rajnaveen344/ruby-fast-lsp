@@ -410,8 +410,8 @@ impl RubyLanguageServer {
         self.projects.analysis_engines()
     }
 
-    pub fn clear_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
-        self.projects.clear_file_from_other_engines(uri, owner)
+    pub fn remove_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
+        self.projects.remove_file_from_other_engines(uri, owner)
     }
 
     pub fn open_or_update_analysis_file(
@@ -583,7 +583,8 @@ impl ProjectRegistry {
         engines
     }
 
-    pub fn clear_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
+    /// Remove a rehomed document from every project except its new owner.
+    pub fn remove_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
@@ -593,11 +594,7 @@ impl ProjectRegistry {
             }
             let mut engine = analysis_engine.write();
             if let Some(file_id) = engine.file_id(&path) {
-                engine.update(
-                    file_id,
-                    ruby_analysis::core::FileAnalysis::default(),
-                    ruby_analysis::engine::ResolveMode::Immediate,
-                );
+                engine.remove(file_id, ruby_analysis::engine::ResolveMode::Immediate);
             }
         }
     }

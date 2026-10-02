@@ -101,6 +101,10 @@ impl IndexerProject {
             })
             .map(|file| file.id)
             .collect::<Vec<_>>();
+        // Withhold prior project facts from the pre-collection baseline. The
+        // files stay registered in this private snapshot because the seed
+        // below addresses them by path; the live engine is untouched, so this
+        // is an empty update rather than a removal.
         for file_id in stale_project_file_ids {
             snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
         }

@@ -58,6 +58,12 @@ calls them in its own order, so the owner observes the load's write sequence.
 Fact commits and resolution still run on the engine handle returned by
 `engine_for_uri`.
 
+The loader never removes a file. A file that exists but does not parse stays
+registered with no facts. The pre-collection baseline withholds stale project
+facts with empty updates on its private snapshot, because the declaration seed
+addresses those files by path. Deleted, excluded, and rehomed files are removed
+by the server with `Project::remove`.
+
 After final resolution the loader calls `LoadSink::project_facts_ready`. The
 server then publishes a complete diagnostic projection (syntax, engine facts,
 and retained external linter results) for each open document that the

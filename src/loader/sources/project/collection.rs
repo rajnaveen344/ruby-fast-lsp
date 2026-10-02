@@ -497,6 +497,10 @@ impl IndexerProject {
             } else {
                 let mut snapshot = engine.clone();
                 drop(engine);
+                // These files still exist and are about to be collected; only
+                // their prior facts are withheld. They keep their identity
+                // because the seed below addresses them by path, so this is
+                // an empty update rather than a removal.
                 for file_id in stale_file_ids {
                     snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
                 }

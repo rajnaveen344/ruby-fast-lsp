@@ -69,6 +69,21 @@ impl FakeEditor {
         self.client_messages.diagnostics(&uri, &submitted).await
     }
 
+    /// Observe the diagnostics last delivered for a file in any buffer state,
+    /// including a closed or deleted file. Panics when nothing was published.
+    pub async fn delivered_diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
+        let uri = Self::filename_to_uri(filename);
+        let submitted = self
+            .server
+            .last_diagnostic_publication(&uri)
+            .expect_invariant(
+                "file has no diagnostic publication",
+                "a missing notification is not an empty result",
+                "inspect the publication lifecycle; do not recompute in the observer",
+            );
+        self.client_messages.diagnostics(&uri, &submitted).await
+    }
+
     /// Assert the file has zero ERROR-severity diagnostics.
     ///
     /// Panics with a list of all errors if any are found. WARNING/INFO/HINT

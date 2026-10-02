@@ -665,7 +665,8 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     server.release_external_document_project(&uri);
     debug!("Doc cache size: {}", server.documents.read().len());
 
-    if clear_file_facts_if_kind(server, &uri, SourceKind::Excluded) {
+    // An excluded file is analyzed only while it is open.
+    if remove_file_if_kind(server, &uri, SourceKind::Excluded) {
         server.publish_diagnostics(uri, Vec::new()).await;
         server.invalidate_namespace_tree_cache_debounced();
         return;
@@ -715,8 +716,7 @@ pub async fn handle_watched_files_changed(
             if change.typ == FileChangeType::DELETED
                 || !policy.includes_signature(&workspace.root_path, &path)
             {
-                analysis_changed |=
-                    clear_file_facts_if_kind(server, &change.uri, SourceKind::Signature);
+                analysis_changed |= remove_file_if_kind(server, &change.uri, SourceKind::Signature);
                 continue;
             }
             match tokio::fs::read_to_string(&path).await {
@@ -733,7 +733,7 @@ pub async fn handle_watched_files_changed(
                 },
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     analysis_changed |=
-                        clear_file_facts_if_kind(server, &change.uri, SourceKind::Signature);
+                        remove_file_if_kind(server, &change.uri, SourceKind::Signature);
                 }
                 Err(error) => {
                     log::error!(
@@ -748,7 +748,7 @@ pub async fn handle_watched_files_changed(
         }
 
         if change.typ == FileChangeType::DELETED || !policy.includes(&workspace.root_path, &path) {
-            analysis_changed |= clear_project_file_facts(server, &change.uri);
+            analysis_changed |= remove_project_file(server, &change.uri);
             if change.typ == FileChangeType::DELETED {
                 server
                     .publish_diagnostics(change.uri.clone(), Vec::new())
@@ -766,7 +766,7 @@ pub async fn handle_watched_files_changed(
                 }
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                analysis_changed |= clear_project_file_facts(server, &change.uri);
+                analysis_changed |= remove_project_file(server, &change.uri);
             }
             Err(error) => {
                 log::error!("Failed to read watched file {}: {error}", path.display());
@@ -839,29 +839,47 @@ fn refresh_open_project_files_for_dependency_engines(
     }
 }
 
+fn remove_project_file(server: &RubyLanguageServer, uri: &Url) -> bool {
+    remove_file_if_kind(server, uri, SourceKind::Project)
+}
+
 fn clear_project_file_facts(server: &RubyLanguageServer, uri: &Url) -> bool {
     clear_file_facts_if_kind(server, uri, SourceKind::Project)
 }
 
+/// Remove a file that no longer exists or no longer belongs to its project.
+/// Other files stop resolving into it, and a later registration at the same
+/// path starts from a fresh identity.
+fn remove_file_if_kind(server: &RubyLanguageServer, uri: &Url, expected_kind: SourceKind) -> bool {
+    let analysis_engine = server.analysis_engine_for_uri(uri);
+    let mut engine = analysis_engine.write();
+    let Some(file_id) = registered_file_of_kind(&engine, uri, expected_kind) else {
+        return false;
+    };
+    engine.remove(file_id, ResolveMode::Immediate)
+}
+
+/// Keep a file that still exists on disk but could not be read or analyzed
+/// registered as an empty source, so require resolution still finds it while
+/// none of its previous facts survive.
 fn clear_file_facts_if_kind(
     server: &RubyLanguageServer,
     uri: &Url,
     expected_kind: SourceKind,
 ) -> bool {
-    let path = uri
-        .to_file_path()
-        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
     let analysis_engine = server.analysis_engine_for_uri(uri);
     let mut engine = analysis_engine.write();
-    let Some(file_id) = engine.file_id(&path) else {
+    let Some(file_id) = registered_file_of_kind(&engine, uri, expected_kind) else {
         return false;
     };
-    if !engine
+    let path = engine
         .file(file_id)
-        .is_some_and(|file| file.kind == expected_kind)
-    {
-        return false;
-    }
+        .map(|file| file.path.clone())
+        .expect_invariant(
+            "a registered file vanished under the engine write lock",
+            "the lookup and the clear hold one engine write borrow",
+            "keep lookup and clear inside one write guard",
+        );
     let file_id = engine.register_file(SourceFileInput {
         path,
         content: String::new(),
@@ -869,6 +887,21 @@ fn clear_file_facts_if_kind(
     });
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     true
+}
+
+fn registered_file_of_kind(
+    engine: &ruby_analysis::engine::Project,
+    uri: &Url,
+    expected_kind: SourceKind,
+) -> Option<ruby_analysis::core::SourceFileId> {
+    let path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
+    let file_id = engine.file_id(&path)?;
+    engine
+        .file(file_id)
+        .is_some_and(|file| file.kind == expected_kind)
+        .then_some(file_id)
 }
 
 #[cfg(test)]
