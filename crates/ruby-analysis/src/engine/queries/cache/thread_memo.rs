@@ -114,7 +114,7 @@ pub(super) fn thread_method_insert(identity: (u64, u64), key: MethodMemoKey, val
     });
 }
 
-pub(super) fn thread_receiver_has_non_public(
+pub(super) fn thread_protected_return_may_differ(
     identity: (u64, u64),
     namespace: &FullyQualifiedName,
     method: RubyMethod,

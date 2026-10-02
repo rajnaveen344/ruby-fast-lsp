@@ -16,7 +16,7 @@ use crate::engine::resolution::{
 use crate::inference::semantics::ReceiverAccess;
 
 use super::memo::AnalysisQueryCache;
-use super::thread_memo::thread_receiver_has_non_public;
+use super::thread_memo::thread_protected_return_may_differ;
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
 
@@ -329,9 +329,9 @@ impl<'a> View<'a> {
     }
 
     /// The access a memoized return lookup is keyed and computed with. A
-    /// protected lookup whose receiver chain has no private or protected
-    /// method of that name shares the public entry, so the caller namespace
-    /// is not part of the hot key.
+    /// protected lookup that the return walk would answer exactly like a
+    /// public one shares the public entry, so the caller namespace is not
+    /// part of the hot key.
     pub(in crate::engine) fn return_memo_access<'r>(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -340,11 +340,11 @@ impl<'a> View<'a> {
     ) -> ReceiverAccess<'r> {
         match access {
             ReceiverAccess::Protected { .. }
-                if !thread_receiver_has_non_public(
+                if !thread_protected_return_may_differ(
                     self.engine.query_cache_identity(),
                     namespace_fqn,
                     *method,
-                    || self.receiver_method_has_non_public(namespace_fqn, method),
+                    || self.protected_return_may_differ(namespace_fqn, method),
                 ) =>
             {
                 ReceiverAccess::Public
@@ -355,16 +355,30 @@ impl<'a> View<'a> {
         }
     }
 
-    fn receiver_method_has_non_public(
+    /// Whether the return walk may answer a protected lookup differently from
+    /// a public one. Only the receiver's own chain is compared, so a walk
+    /// that leaves it, through module includers, execution-context
+    /// applications, or a custom `method_missing`, may differ.
+    fn protected_return_may_differ(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> bool {
+        if !module_instance_receivers(self.engine, namespace_fqn).is_empty() {
+            return true;
+        }
         let private_facts = self.own_chain_method_facts(namespace_fqn, method, ReceiverAccess::Any);
         let public_facts =
             self.own_chain_method_facts(namespace_fqn, method, ReceiverAccess::Public);
         match (private_facts, public_facts) {
-            (None, None) => false,
+            (None, None) => {
+                !execution_context_application_targets(self.engine, namespace_fqn).is_empty()
+                    || (*method != method_missing_method()
+                        && chain_has_custom_method_missing(
+                            self.engine,
+                            &method_lookup_chain(self.engine, namespace_fqn),
+                        ))
+            }
             (Some((private_owner, private_facts)), Some((public_owner, public_facts))) => {
                 private_owner != public_owner
                     || private_facts

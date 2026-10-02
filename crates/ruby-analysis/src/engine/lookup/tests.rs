@@ -8,12 +8,12 @@ use parking_lot::RwLock;
 use ruby_prism::Visit;
 use url::Url;
 
-use super::{method, LookupReceiver, LookupUnknown, MethodAnswer, MethodFound};
+use super::{method, method_cached, LookupReceiver, LookupUnknown, MethodAnswer, MethodFound};
 use super::{MethodRequest, MethodWant};
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceKind,
 };
-use crate::engine::{Project, ResolveMode, SourceFileInput, View};
+use crate::engine::{AnalysisQueryCache, Project, ResolveMode, SourceFileInput, View};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
 use crate::inference::semantics::ReceiverAccess;
@@ -549,4 +549,41 @@ fn private_and_protected_methods_follow_access() {
         0
     );
     assert_eq!(found("guarded", ReceiverAccess::Public), 0);
+}
+
+/// A memo only shares work: every request answers the same with and without
+/// one, including protected returns on a module dispatched to its includers.
+#[test]
+fn memoized_answers_equal_direct_answers() {
+    let engine = project();
+    let view = engine.view();
+    let cache = AnalysisQueryCache::default();
+    let (child, other) = (namespace("Child"), namespace("Other"));
+    let types = receiver_types();
+    let owners = namespaces();
+    let receivers = owners
+        .iter()
+        .flat_map(|owner| {
+            [
+                LookupReceiver::Namespace(owner),
+                LookupReceiver::Reflection(owner),
+                LookupReceiver::Super { owner },
+            ]
+        })
+        .chain(types.iter().map(LookupReceiver::Type))
+        .chain([LookupReceiver::TopLevel]);
+    for receiver in receivers {
+        for name in methods() {
+            for access in accesses(&child, &other) {
+                for want in WANTS {
+                    let request = request(receiver, name, access, want);
+                    let direct = method(&view, request);
+                    // Twice: the first call fills the memo, the second reads it.
+                    for _ in 0..2 {
+                        assert_eq!(method_cached(&view, request, &cache), direct, "{request:?}");
+                    }
+                }
+            }
+        }
+    }
 }
