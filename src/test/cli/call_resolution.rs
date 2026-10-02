@@ -273,6 +273,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         .expect("cycle fixture must be registered in the analysis engine");
     let equations_before_unchanged_edit = analysis_engine
         .read()
+        .view()
         .method_return_equations_in_file(even_file_id)
         .expect("cycle fixture must retain its return equations")
         .to_vec();
@@ -280,6 +281,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     assert_eq!(
         analysis_engine
             .read()
+            .view()
             .method_return_equations_in_file(even_file_id)
             .expect("unchanged cycle fixture must retain its return equations"),
         equations_before_unchanged_edit,

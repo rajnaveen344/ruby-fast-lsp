@@ -38,7 +38,11 @@ pub(super) fn replace_analysis_facts_for_file(
 ) {
     let mut file_facts = facts.clone();
     if file_facts.inference == ruby_analysis::core::InferenceEvidence::default() {
-        if let Some(previous) = analysis_engine.read().inference_evidence_in_file(file_id) {
+        if let Some(previous) = analysis_engine
+            .read()
+            .view()
+            .inference_evidence_in_file(file_id)
+        {
             file_facts.inference = previous;
         }
     }

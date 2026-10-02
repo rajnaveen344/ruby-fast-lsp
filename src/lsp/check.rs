@@ -324,7 +324,7 @@ impl CheckSession {
                     "one process cannot retain more files than addressable memory",
                     "bound project discovery below usize::MAX",
                 );
-                if let Some(file_telemetry) = engine.inference_telemetry_in_file(file.id) {
+                if let Some(file_telemetry) = engine.view().inference_telemetry_in_file(file.id) {
                     inference.merge(file_telemetry);
                 }
                 inferred_types.extend(solved_types_in_file(&engine, &root, file.id)?);
@@ -406,7 +406,7 @@ fn solved_types_in_file(
         .file(file_id)
         .ok_or_else(|| anyhow!("inferred types reference unknown file id {file_id:?}"))?;
     let query = AnalysisQuery::new(engine);
-    let exact_outcomes = engine.method_return_outcomes_in_file(file_id);
+    let exact_outcomes = engine.view().method_return_outcomes_in_file(file_id);
     let mut inferred = Vec::new();
 
     for method in query.method_facts_in_file(file_id) {

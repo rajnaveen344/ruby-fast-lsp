@@ -78,7 +78,7 @@ pub(crate) fn indexing_summary_json(
     let mut semantic_complete_ms = Vec::new();
     for workspace in server.list_workspaces() {
         let engine = workspace.analysis_engine.read();
-        inference_telemetry.merge(&engine.inference_telemetry());
+        inference_telemetry.merge(&engine.view().inference_telemetry());
         analysis.merge(&engine.stats());
         resolve_pass.merge(engine.last_resolve_stats());
         estimated_engine_heap_bytes = estimated_engine_heap_bytes

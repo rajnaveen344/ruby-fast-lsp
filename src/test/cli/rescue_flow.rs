@@ -308,6 +308,7 @@ end
         .expect("rescue fixture must be registered in the analysis engine");
     let method_return_outcomes = analysis_engine
         .read()
+        .view()
         .method_return_outcomes_in_file(main_file_id)
         .expect("rescue fixture must retain method-return outcomes")
         .clone();

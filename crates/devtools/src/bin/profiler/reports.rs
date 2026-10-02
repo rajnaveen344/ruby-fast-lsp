@@ -304,7 +304,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             stats.get(AnalysisStat::References)
         );
         info!("Type facts: {}", stats.get(AnalysisStat::Types));
-        let inference = engine.inference_telemetry();
+        let inference = engine.view().inference_telemetry();
         info!(
             "Shape proof telemetry: occurrences={}, fields_total={}, fields_max={}, depth_max={}, unions={}, union_variants_total={}, union_variants_max={}, aliases_max={}, invalidated_unknowns={}, bound_unknowns={}",
             inference.retained_shape_occurrences,

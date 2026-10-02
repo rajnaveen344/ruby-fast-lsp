@@ -312,9 +312,13 @@ fn inference_telemetry_replaces_with_its_owning_file() {
         },
         ResolveMode::Immediate,
     );
-    assert_eq!(engine.inference_telemetry().unknown_method_returns, 1);
+    assert_eq!(
+        engine.view().inference_telemetry().unknown_method_returns,
+        1
+    );
     assert_eq!(
         engine
+            .view()
             .method_return_outcomes_in_file(file_id)
             .and_then(|outcomes| outcomes.get(&method))
             .and_then(TypeInferenceOutcome::unknown_reason),
@@ -341,7 +345,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
         ResolveMode::Immediate,
     );
 
-    let current = engine.inference_telemetry();
+    let current = engine.view().inference_telemetry();
     assert_eq!(current.method_return_outcomes, 1);
     assert_eq!(current.proven_method_returns, 1);
     assert_eq!(current.unknown_method_returns, 0);
@@ -349,6 +353,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
     assert_eq!(current.recursive_components, 0);
     assert_eq!(
         engine
+            .view()
             .method_return_outcomes_in_file(file_id)
             .and_then(|outcomes| outcomes.get(&method))
             .and_then(TypeInferenceOutcome::proven_type),

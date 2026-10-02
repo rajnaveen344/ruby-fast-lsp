@@ -632,45 +632,6 @@ impl Project {
             .apply_method_return_equations(&mut self.types, plan)
     }
 
-    pub fn inference_telemetry(&self) -> InferenceTelemetry {
-        self.solver.telemetry()
-    }
-
-    pub fn inference_telemetry_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<&InferenceTelemetry> {
-        self.solver
-            .evidence(file_id)
-            .map(|evidence| &evidence.telemetry)
-    }
-
-    pub fn method_return_outcomes_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<&BTreeMap<FullyQualifiedName, TypeInferenceOutcome>> {
-        self.solver
-            .evidence(file_id)
-            .map(|evidence| &evidence.method_return_outcomes)
-    }
-
-    pub fn method_return_equations_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<&[MethodReturnEquation]> {
-        self.solver
-            .evidence(file_id)
-            .map(|evidence| evidence.method_return_equations.as_slice())
-    }
-
-    pub fn inference_evidence_in_file(&self, file_id: SourceFileId) -> Option<InferenceEvidence> {
-        let mut evidence = self.solver.evidence(file_id)?.clone();
-        evidence.call_expression_outcomes = self
-            .call_expression_outcomes_in_file(file_id)
-            .unwrap_or_default();
-        Some(evidence)
-    }
-
     pub(in crate::engine) fn constant_callable_body(
         &self,
         constant: &FullyQualifiedName,
@@ -708,5 +669,50 @@ impl Project {
         self.solver
             .evidence(file_id)
             .map(|evidence| evidence.expression_unknown_reasons.as_slice())
+    }
+}
+
+impl<'a> View<'a> {
+    pub fn inference_telemetry(&self) -> InferenceTelemetry {
+        self.engine.solver.telemetry()
+    }
+
+    pub fn inference_telemetry_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&'a InferenceTelemetry> {
+        self.engine
+            .solver
+            .evidence(file_id)
+            .map(|evidence| &evidence.telemetry)
+    }
+
+    pub fn method_return_outcomes_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&'a BTreeMap<FullyQualifiedName, TypeInferenceOutcome>> {
+        self.engine
+            .solver
+            .evidence(file_id)
+            .map(|evidence| &evidence.method_return_outcomes)
+    }
+
+    pub fn method_return_equations_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&'a [MethodReturnEquation]> {
+        self.engine
+            .solver
+            .evidence(file_id)
+            .map(|evidence| evidence.method_return_equations.as_slice())
+    }
+
+    pub fn inference_evidence_in_file(&self, file_id: SourceFileId) -> Option<InferenceEvidence> {
+        let mut evidence = self.engine.solver.evidence(file_id)?.clone();
+        evidence.call_expression_outcomes = self
+            .engine
+            .call_expression_outcomes_in_file(file_id)
+            .unwrap_or_default();
+        Some(evidence)
     }
 }

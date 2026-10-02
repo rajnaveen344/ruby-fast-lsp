@@ -172,7 +172,7 @@ Delete this file when the last task is done. Git history keeps the record.
           `references_for_fqn`), `type_at`, `type_facts_for`.
     - [x] B4e5. Diagnostics: `diagnostic_facts_in_file`,
           `all_diagnostic_facts`.
-    - [ ] B4e6. Solver telemetry: `inference_telemetry`,
+    - [x] B4e6. Solver telemetry: `inference_telemetry`,
           `inference_telemetry_in_file`, `inference_evidence_in_file`,
           `method_return_outcomes_in_file`, `method_return_equations_in_file`.
     - [ ] B4e7. Fingerprints: `semantic_export_fingerprint`,
