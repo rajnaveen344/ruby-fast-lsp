@@ -12,7 +12,7 @@ use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::core::TextRange;
 use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use ruby_analysis::engine::{AnalysisEngine, View};
+use ruby_analysis::engine::View;
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::converter::YardTypeConverter;
 use ruby_analysis::indexer::{Identifier, RubyDocument};
@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, ReferenceParams, Url};
 
 use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
 use crate::features::cursor::{method, Cursor, EngineQuery};
-use crate::server::RubyLanguageServer;
+use crate::server::{ProjectHandle, RubyLanguageServer};
 use crate::utils::lsp::{deduplicate_locations, lsp_text_location, source_position};
 use crate::utils::parser::position_to_offset;
 
@@ -56,10 +56,10 @@ pub(crate) fn read_open_document(
     read: impl FnOnce(Cursor<'_>) -> Answer,
 ) -> Option<Vec<Location>> {
     let document = server.documents.read().get(uri)?.clone();
-    let engine = server.analysis_engine_for_uri(uri);
-    EngineQuery::with_doc_and_engine(document.clone(), engine.clone())
+    let project = server.project_for_uri(uri);
+    EngineQuery::with_doc_and_project(document.clone(), project.clone())
         .with_view(read)
-        .finish(&document, engine)
+        .finish(&document, &project)
 }
 
 /// A cursor read's result. A local variable without reference ranges in the
@@ -74,13 +74,13 @@ impl Answer {
     fn finish(
         self,
         document: &Arc<RwLock<RubyDocument>>,
-        engine: Arc<RwLock<AnalysisEngine>>,
+        project: &ProjectHandle,
     ) -> Option<Vec<Location>> {
         let (name, byte_offset) = match self {
             Answer::Locations(locations) => return locations,
             Answer::StaleLocalScopes { name, byte_offset } => (name, byte_offset),
         };
-        rebuild_local_variable_scopes(document, engine);
+        rebuild_local_variable_scopes(document, project);
         let document = document.read();
         let ranges = document.local_variable_reference_ranges_at(&name, byte_offset);
         (!ranges.is_empty()).then(|| document_locations(&document, ranges))
@@ -353,18 +353,18 @@ fn document_locations(document: &RubyDocument, ranges: Vec<TextRange>) -> Vec<Lo
         .collect()
 }
 
-fn rebuild_local_variable_scopes(
-    document: &Arc<RwLock<RubyDocument>>,
-    engine: Arc<RwLock<AnalysisEngine>>,
-) {
+fn rebuild_local_variable_scopes(document: &Arc<RwLock<RubyDocument>>, project: &ProjectHandle) {
     let snapshot = document.read().clone();
     let content = snapshot.content.clone();
     let parse_result = ruby_prism::parse(content.as_bytes());
-    let mut collector =
-        FactCollector::analysis_only(snapshot, Arc::new(NullFactCollectorExtensionHost), engine)
-            .without_analysis_method_return_resolution()
-            .without_expression_receiver_inference()
-            .without_diagnostics();
+    let mut collector = FactCollector::analysis_only(
+        snapshot,
+        Arc::new(NullFactCollectorExtensionHost),
+        project.shared_engine().clone(),
+    )
+    .without_analysis_method_return_resolution()
+    .without_expression_receiver_inference()
+    .without_diagnostics();
     collector.visit(&parse_result.node());
     document.write().variable_scopes = collector.into_document().variable_scopes;
 }

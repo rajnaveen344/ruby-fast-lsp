@@ -15,15 +15,13 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
     let mut workspaces = server.list_workspaces();
     workspaces.sort_by(|left, right| left.root_path.cmp(&right.root_path));
     for workspace in workspaces {
-        let engine = workspace.analysis_engine.read();
-        let result_fingerprints = engine
-            .view()
+        workspace.handle().view(|view| -> anyhow::Result<()> {
+        let result_fingerprints = view
             .semantic_result_file_fingerprints()
             .into_iter()
             .collect::<std::collections::HashMap<_, _>>();
-        let resolution_fingerprints = engine.view().semantic_resolution_file_fingerprints();
-        let mut files = engine
-            .view().files()
+        let resolution_fingerprints = view.semantic_resolution_file_fingerprints();
+        let mut files = view.files()
             .map(|file| {
                 let path = if file.kind == SourceKind::Project {
                     file.path
@@ -41,8 +39,7 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
                 } else {
                     file.path.clone()
                 };
-                let fingerprint = engine
-                    .view().semantic_export_fingerprint(file.id)
+                let fingerprint = view.semantic_export_fingerprint(file.id)
                     .map(|fingerprint| stable_fingerprint_hex(fingerprint.stable_bytes()));
                 let result_fingerprint = result_fingerprints.get(&file.id).unwrap_or_else(|| {
                     unreachable_invariant!(
@@ -87,6 +84,8 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
                 }
             }))?
         );
+        Ok(())
+        })?;
     }
     Ok(())
 }
@@ -95,8 +94,8 @@ pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::
     let mut workspaces = server.list_workspaces();
     workspaces.sort_by(|left, right| left.root_path.cmp(&right.root_path));
     for workspace in workspaces {
-        let engine = workspace.analysis_engine.read();
-        let query = engine.view();
+        workspace.handle().view(|view| -> anyhow::Result<()> {
+        let query = view;
         let mut diagnostics = query
             .all_diagnostic_facts()
             .into_iter()
@@ -197,6 +196,8 @@ pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::
                 }
             }))?
         );
+        Ok(())
+        })?;
     }
     Ok(())
 }
@@ -239,8 +240,8 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
     );
 
     for workspace in server.list_workspaces() {
-        let engine = workspace.analysis_engine.read();
-        let stats = engine.view().stats();
+        workspace.handle().view(|view| {
+        let stats = view.stats();
         info!("=== ANALYSIS STATS: {} ===", workspace.root_path.display());
         info!("Files: {}", stats.get(AnalysisStat::Files));
         info!(
@@ -259,7 +260,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             stats.get(AnalysisStat::MethodReferenceCandidates),
             stats.get(AnalysisStat::ResolvedReferenceCandidates)
         );
-        let resolve_pass = engine.view().last_resolve_stats();
+        let resolve_pass = view.last_resolve_stats();
         info!(
             "Resolve pass ns: graph_retry={}, diagnostic_seed={}, constants={}, methods={}, sort_all={}, diagnostic_rebuild={}",
             resolve_pass.get(ResolveStat::GraphRetryNs),
@@ -305,7 +306,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             stats.get(AnalysisStat::References)
         );
         info!("Type facts: {}", stats.get(AnalysisStat::Types));
-        let inference = engine.view().inference_telemetry();
+        let inference = view.inference_telemetry();
         info!(
             "Shape proof telemetry: occurrences={}, fields_total={}, fields_max={}, depth_max={}, unions={}, union_variants_total={}, union_variants_max={}, aliases_max={}, invalidated_unknowns={}, bound_unknowns={}",
             inference.retained_shape_occurrences,
@@ -331,7 +332,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             stats.get(AnalysisStat::UnresolvedGraphEdges)
         );
 
-        let memory = engine.view().estimated_memory_stats();
+        let memory = view.estimated_memory_stats();
         let total = memory.total();
         info!(
             "=== ESTIMATED ENGINE HEAP: {} ===",
@@ -354,6 +355,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             memory.unresolved_graph_edges,
             total,
         );
+        });
     }
 }
 

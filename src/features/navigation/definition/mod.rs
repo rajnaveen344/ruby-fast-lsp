@@ -81,7 +81,7 @@ pub async fn find_definition_at_position(
         }
     }
 
-    let locations = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri))
+    let locations = EngineQuery::with_doc_and_project(doc_arc, server.project_for_uri(&uri))
         .with_view(|cursor| {
             let content = &cursor.document?.content;
             definitions_at(cursor, &uri, position, content)
@@ -120,18 +120,18 @@ fn require_path_definitions(
         .paths_for_project(&project_root)
         .to_vec();
     let feature_index = server.require_feature_index_for_uri(uri);
-    let engine = server.analysis_engine_for_uri(uri);
-    let engine_guard = engine.read();
-    let resolved = resolve_require_path(
-        target.kind,
-        &target.argument,
-        &current_file,
-        &project_root,
-        &load_paths,
-        &feature_index,
-        Some(&engine_guard),
-    )?;
-    let location = location_for_require_target(&resolved, Some(&engine_guard))?;
+    let location = server.project_for_uri(uri).view(|view| {
+        let resolved = resolve_require_path(
+            target.kind,
+            &target.argument,
+            &current_file,
+            &project_root,
+            &load_paths,
+            &feature_index,
+            Some(view),
+        )?;
+        location_for_require_target(&resolved, Some(view))
+    })?;
     Some(GotoDefinitionResponse::Link(vec![LocationLink {
         origin_selection_range: Some(origin),
         target_uri: location.uri,

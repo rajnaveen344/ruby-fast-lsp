@@ -269,14 +269,12 @@ pub(crate) async fn run_type_inference_only(server: &RubyLanguageServer) {
         .list_workspaces()
         .into_iter()
         .map(|workspace| {
-            workspace
-                .analysis_engine
-                .read()
-                .view()
-                .all_type_facts()
-                .into_iter()
-                .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
-                .count()
+            workspace.handle().view(|view| {
+                view.all_type_facts()
+                    .into_iter()
+                    .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
+                    .count()
+            })
         })
         .sum::<usize>();
     info!("Type inference completed in {:?}", start.elapsed());

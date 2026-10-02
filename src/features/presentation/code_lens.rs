@@ -47,7 +47,7 @@ pub async fn handle(
     // 3. Read module lenses under one cursor. The guards are released before
     // awaiting governed extension work, so the LSP future remains Send.
     let mut lenses: Vec<CodeLens> =
-        EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine_for_uri(uri))
+        EngineQuery::with_doc_and_project(doc_arc, lang_server.project_for_uri(uri))
             .with_view(|cursor| code_lenses_at(cursor, uri))
             .into_iter()
             .map(to_lsp_code_lens)
@@ -134,7 +134,7 @@ pub fn code_lenses_at(cursor: Cursor<'_>, uri: &Url) -> Vec<CodeLensData> {
     let document = cursor.document.expect_invariant(
         "code lenses were read without a document",
         "the handler builds its cursor from the open document",
-        "construct EngineQuery with with_doc_and_engine()",
+        "construct EngineQuery with with_doc_and_project()",
     );
     // Parse the document's Ruby analysis projection. For ERB this preserves
     // template byte offsets while masking host-language text.

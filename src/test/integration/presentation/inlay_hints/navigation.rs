@@ -129,12 +129,12 @@ async fn compact_inlay_navigation_retains_external_project_context() {
                 .collect_file_facts_as_deferred_resolution_in_engine(
                     &uri,
                     content,
-                    workspace.analysis_engine.clone(),
+                    workspace.handle().shared_engine().clone(),
                     SourceKind::Gem,
                 )
                 .unwrap();
         }
-        workspace.analysis_engine.write().resolve();
+        workspace.handle().test_write().resolve();
     }
     editor
         .open("workspace_a/app.rb", "item = Catalog::Entry.new\n")

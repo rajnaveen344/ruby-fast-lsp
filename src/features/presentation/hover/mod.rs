@@ -47,13 +47,11 @@ fn hover(server: &RubyLanguageServer, params: HoverParams) -> Option<Hover> {
         return Some(hover);
     }
 
-    let hover_info =
-        EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri)).with_view(
-            |cursor| {
-                let content = &cursor.document?.content;
-                hover_at(cursor, &uri, position, content)
-            },
-        )?;
+    let hover_info = EngineQuery::with_doc_and_project(doc_arc, server.project_for_uri(&uri))
+        .with_view(|cursor| {
+            let content = &cursor.document?.content;
+            hover_at(cursor, &uri, position, content)
+        })?;
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -83,17 +81,17 @@ fn require_path_hover(
         .paths_for_project(&project_root)
         .to_vec();
     let feature_index = server.require_feature_index_for_uri(uri);
-    let engine = server.analysis_engine_for_uri(uri);
-    let engine_guard = engine.read();
-    let resolved = resolve_require_path(
-        target.kind,
-        &target.argument,
-        &current_file,
-        &project_root,
-        &load_paths,
-        &feature_index,
-        Some(&engine_guard),
-    );
+    let resolved = server.project_for_uri(uri).view(|view| {
+        resolve_require_path(
+            target.kind,
+            &target.argument,
+            &current_file,
+            &project_root,
+            &load_paths,
+            &feature_index,
+            Some(view),
+        )
+    });
     let kind = match target.kind {
         RequireKind::Require => "require",
         RequireKind::RequireRelative => "require_relative",

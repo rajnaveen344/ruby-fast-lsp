@@ -26,7 +26,7 @@ pub async fn handle(
 
     let doc_arc = server.documents.read().get(&uri).cloned();
     let implementations = doc_arc.and_then(|doc_arc| {
-        EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri)).with_view(
+        EngineQuery::with_doc_and_project(doc_arc, server.project_for_uri(&uri)).with_view(
             |cursor| {
                 let content = &cursor.document?.content;
                 implementations_at(cursor, &uri, position, content)

@@ -390,7 +390,7 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
     let platform_app =
         FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
     let method = RubyMethod::new("get_images").unwrap();
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     assert!(
         query.namespace_exists(&platform_app),
@@ -449,7 +449,7 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
         ],
         RubyMethod::new("from_other_file").unwrap(),
     );
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     assert_eq!(engine.view().method_facts_for(&expected).len(), 1);
     assert!(engine.view().method_facts_for(&shadow).is_empty());
 }
@@ -467,12 +467,12 @@ fn explicit_project_engine_owns_external_gem_source() {
         .collect_file_facts_as_deferred_resolution_in_engine(
             &dependency_uri,
             "class PBKDF2\nend\n",
-            project.analysis_engine.clone(),
+            project.handle().shared_engine().clone(),
             SourceKind::Gem,
         )
         .unwrap();
 
-    let engine = project.analysis_engine.read();
+    let engine = project.handle().test_read();
     let path = dependency_uri.to_file_path().unwrap();
     let file_id = engine
         .view()
@@ -480,8 +480,8 @@ fn explicit_project_engine_owns_external_gem_source() {
         .expect("gem source must be registered");
     assert_eq!(engine.view().file(file_id).unwrap().kind, SourceKind::Gem);
     assert!(server
-        .orphan_engine()
-        .read()
+        .orphan_project()
+        .test_read()
         .view()
         .file_id(&path)
         .is_none());

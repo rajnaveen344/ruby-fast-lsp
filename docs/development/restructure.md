@@ -453,12 +453,21 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] C4. Introduce `ProjectHandle`. A single writer task owns each project's
       mutations and readers share the project for reads. Remove the per-project
       locks from `RubyLanguageServer`.
-  - [ ] C4a. Add `ProjectHandle` wrapping the existing
+  - [x] C4a. Add `ProjectHandle` wrapping the existing
         `Arc<RwLock<AnalysisEngine>>` with `view()` and `update(|engine| ..)`.
         No behavior change.
-  - [ ] C4b. Route feature reads through `view()` with one guard per request.
+  - [x] C4b. Route feature reads through `view()` with one guard per request.
         Remove the repeated `.read()` calls in references, hover, and
         definition.
+
+  Notes: `ProjectHandle` lives in `src/server/projects/handle.rs`.
+  `Workspace::analysis_engine`, `analysis_engine_for_uri`,
+  `analysis_engines`, and `orphan_engine` are already gone: the server routes
+  with `project_for_uri`, `projects`, and `orphan_project`, and `EngineQuery`
+  holds a handle. The loader still receives the shared engine through
+  `ProjectHandle::shared_engine` (sink, coordinator override, and the
+  analysis-only collector). Tests that inspect state across many statements
+  use the test-only owned guards `test_read` and `test_write`.
   - [ ] C4c. Add the writer task: a command channel (commit-if-snapshot,
         register, resolve chunk, reset) with replies through oneshot. The
         `LoadSink` adapter sends commands. Profiler comparison, with didOpen

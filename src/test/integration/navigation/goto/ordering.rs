@@ -1,12 +1,10 @@
 //! Ruby lookup precedence ranks definitions; source order only breaks ties.
 
 use crate::features::cursor::{method, EngineQuery};
+use crate::server::ProjectHandle;
 use crate::test::harness::FakeEditor;
-use parking_lot::RwLock;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{NamespaceKind, RubyConstant, RubyMethod};
-use ruby_analysis::engine::AnalysisEngine;
-use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position};
 
 fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
@@ -23,8 +21,8 @@ fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
 }
 
 /// Implicit-self `label` definitions from inside `Feature`, without a document.
-fn feature_label_definitions(engine: Arc<RwLock<AnalysisEngine>>) -> Option<Vec<Location>> {
-    EngineQuery::with_engine(engine).with_view(|cursor| {
+fn feature_label_definitions(engine: ProjectHandle) -> Option<Vec<Location>> {
+    EngineQuery::with_project(engine).with_view(|cursor| {
         method::definitions(
             cursor,
             &MethodReceiver::None,
@@ -122,7 +120,7 @@ async fn semantic_definition_order_prefers_overrides_and_tracks_edits() {
         );
         let engine = editor
             .server()
-            .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
+            .project_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         assert_eq!(
             files(feature_label_definitions(engine).unwrap()),
             ["/z_child.rb", "/a_parent.rb"],
@@ -365,7 +363,7 @@ async fn definition_order_covers_method_lookup_without_document_facts() {
 
     let engine = editor
         .server()
-        .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
+        .project_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
     let locations = feature_label_definitions(engine)
         .expect("known module receivers must retain their definition targets");
     assert_eq!(

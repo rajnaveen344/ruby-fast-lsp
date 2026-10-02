@@ -12,7 +12,18 @@ handlers; the server keeps state and state operations only and imports neither
 `NamespaceTreeResponse`; the request parameters stay with the namespace-tree feature. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
 [AnalysisEngine](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
-project, with a separate orphan engine for unowned documents.
+project, with a separate orphan project for unowned documents.
+
+Each project's engine is reached only through a
+[`ProjectHandle`](../../src/server/projects/handle.rs). Readers call
+`view(|view| ..)`, which holds the engine read guard for one synchronous
+closure, so an answer reflects one semantic revision and no guard crosses an
+`.await`. Writers call `update(|engine| ..)`. Handles are compared with
+`is_same`. The server routes with `project_for_uri`, `projects`, and
+`orphan_project`. The loader alone receives the shared engine
+(`ProjectHandle::shared_engine`) through `LoadSink::engine_for_uri` and the
+coordinator's engine override; it is not a reader or writer API for features
+or lifecycle code.
 
 ## The ten server fields
 
@@ -21,7 +32,7 @@ project, with a separate orphan engine for unowned documents.
 | `client` | Outbound LSP notifications, registration, and refresh requests. | Protocol methods in [service.rs](../../src/lsp/service.rs). |
 | `config` | One shared accepted server configuration. | `environment/config/` and initialization handlers. |
 | `documents` | Open buffers, versions, document handles, and per-URI lifecycle locks. | [documents.rs](../../src/server/documents.rs) |
-| `projects` | Longest-root routing, isolated project engines, orphan engine, and retained external-document provenance. | [projects](../../src/server/projects/mod.rs), [load sink](../../src/server/projects/load_sink.rs) |
+| `projects` | Longest-root routing, isolated project handles, orphan project, and retained external-document provenance. | [projects](../../src/server/projects/mod.rs), [load sink](../../src/server/projects/load_sink.rs) |
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
 | `products` | Runtime discovery, shared immutable dependency products, and the `runtime/status` projection (`ProjectRuntimeStatus`). | [products.rs](../../src/server/products.rs) |
 | `extensions` | Extension registry and dynamic watcher registration lifecycle. | [extensions.rs](../../src/server/extensions.rs) |
@@ -95,8 +106,8 @@ they are not counts of allocations or independent copies of state.
 | Owner | Fields | Contents |
 | --- | ---: | --- |
 | `OpenDocuments` | 2 | Buffer map and weak per-document semantic locks. |
-| `ProjectRegistry` | 3 | Projects, orphan engine, external-document provenance. |
-| `Workspace` | 9 | Root URI/path, indexing status, engine, runtime, extension context, navigation demand, require resolution, owning editor folders. |
+| `ProjectRegistry` | 3 | Projects, orphan project handle, external-document provenance. |
+| `Workspace` | 9 | Root URI/path, indexing status, project handle (`handle()`), runtime, extension context, navigation demand, require resolution, owning editor folders. |
 | `ProjectRuntimeState` | 3 | Selected runtime, Ruby version, JRuby add-on (`loader::jruby_add_on::JrubyAddOn`; the classpath fingerprint is read from it). |
 | `DependencyRequireState` | 2 | Require roots and their feature index. |
 | `IndexingServices` | 3 | Scheduler, resource governor, status publisher. |

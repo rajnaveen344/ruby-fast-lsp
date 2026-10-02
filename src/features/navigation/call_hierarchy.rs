@@ -45,7 +45,7 @@ pub async fn handle_prepare(
         .get(&uri)
         .map(|document| document.read().content.clone());
     let result = content.and_then(|content| {
-        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri))
+        EngineQuery::with_project(server.project_for_uri(&uri))
             .with_view(|cursor| prepare_at(cursor, &uri, position, &content))
     });
     info!(
@@ -98,7 +98,7 @@ fn read_item<R>(
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
-    EngineQuery::with_engine(server.analysis_engine_for_uri(&item.uri))
+    EngineQuery::with_project(server.project_for_uri(&item.uri))
         .with_view(|cursor| read(cursor.view, &data))
 }
 

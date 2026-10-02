@@ -43,8 +43,8 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
         .get(uri)
         .map(|document| document.read().clone())
         .unwrap_or_else(|| panic!("<type> fixture {uri} is not open"));
-    let engine_handle = server.analysis_engine_for_uri(uri);
-    let engine = engine_handle.read();
+    let engine_handle = server.project_for_uri(uri);
+    let engine = engine_handle.test_read();
 
     for tag in tags {
         let expected = tag.attr("label").expect("<type> requires `label`");

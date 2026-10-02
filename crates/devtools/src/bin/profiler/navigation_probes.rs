@@ -116,20 +116,21 @@ pub(crate) async fn observe_first_live_definition(
         let query_elapsed = query_started.elapsed();
         let status = workspace.indexing_status.snapshot();
         if !locations.is_empty() {
-            let engine = workspace.analysis_engine.read();
-            let target_source_kinds = locations
-                .iter()
-                .map(|location| {
-                    location
-                        .uri
-                        .to_file_path()
-                        .ok()
-                        .and_then(|path| engine.view().file_id(path))
-                        .and_then(|file_id| engine.view().file(file_id))
-                        .map(|file| format!("{:?}", file.kind))
-                        .unwrap_or_else(|| "Unknown".to_string())
-                })
-                .collect::<Vec<_>>();
+            let target_source_kinds = workspace.handle().view(|view| {
+                locations
+                    .iter()
+                    .map(|location| {
+                        location
+                            .uri
+                            .to_file_path()
+                            .ok()
+                            .and_then(|path| view.file_id(path))
+                            .and_then(|file_id| view.file(file_id))
+                            .map(|file| format!("{:?}", file.kind))
+                            .unwrap_or_else(|| "Unknown".to_string())
+                    })
+                    .collect::<Vec<_>>()
+            });
             invariant!(
                 target_source_kinds.iter().all(|kind| kind != "Unknown"),
                 what = "definition probe {} resolved outside its originating project engine",
@@ -304,8 +305,9 @@ pub(crate) async fn sample_open_file_diagnostics(
             },
         )
         .await;
-        let diagnostics =
-            engine_diagnostics(&server.analysis_engine_for_uri(&uri).read().view(), &uri);
+        let diagnostics = server
+            .project_for_uri(&uri)
+            .view(|view| engine_diagnostics(view, &uri));
 
         println!(
             "{}",

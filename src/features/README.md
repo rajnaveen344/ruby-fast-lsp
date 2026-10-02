@@ -49,7 +49,7 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
   Semantic questions the engine already defines as a trait, such as
   `CompletionSemanticQuery`, are implemented by `View` itself rather than by
   a server adapter that locks per call. Call and type hierarchies and
-  workspace symbols read `with_engine(..).with_view` without a document, so
+  workspace symbols read `EngineQuery::with_project(..).with_view` without a document, so
   `cursor.document` is `None` there.
 - A feature may read `server` state and `loader` products. It never names
   `lsp`; an item a feature needs from `lsp` moves to its proper owner.

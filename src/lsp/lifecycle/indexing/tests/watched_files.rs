@@ -398,8 +398,8 @@ async fn opening_default_external_workspace_file_does_not_make_it_project_owned(
     )
     .await;
 
-    let analysis_engine = server.analysis_engine_for_uri(&uri);
-    let engine = analysis_engine.read();
+    let analysis_engine = server.project_for_uri(&uri);
+    let engine = analysis_engine.test_read();
     let file_id = engine
         .view()
         .file_id(&path)
@@ -443,8 +443,8 @@ async fn opening_default_external_workspace_file_does_not_make_it_project_owned(
     )
     .await;
 
-    let analysis_engine = server.analysis_engine_for_uri(&uri);
-    let engine = analysis_engine.read();
+    let analysis_engine = server.project_for_uri(&uri);
+    let engine = analysis_engine.test_read();
     assert!(
         !engine
             .view()

@@ -198,7 +198,7 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
         ruby_analysis::core::RubyConstant::new("Child").unwrap(),
     ]);
     {
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         assert!(
             engine.view().unresolved_graph_edges().iter().any(|edge| {
                 edge.source == child && edge.kind == ruby_analysis::core::GraphEdgeKind::Superclass
@@ -208,8 +208,8 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
         );
     }
 
-    workspace_state.analysis_engine.write().resolve();
-    let engine = workspace_state.analysis_engine.read();
+    workspace_state.handle().test_write().resolve();
+    let engine = workspace_state.handle().test_read();
     assert!(
         engine.view().unresolved_graph_edges().iter().all(|edge| {
             edge.source != child || edge.kind != ruby_analysis::core::GraphEdgeKind::Superclass
@@ -269,10 +269,10 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
                 }
             });
         indexer.finish_remaining_project_facts();
-        workspace_state.analysis_engine.write().resolve();
+        workspace_state.handle().test_write().resolve();
         let actual = workspace_state
-            .analysis_engine
-            .read()
+            .handle()
+            .test_read()
             .view()
             .semantic_result_fingerprint();
 
@@ -330,10 +330,10 @@ fn parallel_batch_collection_has_a_stable_semantic_result() {
             )
             .unwrap();
         indexer.finish_remaining_project_facts();
-        workspace_state.analysis_engine.write().resolve();
+        workspace_state.handle().test_write().resolve();
         let actual = workspace_state
-            .analysis_engine
-            .read()
+            .handle()
+            .test_read()
             .view()
             .semantic_result_fingerprint();
 

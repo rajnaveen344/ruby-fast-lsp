@@ -21,28 +21,17 @@ fn server_ownership_clones_share_document_locks_and_isolate_project_engines() {
     let first = server.add_workspace(crate::test::harness::fixture_uri("/ownership/"));
     let second = clone.add_workspace(crate::test::harness::fixture_uri("/neighbor/"));
     assert_eq!(server.list_workspaces().len(), 2);
-    assert!(Arc::ptr_eq(
-        &first.analysis_engine,
-        &clone.analysis_engine_for_uri(&uri)
-    ));
-    assert!(!Arc::ptr_eq(
-        &first.analysis_engine,
-        &second.analysis_engine
-    ));
+    assert!(first.handle().is_same(&clone.project_for_uri(&uri)));
+    assert!(!first.handle().is_same(&second.handle()));
     let orphan = crate::test::harness::fixture_uri("/loose.rb");
-    assert!(Arc::ptr_eq(
-        &server.analysis_engine_for_uri(&orphan),
-        &clone.analysis_engine_for_uri(&orphan)
-    ));
-    assert!(!Arc::ptr_eq(
-        &first.analysis_engine,
-        &clone.analysis_engine_for_uri(&orphan)
-    ));
+    assert!(server
+        .project_for_uri(&orphan)
+        .is_same(&clone.project_for_uri(&orphan)));
+    assert!(!first.handle().is_same(&clone.project_for_uri(&orphan)));
     clone.remove_workspace(&first.root_uri);
-    assert!(Arc::ptr_eq(
-        &server.analysis_engine_for_uri(&uri),
-        &server.analysis_engine_for_uri(&orphan)
-    ));
+    assert!(server
+        .project_for_uri(&uri)
+        .is_same(&server.project_for_uri(&orphan)));
 }
 
 #[tokio::test]

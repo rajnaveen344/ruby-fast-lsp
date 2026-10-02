@@ -24,7 +24,11 @@ struct Collected {
 fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
     let uri = crate::test::harness::fixture_uri(format!("/{filename}"));
     let path = uri.to_file_path().unwrap();
-    let engine = editor.server().analysis_engine_for_uri(&uri);
+    let engine = editor
+        .server()
+        .project_for_uri(&uri)
+        .shared_engine()
+        .clone();
     let snapshot = engine
         .read()
         .view()
@@ -162,7 +166,11 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
         editor.open(FILE, OLD).await;
         let old = collect(&editor, FILE, OLD);
         let uri = crate::test::harness::fixture_uri(format!("/{FILE}"));
-        let engine = editor.server().analysis_engine_for_uri(&uri);
+        let engine = editor
+            .server()
+            .project_for_uri(&uri)
+            .shared_engine()
+            .clone();
         match seed {
             0 => {
                 assert!(release_commit(pending_commit(old, engine)).await);
@@ -197,7 +205,11 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 let mut replacement = FakeEditor::new().await;
                 replacement.add_workspace("release_alpha");
                 replacement.open(FILE, NEW).await;
-                let target = replacement.server().analysis_engine_for_uri(&uri);
+                let target = replacement
+                    .server()
+                    .project_for_uri(&uri)
+                    .shared_engine()
+                    .clone();
                 assert!(
                     !release_commit(pending_commit(old, target)).await,
                     "source snapshots must not survive engine replacement"
@@ -208,7 +220,11 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 let other_file = "release_beta/service.rb";
                 editor.open(other_file, NEW).await;
                 let other_uri = crate::test::harness::fixture_uri(format!("/{other_file}"));
-                let other_engine = editor.server().analysis_engine_for_uri(&other_uri);
+                let other_engine = editor
+                    .server()
+                    .project_for_uri(&other_uri)
+                    .shared_engine()
+                    .clone();
                 assert!(
                     !release_commit(pending_commit(old, other_engine)).await,
                     "project-specific facts must never cross isolated engines"

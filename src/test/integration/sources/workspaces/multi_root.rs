@@ -254,7 +254,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
         .collect_file_facts_as_deferred_resolution_in_engine(
             &entry_uri,
             entry_source,
-            workspace.analysis_engine.clone(),
+            workspace.handle().shared_engine().clone(),
             SourceKind::Gem,
         )
         .expect("entry dependency facts must index");
@@ -262,11 +262,11 @@ async fn navigation_into_external_dependency_retains_originating_project_context
         .collect_file_facts_as_deferred_resolution_in_engine(
             &inner_uri,
             "module DemoGem\n  class Inner\n  end\nend\n",
-            workspace.analysis_engine.clone(),
+            workspace.handle().shared_engine().clone(),
             SourceKind::Gem,
         )
         .expect("inner dependency facts must index");
-    workspace.analysis_engine.write().resolve();
+    workspace.handle().test_write().resolve();
 
     editor.open("workspace_a/app.rb", "DemoGem::Entry\n").await;
     let entry_definitions = editor.goto_def_at("workspace_a/app.rb", 0, 10).await;
@@ -285,8 +285,8 @@ async fn navigation_into_external_dependency_retains_originating_project_context
     assert!(
         editor
             .server()
-            .orphan_engine()
-            .read()
+            .orphan_project()
+            .test_read()
             .view()
             .file_id(
                 entry_uri
@@ -320,12 +320,12 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
             .collect_file_facts_as_deferred_resolution_in_engine(
                 uri,
                 source,
-                workspace.analysis_engine.clone(),
+                workspace.handle().shared_engine().clone(),
                 SourceKind::Gem,
             )
             .expect("dependency facts must index");
     }
-    workspace.analysis_engine.write().resolve();
+    workspace.handle().test_write().resolve();
 
     editor
         .open("external/unique-gem/lib/entry.rb", entry_source)
@@ -349,7 +349,7 @@ async fn unbound_external_document_is_not_promoted_to_project_source() {
     let path = external_uri
         .to_file_path()
         .expect("external URI must be a file path");
-    let orphan = editor.server().orphan_engine().read();
+    let orphan = editor.server().orphan_project().test_read();
     let file_id = orphan
         .view()
         .file_id(&path)
@@ -393,7 +393,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
             .collect_file_facts_as_deferred_resolution_in_engine(
                 &entry_uri,
                 entry_source,
-                workspace.analysis_engine.clone(),
+                workspace.handle().shared_engine().clone(),
                 SourceKind::Gem,
             )
             .expect("entry dependency facts must index");
@@ -401,11 +401,11 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
             .collect_file_facts_as_deferred_resolution_in_engine(
                 &inner_uri,
                 "module SharedGem\n  class Inner\n  end\nend\n",
-                workspace.analysis_engine.clone(),
+                workspace.handle().shared_engine().clone(),
                 SourceKind::Gem,
             )
             .expect("inner dependency facts must index");
-        workspace.analysis_engine.write().resolve();
+        workspace.handle().test_write().resolve();
     }
 
     editor
@@ -442,23 +442,20 @@ fn method_fact_in_path(
     method_name: &str,
     path_suffix: &str,
 ) -> bool {
-    server
-        .analysis_engines()
-        .into_iter()
-        .any(|analysis_engine| {
-            let engine = analysis_engine.read();
-            engine.view().all_method_facts().into_iter().any(|fact| {
-                let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
-                    return false;
-                };
-                if method.as_str() != method_name {
-                    return false;
-                }
-                engine
-                    .view()
-                    .file(fact.range.file_id)
-                    .map(|file| file.path.ends_with(path_suffix))
-                    .unwrap_or(false)
-            })
+    server.projects().into_iter().any(|analysis_engine| {
+        let engine = analysis_engine.test_read();
+        engine.view().all_method_facts().into_iter().any(|fact| {
+            let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
+                return false;
+            };
+            if method.as_str() != method_name {
+                return false;
+            }
+            engine
+                .view()
+                .file(fact.range.file_id)
+                .map(|file| file.path.ends_with(path_suffix))
+                .unwrap_or(false)
         })
+    })
 }

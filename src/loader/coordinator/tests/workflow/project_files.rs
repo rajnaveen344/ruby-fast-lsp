@@ -51,7 +51,7 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         .await
         .expect("workspace indexing must succeed");
 
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     assert!(
         query.file_id(&signature_path).is_some(),
@@ -86,9 +86,9 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         .get(&usage_uri)
         .cloned()
         .expect("opened usage document must exist");
-    let query = crate::features::cursor::EngineQuery::with_doc_and_engine(
+    let query = crate::features::cursor::EngineQuery::with_doc_and_project(
         document,
-        server.orphan_engine().clone(),
+        server.orphan_project().clone(),
     );
     let definitions = query
         .with_view(|cursor| {
@@ -284,8 +284,8 @@ async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
 
     assert!(
         server
-            .analysis_engine_for_uri(&uri)
-            .read()
+            .project_for_uri(&uri)
+            .test_read()
             .view()
             .stats()
             .get(AnalysisStat::Diagnostics)

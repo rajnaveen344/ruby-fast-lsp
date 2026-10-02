@@ -170,7 +170,7 @@ fn require_can_resolve_engine_registered_virtual_files() {
         Path::new("/project"),
         &[],
         &RequireFeatureIndex::empty(),
-        Some(&engine),
+        Some(&engine.view()),
     )
     .unwrap();
     assert_eq!(resolved, path);
@@ -437,13 +437,13 @@ fn reresolve_clears_from_engine_indexed_files_without_disk() {
     );
     assert_eq!(existing.len(), 1);
 
-    let index = RequireFeatureIndex::build(&[gem_lib], Some(&engine));
+    let index = RequireFeatureIndex::build(&[gem_lib], Some(&engine.view()));
     let refreshed = reresolve_unresolved_require_diagnostics(
         Path::new("/project/main.rb"),
         Path::new("/project"),
         &[],
         &index,
-        Some(&engine),
+        Some(&engine.view()),
         &existing,
     );
     assert!(
@@ -467,7 +467,7 @@ fn engine_present_build_skips_unindexed_disk_files() {
         content: "# engine\n".to_string(),
         kind: SourceKind::Gem,
     });
-    let index = RequireFeatureIndex::build(&[gem_lib], Some(&engine));
+    let index = RequireFeatureIndex::build(&[gem_lib], Some(&engine.view()));
     assert_eq!(index.lookup("in_engine"), Some(engine_path.as_path()));
     assert!(
         index.lookup("disk_only").is_none(),

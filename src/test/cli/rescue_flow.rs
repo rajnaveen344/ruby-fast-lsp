@@ -300,14 +300,14 @@ end
 
     editor.set("main.rb", unknown_return_union_source).await;
     let main_uri = crate::test::harness::fixture_uri("/main.rb");
-    let analysis_engine = editor.server().analysis_engine_for_uri(&main_uri);
+    let analysis_engine = editor.server().project_for_uri(&main_uri);
     let main_file_id = analysis_engine
-        .read()
+        .test_read()
         .view()
         .file_id(&crate::test::harness::fixture_path("/main.rb"))
         .expect("rescue fixture must be registered in the analysis engine");
     let method_return_outcomes = analysis_engine
-        .read()
+        .test_read()
         .view()
         .method_return_outcomes_in_file(main_file_id)
         .expect("rescue fixture must retain method-return outcomes")

@@ -265,14 +265,14 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     editor.set("cycle_even.rb", &unchanged_equation).await;
     let analysis_engine = editor
         .server()
-        .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
+        .project_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
     let even_file_id = analysis_engine
-        .read()
+        .test_read()
         .view()
         .file_id(&crate::test::harness::fixture_path("/cycle_even.rb"))
         .expect("cycle fixture must be registered in the analysis engine");
     let equations_before_unchanged_edit = analysis_engine
-        .read()
+        .test_read()
         .view()
         .method_return_equations_in_file(even_file_id)
         .expect("cycle fixture must retain its return equations")
@@ -280,7 +280,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     editor.set("cycle_even.rb", &unchanged_equation).await;
     assert_eq!(
         analysis_engine
-            .read()
+            .test_read()
             .view()
             .method_return_equations_in_file(even_file_id)
             .expect("unchanged cycle fixture must retain its return equations"),
@@ -289,7 +289,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     );
     assert_eq!(
         analysis_engine
-            .read()
+            .test_read()
             .view()
             .last_resolve_stats()
             .get(ResolveStat::MethodReturnEquationSolveRuns),
@@ -311,7 +311,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     editor.set("cycle_even.rb", integer_even_source).await;
     assert_eq!(
         analysis_engine
-            .read()
+            .test_read()
             .view()
             .last_resolve_stats()
             .get(ResolveStat::MethodReturnEquationSolveRuns),

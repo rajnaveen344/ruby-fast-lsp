@@ -77,19 +77,18 @@ pub(crate) fn indexing_summary_json(
     let mut dependency_navigation_ready_ms = Vec::new();
     let mut semantic_complete_ms = Vec::new();
     for workspace in server.list_workspaces() {
-        let engine = workspace.analysis_engine.read();
-        inference_telemetry.merge(&engine.view().inference_telemetry());
-        analysis.merge(&engine.view().stats());
-        resolve_pass.merge(engine.view().last_resolve_stats());
+        workspace.handle().view(|view| {
+        inference_telemetry.merge(&view.inference_telemetry());
+        analysis.merge(&view.stats());
+        resolve_pass.merge(view.last_resolve_stats());
         estimated_engine_heap_bytes = estimated_engine_heap_bytes
-            .checked_add(engine.view().estimated_memory_stats().total())
+            .checked_add(view.estimated_memory_stats().total())
             .expect_invariant(
                 "profiler aggregate engine heap overflowed usize",
                 "estimated live engine memory must fit the process address space",
                 "inspect memory accounting",
             );
-        let mut project_sources = engine
-            .view()
+        let mut project_sources = view
             .files()
             .filter(|file| file.kind == SourceKind::Project)
             .collect::<Vec<_>>();
@@ -154,7 +153,7 @@ pub(crate) fn indexing_summary_json(
         dependency_navigation_ready_ms.push(dependencies_ready);
         semantic_complete_ms.push(status.elapsed_ms);
         let semantic_result_fingerprint_hex =
-            stable_fingerprint_hex(engine.view().semantic_result_fingerprint().stable_bytes());
+            stable_fingerprint_hex(view.semantic_result_fingerprint().stable_bytes());
         project_evidence.push(serde_json::json!({
             "root": workspace.root_path,
             "runtime": workspace.runtime.selected().read().clone(),
@@ -168,6 +167,7 @@ pub(crate) fn indexing_summary_json(
             "dependency_navigation_ready_ms": dependencies_ready,
             "semantic_complete_ms": status.elapsed_ms,
         }));
+        });
     }
     project_evidence.sort_by(|left, right| left["root"].as_str().cmp(&right["root"].as_str()));
     let dataset_fingerprint_sha256 = dataset_fingerprint_sha256(&project_evidence);

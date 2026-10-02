@@ -72,7 +72,7 @@ async fn remove_workspace_at_runtime_drops_it() {
 }
 
 #[tokio::test]
-async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
+async fn removing_workspace_rehomes_open_documents_in_orphan_project() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("temporary");
     editor
@@ -99,8 +99,8 @@ async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
         .unwrap();
     assert!(editor
         .server()
-        .orphan_engine()
-        .read()
+        .orphan_project()
+        .test_read()
         .view()
         .file_id(path)
         .is_some());
@@ -117,8 +117,8 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
         .await;
     assert!(editor
         .server()
-        .orphan_engine()
-        .read()
+        .orphan_project()
+        .test_read()
         .view()
         .file_id(&file)
         .is_some());
@@ -135,12 +135,7 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
     .await;
 
     let project = editor.workspace_for(&filename).unwrap();
-    assert!(project
-        .analysis_engine
-        .read()
-        .view()
-        .file_id(&file)
-        .is_some());
+    assert!(project.handle().test_read().view().file_id(&file).is_some());
 }
 
 #[tokio::test]

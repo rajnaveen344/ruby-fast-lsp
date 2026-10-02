@@ -4,14 +4,13 @@ use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::project::files::ProjectFilePolicy;
-use crate::server::RubyLanguageServer;
+use crate::server::{ProjectHandle, RubyLanguageServer};
 use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{ResolveMode, SourceFileInput};
 
 use log::{debug, info};
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::*;
 
@@ -143,7 +142,7 @@ async fn init_workspace_inner(
         .into_iter()
         .find(|workspace| workspace.root_uri == folder_uri)
     {
-        coordinator.set_analysis_engine(workspace.analysis_engine);
+        coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
     }
     coordinator.set_cache_root(server.products.cache_root());
     coordinator.set_extension_registry(server.extensions.registry().clone());
@@ -271,7 +270,7 @@ async fn refresh_open_project_files_after_dependency_open(
     server: &RubyLanguageServer,
     opened_uri: &Url,
 ) {
-    let owning_engine = server.analysis_engine_for_uri(opened_uri);
+    let owning_project = server.project_for_uri(opened_uri);
     let mut open_docs = {
         let docs = server.documents.read();
         docs.iter()
@@ -279,7 +278,7 @@ async fn refresh_open_project_files_after_dependency_open(
                 if uri == opened_uri {
                     return None;
                 }
-                if !Arc::ptr_eq(&owning_engine, &server.analysis_engine_for_uri(uri)) {
+                if !owning_project.is_same(&server.project_for_uri(uri)) {
                     return None;
                 }
                 if analysis_file_kind(server, uri).is_some_and(|kind| kind.is_external()) {
@@ -329,13 +328,11 @@ fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKi
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let analysis_engine = server.analysis_engine_for_uri(uri);
-    let engine = analysis_engine.read();
-    engine
-        .view()
-        .file_id(&path)
-        .and_then(|file_id| engine.view().file(file_id))
-        .map(|file| file.kind)
+    server.project_for_uri(uri).view(|view| {
+        view.file_id(&path)
+            .and_then(|file_id| view.file(file_id))
+            .map(|file| file.kind)
+    })
 }
 
 pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTextDocumentParams) {
@@ -653,17 +650,14 @@ async fn refresh_open_project_files_for_dependency_engines(
     server: &RubyLanguageServer,
     changed_uris: &[Url],
 ) {
-    let mut changed_engines = Vec::new();
+    let mut changed_projects: Vec<ProjectHandle> = Vec::new();
     for uri in changed_uris {
-        let engine = server.analysis_engine_for_uri(uri);
-        if !changed_engines
-            .iter()
-            .any(|known| Arc::ptr_eq(known, &engine))
-        {
-            changed_engines.push(engine);
+        let project = server.project_for_uri(uri);
+        if !changed_projects.iter().any(|known| known.is_same(&project)) {
+            changed_projects.push(project);
         }
     }
-    if changed_engines.is_empty() {
+    if changed_projects.is_empty() {
         return;
     }
 
@@ -674,10 +668,10 @@ async fn refresh_open_project_files_for_dependency_engines(
                 if analysis_file_kind(server, uri) != Some(SourceKind::Project) {
                     return None;
                 }
-                let owning_engine = server.analysis_engine_for_uri(uri);
-                if !changed_engines
+                let owning_project = server.project_for_uri(uri);
+                if !changed_projects
                     .iter()
-                    .any(|changed| Arc::ptr_eq(changed, &owning_engine))
+                    .any(|changed| changed.is_same(&owning_project))
                 {
                     return None;
                 }
@@ -710,12 +704,12 @@ fn clear_project_file_facts(server: &RubyLanguageServer, uri: &Url) -> bool {
 /// Other files stop resolving into it, and a later registration at the same
 /// path starts from a fresh identity.
 fn remove_file_if_kind(server: &RubyLanguageServer, uri: &Url, expected_kind: SourceKind) -> bool {
-    let analysis_engine = server.analysis_engine_for_uri(uri);
-    let mut engine = analysis_engine.write();
-    let Some(file_id) = registered_file_of_kind(&engine, uri, expected_kind) else {
-        return false;
-    };
-    engine.remove(file_id, ResolveMode::Immediate)
+    server.project_for_uri(uri).update(|engine| {
+        let Some(file_id) = registered_file_of_kind(engine, uri, expected_kind) else {
+            return false;
+        };
+        engine.remove(file_id, ResolveMode::Immediate)
+    })
 }
 
 /// Keep a file that still exists on disk but could not be read or analyzed
@@ -726,27 +720,27 @@ fn clear_file_facts_if_kind(
     uri: &Url,
     expected_kind: SourceKind,
 ) -> bool {
-    let analysis_engine = server.analysis_engine_for_uri(uri);
-    let mut engine = analysis_engine.write();
-    let Some(file_id) = registered_file_of_kind(&engine, uri, expected_kind) else {
-        return false;
-    };
-    let path = engine
-        .view()
-        .file(file_id)
-        .map(|file| file.path.clone())
-        .expect_invariant(
-            "a registered file vanished under the engine write lock",
-            "the lookup and the clear hold one engine write borrow",
-            "keep lookup and clear inside one write guard",
-        );
-    let file_id = engine.register_file(SourceFileInput {
-        path,
-        content: String::new(),
-        kind: expected_kind,
-    });
-    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-    true
+    server.project_for_uri(uri).update(|engine| {
+        let Some(file_id) = registered_file_of_kind(engine, uri, expected_kind) else {
+            return false;
+        };
+        let path = engine
+            .view()
+            .file(file_id)
+            .map(|file| file.path.clone())
+            .expect_invariant(
+                "a registered file vanished under the engine write lock",
+                "the lookup and the clear hold one engine write borrow",
+                "keep lookup and clear inside one project update",
+            );
+        let file_id = engine.register_file(SourceFileInput {
+            path,
+            content: String::new(),
+            kind: expected_kind,
+        });
+        engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+        true
+    })
 }
 
 fn registered_file_of_kind(

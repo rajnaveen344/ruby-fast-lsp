@@ -2,7 +2,7 @@
 //! the engine's namespace hash.
 
 use log::{debug, info};
-use ruby_analysis::engine::{AnalysisQuery, NamespaceTreeResponse};
+use ruby_analysis::engine::NamespaceTreeResponse;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
@@ -49,16 +49,15 @@ fn namespace_tree(
         .as_deref()
         .filter(|uri| !uri.is_empty())
         .and_then(|uri| Url::parse(uri).ok());
-    let analysis_engine = request_uri
+    let project = request_uri
         .as_ref()
-        .map(|uri| lang_server.analysis_engine_for_uri(uri))
+        .map(|uri| lang_server.project_for_uri(uri))
         .or_else(|| {
             let workspaces = lang_server.list_workspaces();
-            (workspaces.len() == 1).then(|| workspaces[0].analysis_engine.clone())
+            (workspaces.len() == 1).then(|| workspaces[0].handle().clone())
         })
-        .unwrap_or_else(|| lang_server.orphan_engine().clone());
-    let engine_hash =
-        AnalysisQuery::new(&analysis_engine.read()).namespace_tree_hash(params.show_external_types);
+        .unwrap_or_else(|| lang_server.orphan_project().clone());
+    let engine_hash = project.view(|view| view.namespace_tree_hash(params.show_external_types));
     let mut cache_hasher = std::collections::hash_map::DefaultHasher::new();
     request_uri
         .as_ref()
@@ -73,8 +72,7 @@ fn namespace_tree(
     }
 
     debug!("[NAMESPACE_TREE] Cache miss, computing namespace tree");
-    let response =
-        AnalysisQuery::new(&analysis_engine.read()).namespace_tree(params.show_external_types);
+    let response = project.view(|view| view.namespace_tree(params.show_external_types));
 
     lang_server.cache_namespace_tree(combined_hash, response.clone());
 

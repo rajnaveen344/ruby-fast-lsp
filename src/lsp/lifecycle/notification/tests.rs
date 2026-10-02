@@ -103,7 +103,7 @@ async fn watcher_storm_processes_only_the_newest_complete_batch() {
 
     let stale = FullyQualifiedName::namespace(vec![RubyConstant::new("StaleService").unwrap()]);
     let current = FullyQualifiedName::namespace(vec![RubyConstant::new("CurrentService").unwrap()]);
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     let query = AnalysisQuery::new(&engine);
     assert!(query.symbol_facts_for(&stale).is_empty());
     assert_eq!(query.symbol_facts_for(&current).len(), 1);
@@ -305,8 +305,8 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
     )
     .await;
     workspace
-        .analysis_engine
-        .write()
+        .handle()
+        .test_write()
         .register_file(SourceFileInput {
             path: external_path.clone(),
             content: "package com.example; class Runtime {}\n".to_string(),
@@ -314,8 +314,8 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
         });
     server.retain_external_document_project(&external_uri, &workspace);
     assert!(workspace
-        .analysis_engine
-        .read()
+        .handle()
+        .test_read()
         .view()
         .file_id(&external_path)
         .is_some());
@@ -339,7 +339,7 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
     )
     .await;
 
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     assert!(
         engine.view().file_id(&external_path).is_none(),
         "runtime rebuild must remove stale external implementation facts"
@@ -445,8 +445,8 @@ async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts(
         .await
         .expect("initial JRuby fixture workspace must index");
     let initial_files = workspace
-        .analysis_engine
-        .read()
+        .handle()
+        .test_read()
         .view()
         .files()
         .map(|file| (file.kind, file.path.clone()))
@@ -475,7 +475,7 @@ async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts(
     )
     .await;
 
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     assert!(
         !engine.view().files().any(|file| {
             matches!(file.kind, SourceKind::External | SourceKind::Signature)

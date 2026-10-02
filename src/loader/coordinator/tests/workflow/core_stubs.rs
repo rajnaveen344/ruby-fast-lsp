@@ -20,7 +20,7 @@ async fn test_coordinator_complete_indexing_workflow() {
         "Indexing should complete successfully: {result:?}"
     );
 
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     for path in [
         fixture.project_root().join("Thorfile"),
@@ -74,16 +74,13 @@ async fn identical_core_stubs_use_one_template_but_keep_isolated_engines() {
         "the same compatibility core must have one prepared template"
     );
     assert!(
-        !Arc::ptr_eq(
-            &admin_workspace.analysis_engine,
-            &server_workspace.analysis_engine
-        ),
+        !admin_workspace.handle().is_same(&server_workspace.handle()),
         "projects must retain isolated mutable engines"
     );
     let unique = admin.join("only_admin.rb");
     admin_workspace
-        .analysis_engine
-        .write()
+        .handle()
+        .test_write()
         .register_file(SourceFileInput {
             path: unique.clone(),
             content: "ADMIN_ONLY = true\n".to_string(),
@@ -91,8 +88,8 @@ async fn identical_core_stubs_use_one_template_but_keep_isolated_engines() {
         });
     assert!(
         server_workspace
-            .analysis_engine
-            .read()
+            .handle()
+            .test_read()
             .view()
             .file_id(&unique)
             .is_none(),
@@ -137,7 +134,7 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
         .await
         .expect("core stubs must bind successfully");
 
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     let file_id = engine
         .view()
         .file_id(&path)

@@ -272,7 +272,7 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
     let mut old_coordinator =
         IndexingCoordinator::new(project.clone(), RubyFastLspConfig::default());
     old_coordinator.set_indexing_run(old_run.clone());
-    old_coordinator.set_analysis_engine(workspace.analysis_engine.clone());
+    old_coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
 
     let replacement = workspace.indexing_status.begin_run();
     let result = old_coordinator
@@ -293,19 +293,19 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
 }
 
 #[test]
-fn removed_coordinator_keeps_detached_engine_instead_of_orphan_engine() {
+fn removed_coordinator_keeps_detached_engine_instead_of_orphan_project() {
     let fixture = TempDir::new().unwrap();
     let project = fixture.path().join("admin");
     fs::create_dir_all(&project).unwrap();
     let server = RubyLanguageServer::default();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
     let mut coordinator = IndexingCoordinator::new(project, RubyFastLspConfig::default());
-    coordinator.set_analysis_engine(workspace.analysis_engine.clone());
+    coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
 
     server.remove_workspace(&workspace.root_uri);
 
     let selected =
         coordinator.analysis_engine(&server.load_context_for_project(&workspace.root_path));
-    assert!(Arc::ptr_eq(&selected, &workspace.analysis_engine));
-    assert!(!Arc::ptr_eq(&selected, &server.orphan_engine()));
+    assert!(workspace.handle().owns_engine(&selected));
+    assert!(!server.orphan_project().owns_engine(&selected));
 }

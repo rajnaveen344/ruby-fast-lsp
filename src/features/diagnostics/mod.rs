@@ -77,10 +77,9 @@ fn document_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKind> {
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let analysis_engine = server.analysis_engine_for_uri(uri);
-    let engine = analysis_engine.read();
-    let view = engine.view();
-    view.file_id(&path)
-        .and_then(|file_id| view.file(file_id))
-        .map(|file| file.kind)
+    server.project_for_uri(uri).view(|view| {
+        view.file_id(&path)
+            .and_then(|file_id| view.file(file_id))
+            .map(|file| file.kind)
+    })
 }

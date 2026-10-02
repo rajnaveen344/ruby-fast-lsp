@@ -32,7 +32,7 @@ impl RubyLanguageServer {
 #[tower_lsp::async_trait]
 impl LoadSink for RubyLanguageServer {
     fn engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>> {
-        self.analysis_engine_for_uri(uri)
+        self.project_for_uri(uri).shared_engine().clone()
     }
 
     fn indexing_run_state(&self, root: &Path, run: &IndexingRun) -> IndexingRunState {
@@ -93,7 +93,7 @@ impl LoadSink for RubyLanguageServer {
         index: Arc<RequireFeatureIndex>,
     ) {
         if let Some(workspace) = self.project_at_root(root) {
-            if Arc::ptr_eq(&workspace.analysis_engine, engine) {
+            if workspace.handle().owns_engine(engine) {
                 workspace.set_dependency_require_resolution(paths, index);
             }
         }

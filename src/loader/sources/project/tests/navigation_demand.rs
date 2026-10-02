@@ -104,7 +104,7 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
     let user = ruby_analysis::core::RubyConstant::new("User").unwrap();
     let report = ruby_analysis::core::RubyConstant::new("Report").unwrap();
     {
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let query = AnalysisQuery::new(&engine);
         assert!(
             !query
@@ -124,7 +124,7 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
         .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
 
-    let engine = workspace_state.analysis_engine.read();
+    let engine = workspace_state.handle().test_read();
     assert!(
         !AnalysisQuery::new(&engine)
             .constant_definition_ranges(&[report], &[])
@@ -161,7 +161,7 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
     let user = ruby_analysis::core::RubyConstant::new("AccountRecord").unwrap();
     let report = ruby_analysis::core::RubyConstant::new("Report").unwrap();
     {
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let query = AnalysisQuery::new(&engine);
         assert!(
             !query
@@ -180,7 +180,7 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
     indexer
         .finish_project_navigation_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
-    let engine = workspace_state.analysis_engine.read();
+    let engine = workspace_state.handle().test_read();
     assert!(
         !AnalysisQuery::new(&engine)
             .constant_definition_ranges(&[report], &[])

@@ -32,7 +32,7 @@ fn signature_help(
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
     let document = server.documents.read().get(&uri)?.clone();
-    let help = EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+    let help = EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))
         .with_view(|cursor| {
             let content = &cursor.document?.content;
             signature_help_at(cursor, &uri, position, content)

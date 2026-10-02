@@ -61,7 +61,7 @@ impl IndexingCoordinator {
         let index = {
             let analysis_engine = self.analysis_engine(ctx);
             let engine = analysis_engine.read();
-            RequireFeatureIndex::build(&paths, Some(&engine))
+            RequireFeatureIndex::build(&paths, Some(&engine.view()))
         };
         let features = index.feature_count();
         let index = std::sync::Arc::new(index);

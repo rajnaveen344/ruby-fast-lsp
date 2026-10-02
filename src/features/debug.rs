@@ -6,21 +6,18 @@ pub use ruby_analysis::engine::{ExportGraphResponse, LookupResponse};
 use serde::{Deserialize, Serialize};
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
-use crate::server::RubyLanguageServer;
-use parking_lot::RwLock;
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
-use std::sync::Arc;
+use crate::server::{ProjectHandle, RubyLanguageServer};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::Url;
 
-fn project_engine(server: &RubyLanguageServer, uri: Option<&str>) -> Arc<RwLock<AnalysisEngine>> {
+fn project(server: &RubyLanguageServer, uri: Option<&str>) -> ProjectHandle {
     uri.and_then(|value| Url::parse(value).ok())
-        .map(|uri| server.analysis_engine_for_uri(&uri))
+        .map(|uri| server.project_for_uri(&uri))
         .or_else(|| {
             let projects = server.list_workspaces();
-            (projects.len() == 1).then(|| projects[0].analysis_engine.clone())
+            (projects.len() == 1).then(|| projects[0].handle().clone())
         })
-        .unwrap_or_else(|| server.orphan_engine().clone())
+        .unwrap_or_else(|| server.orphan_project().clone())
 }
 
 // ============================================================================
@@ -58,9 +55,7 @@ pub async fn handle_lookup(
 ) -> LspResult<LookupResponse> {
     info!("Debug lookup request received for: {}", params.fqn);
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
-    let engine = project_engine(server, params.uri.as_deref());
-    let engine = engine.read();
-    Ok(AnalysisQuery::new(&engine).debug_lookup(&params.fqn))
+    Ok(project(server, params.uri.as_deref()).view(|view| view.debug_lookup(&params.fqn)))
 }
 
 /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.
@@ -70,9 +65,7 @@ pub async fn handle_export_graph(
 ) -> LspResult<ExportGraphResponse> {
     info!("Export graph request received");
     debug!("[DEBUG] Exporting inheritance graph");
-    let engine = project_engine(server, params.uri.as_deref());
-    let engine = engine.read();
-    Ok(AnalysisQuery::new(&engine).debug_export_graph())
+    Ok(project(server, params.uri.as_deref()).view(|view| view.debug_export_graph()))
 }
 
 /// Handle `ruby-fast-lsp/extensions/status` - list loaded extension states.

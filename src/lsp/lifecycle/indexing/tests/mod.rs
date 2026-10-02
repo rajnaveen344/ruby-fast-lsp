@@ -16,8 +16,8 @@ fn namespace(name: &str) -> FullyQualifiedName {
 }
 
 fn has_namespace(server: &RubyLanguageServer, uri: &Url, name: &str) -> bool {
-    let analysis_engine = server.analysis_engine_for_uri(uri);
-    let engine = analysis_engine.read();
+    let analysis_engine = server.project_for_uri(uri);
+    let engine = analysis_engine.test_read();
     !AnalysisQuery::new(&engine)
         .symbol_facts_for(&namespace(name))
         .is_empty()

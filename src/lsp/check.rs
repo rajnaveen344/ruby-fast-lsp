@@ -17,7 +17,7 @@ use ruby_analysis::core::{
     DiagnosticSeverity, InferenceTelemetry, SourceKind, TextRange, TypeInferenceOutcome,
     TypeSubject, UnknownReason,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::View;
 use ruby_analysis::indexer::RubyDocument;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -293,7 +293,7 @@ impl CheckSession {
         for workspace in &workspaces {
             let mut coordinator =
                 IndexingCoordinator::new(workspace.root_path.clone(), config.clone());
-            coordinator.set_analysis_engine(workspace.analysis_engine.clone());
+            coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
             coordinator
                 .run_complete_indexing(
                     &server.load_context_for_project(coordinator.workspace_root()),
@@ -312,8 +312,8 @@ impl CheckSession {
         let mut files_checked = 0usize;
         let mut inference = InferenceTelemetry::default();
         for workspace in &workspaces {
-            let engine = workspace.analysis_engine.read();
-            for file in engine.view().files() {
+            workspace.handle().view(|view| -> Result<()> {
+            for file in view.files() {
                 if !matches!(file.kind, SourceKind::Project | SourceKind::Signature)
                     || !source_is_selected(&file.path, selected_file.as_deref(), &root)
                 {
@@ -324,10 +324,10 @@ impl CheckSession {
                     "one process cannot retain more files than addressable memory",
                     "bound project discovery below usize::MAX",
                 );
-                if let Some(file_telemetry) = engine.view().inference_telemetry_in_file(file.id) {
+                if let Some(file_telemetry) = view.inference_telemetry_in_file(file.id) {
                     inference.merge(file_telemetry);
                 }
-                inferred_types.extend(solved_types_in_file(&engine, &root, file.id)?);
+                inferred_types.extend(solved_types_in_file(view, &root, file.id)?);
                 if file.kind == SourceKind::Project {
                     let source = match file.source_text() {
                         Some(source) => source.to_string(),
@@ -338,7 +338,7 @@ impl CheckSession {
                             )
                         })?,
                     };
-                    if !engine.view().file_content_matches(file.id, &source) {
+                    if !view.file_content_matches(file.id, &source) {
                         return Err(anyhow!(
                             "check source {} changed while analysis was running; rerun the check \
                              so syntax and semantic diagnostics use one byte-identical input",
@@ -363,10 +363,12 @@ impl CheckSession {
                 }
             }
             diagnostics.extend(domain_diagnostics(
-                &engine,
+                view,
                 &root,
                 selected_file.as_deref(),
             )?);
+            Ok(())
+            })?;
         }
         if let Some(selected_file) = selected_file.as_deref() {
             if files_checked != 1 {
@@ -397,16 +399,15 @@ impl CheckSession {
 }
 
 fn solved_types_in_file(
-    engine: &AnalysisEngine,
+    view: &View<'_>,
     root: &Path,
     file_id: ruby_analysis::core::SourceFileId,
 ) -> Result<Vec<CheckInferredType>> {
-    let file = engine
-        .view()
+    let file = view
         .file(file_id)
         .ok_or_else(|| anyhow!("inferred types reference unknown file id {file_id:?}"))?;
-    let query = AnalysisQuery::new(engine);
-    let exact_outcomes = engine.view().method_return_outcomes_in_file(file_id);
+    let query = view;
+    let exact_outcomes = view.method_return_outcomes_in_file(file_id);
     let mut inferred = Vec::new();
 
     for method in query.method_facts_in_file(file_id) {
@@ -584,21 +585,18 @@ fn source_is_selected(path: &Path, selected_file: Option<&Path>, root: &Path) ->
 }
 
 fn domain_diagnostics(
-    engine: &AnalysisEngine,
+    view: &View<'_>,
     root: &Path,
     selected_file: Option<&Path>,
 ) -> Result<Vec<CheckDiagnostic>> {
     let mut diagnostics = Vec::new();
-    for diagnostic in engine.view().all_diagnostic_facts() {
-        let file = engine
-            .view()
-            .file(diagnostic.range.file_id)
-            .ok_or_else(|| {
-                anyhow!(
-                    "diagnostic references unknown file id {:?}",
-                    diagnostic.range.file_id
-                )
-            })?;
+    for diagnostic in view.all_diagnostic_facts() {
+        let file = view.file(diagnostic.range.file_id).ok_or_else(|| {
+            anyhow!(
+                "diagnostic references unknown file id {:?}",
+                diagnostic.range.file_id
+            )
+        })?;
         if selected_file.is_some_and(|selected| file.path != selected) {
             continue;
         }

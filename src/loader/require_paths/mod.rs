@@ -35,7 +35,7 @@ use std::path::{Component, Path, PathBuf};
 
 use log::trace;
 use ruby_analysis::core::{DiagnosticFact, DiagnosticSeverity, SourceFileId, TextRange};
-use ruby_analysis::engine::{AnalysisEngine, UNRESOLVED_REQUIRE_CODE};
+use ruby_analysis::engine::{View, UNRESOLVED_REQUIRE_CODE};
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -55,14 +55,13 @@ impl RequireFeatureIndex {
         Self::default()
     }
 
-    /// When `engine` is present, snapshot its `.rb` paths once and assign each
+    /// When `view` is present, snapshot its `.rb` paths once and assign each
     /// file to the first published root that is a prefix (sorted range scan).
     /// Without an engine (tests and FakeEditor root injection), walk on-disk
     /// `.rb` files. First insert wins, matching sequential `$LOAD_PATH` search.
-    pub fn build(roots: &[PathBuf], engine: Option<&AnalysisEngine>) -> Self {
-        if let Some(engine) = engine {
-            let paths: Vec<PathBuf> = engine
-                .view()
+    pub fn build(roots: &[PathBuf], view: Option<&View<'_>>) -> Self {
+        if let Some(view) = view {
+            let paths: Vec<PathBuf> = view
                 .files()
                 .filter(|file| {
                     file.path
@@ -290,7 +289,7 @@ pub fn unresolved_require_diagnostics(
     project_root: &Path,
     load_paths: &[String],
     feature_index: &RequireFeatureIndex,
-    engine: Option<&AnalysisEngine>,
+    view: Option<&View<'_>>,
 ) -> Vec<DiagnosticFact> {
     let mut diagnostics = Vec::new();
     for target in find_all_require_strings(content) {
@@ -301,7 +300,7 @@ pub fn unresolved_require_diagnostics(
             project_root,
             load_paths,
             feature_index,
-            engine,
+            view,
         )
         .is_some()
         {
@@ -358,7 +357,7 @@ pub fn reresolve_unresolved_require_diagnostics(
     project_root: &Path,
     load_paths: &[String],
     feature_index: &RequireFeatureIndex,
-    engine: Option<&AnalysisEngine>,
+    view: Option<&View<'_>>,
     existing: &[DiagnosticFact],
 ) -> Vec<DiagnosticFact> {
     existing
@@ -373,7 +372,7 @@ pub fn reresolve_unresolved_require_diagnostics(
                 project_root,
                 load_paths,
                 feature_index,
-                engine,
+                view,
             )
             .is_none()
         })
@@ -429,7 +428,7 @@ pub fn resolve_require_path(
     project_root: &Path,
     load_paths: &[String],
     feature_index: &RequireFeatureIndex,
-    engine: Option<&AnalysisEngine>,
+    view: Option<&View<'_>>,
 ) -> Option<PathBuf> {
     if argument.is_empty() {
         return None;
@@ -438,24 +437,22 @@ pub fn resolve_require_path(
     match kind {
         RequireKind::RequireRelative => {
             let parent = current_file.parent()?;
-            existing_require_candidate(&parent.join(argument), engine)
+            existing_require_candidate(&parent.join(argument), view)
         }
         RequireKind::Require => {
             for configured in load_paths {
                 if let Some(root) = validated_project_relative_dir(project_root, configured) {
-                    if let Some(resolved) = existing_require_candidate(&root.join(argument), engine)
-                    {
+                    if let Some(resolved) = existing_require_candidate(&root.join(argument), view) {
                         return Some(resolved);
                     }
                 }
             }
             if let Some(resolved) =
-                existing_require_candidate(&project_root.join("lib").join(argument), engine)
+                existing_require_candidate(&project_root.join("lib").join(argument), view)
             {
                 return Some(resolved);
             }
-            if let Some(resolved) = existing_require_candidate(&project_root.join(argument), engine)
-            {
+            if let Some(resolved) = existing_require_candidate(&project_root.join(argument), view) {
                 return Some(resolved);
             }
             feature_index.lookup(argument).map(Path::to_path_buf)
@@ -464,23 +461,20 @@ pub fn resolve_require_path(
 }
 
 /// Build a goto location that selects the entire target file contents.
-pub fn location_for_require_target(
-    path: &Path,
-    engine: Option<&AnalysisEngine>,
-) -> Option<Location> {
+pub fn location_for_require_target(path: &Path, view: Option<&View<'_>>) -> Option<Location> {
     let uri = Url::from_file_path(path).ok()?;
-    let range = require_target_full_range(path, engine)
+    let range = require_target_full_range(path, view)
         .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)));
     Some(Location { uri, range })
 }
 
-fn require_target_full_range(path: &Path, engine: Option<&AnalysisEngine>) -> Option<Range> {
-    if let Some(content) = require_target_content(path, engine) {
+fn require_target_full_range(path: &Path, view: Option<&View<'_>>) -> Option<Range> {
+    if let Some(content) = require_target_content(path, view) {
         return Some(full_document_range(&content));
     }
-    if let Some(engine) = engine {
-        if let Some(file_id) = engine.query().file_id(path) {
-            if let Some(file) = engine.query().file(file_id) {
+    if let Some(view) = view {
+        if let Some(file_id) = view.file_id(path) {
+            if let Some(file) = view.file(file_id) {
                 return Some(range_from_engine_file(file));
             }
         }
@@ -488,10 +482,10 @@ fn require_target_full_range(path: &Path, engine: Option<&AnalysisEngine>) -> Op
     None
 }
 
-fn require_target_content(path: &Path, engine: Option<&AnalysisEngine>) -> Option<String> {
-    if let Some(engine) = engine {
-        if let Some(file_id) = engine.query().file_id(path) {
-            if let Some(file) = engine.query().file(file_id) {
+fn require_target_content(path: &Path, view: Option<&View<'_>>) -> Option<String> {
+    if let Some(view) = view {
+        if let Some(file_id) = view.file_id(path) {
+            if let Some(file) = view.file(file_id) {
                 if let Some(source) = file.source_text() {
                     return Some(source.to_string());
                 }
@@ -539,16 +533,13 @@ fn validated_project_relative_dir(project_root: &Path, configured: &str) -> Opti
     Some(project_root.join(relative))
 }
 
-fn existing_require_candidate(
-    candidate: &Path,
-    engine: Option<&AnalysisEngine>,
-) -> Option<PathBuf> {
+fn existing_require_candidate(candidate: &Path, view: Option<&View<'_>>) -> Option<PathBuf> {
     for path in [candidate.to_path_buf(), with_rb_extension(candidate)] {
         if path.is_file() {
             return Some(path);
         }
-        if let Some(engine) = engine {
-            if engine.query().file_id(&path).is_some() {
+        if let Some(view) = view {
+            if view.file_id(&path).is_some() {
                 return Some(path);
             }
         }

@@ -54,8 +54,8 @@ async fn edit_between_real_collection_and_commit(
         tokio::spawn(async move { init_workspace_for_run(&cold_server, cold_root, run).await });
     collected.wait().await;
     let old_snapshot = workspace
-        .analysis_engine
-        .read()
+        .handle()
+        .test_read()
         .view()
         .source_snapshot_for_path(&path)
         .expect("cold collection must register its input before reaching the commit boundary");
@@ -75,8 +75,8 @@ async fn edit_between_real_collection_and_commit(
     updated.wait().await;
     assert_ne!(
         workspace
-            .analysis_engine
-            .read()
+            .handle()
+            .test_read()
             .view()
             .source_snapshot_for_path(&path),
         Some(old_snapshot),
@@ -169,15 +169,15 @@ async fn edit_between_real_collection_and_commit(
         "a delayed cold commit must preserve the exact new method definition"
     );
     let file_id = workspace
-        .analysis_engine
-        .read()
+        .handle()
+        .test_read()
         .view()
         .file_id(&path)
         .unwrap();
     assert!(
         workspace
-            .analysis_engine
-            .read()
+            .handle()
+            .test_read()
             .view()
             .file_content_matches(file_id, NEW),
         "cold indexing must never restore disk source over the editor buffer"

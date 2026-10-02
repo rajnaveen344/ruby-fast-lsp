@@ -52,23 +52,21 @@ fn prepare_rename(
 ) -> Option<PrepareRenameResponse> {
     let uri = params.text_document.uri;
     let document = server.documents.read().get(&uri)?.clone();
-    EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+    EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))
         .with_view(|cursor| prepare_rename_at(cursor, &uri, params.position))
 }
 
 fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<WorkspaceEdit> {
     let uri = params.text_document_position.text_document.uri;
     let document = server.documents.read().get(&uri)?.clone();
-    EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri)).with_view(
-        |cursor| {
-            rename_at(
-                cursor,
-                &uri,
-                params.text_document_position.position,
-                &params.new_name,
-            )
-        },
-    )
+    EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri)).with_view(|cursor| {
+        rename_at(
+            cursor,
+            &uri,
+            params.text_document_position.position,
+            &params.new_name,
+        )
+    })
 }
 
 /// The renameable range and current name at `position`: a local variable, then

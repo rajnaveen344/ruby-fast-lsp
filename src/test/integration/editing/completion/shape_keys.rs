@@ -128,7 +128,7 @@ end
         .server()
         .get_doc(&uri)
         .expect("the open consumer must retain its RubyDocument");
-    let engine = editor.server().analysis_engine_for_uri(&uri);
+    let engine = editor.server().project_for_uri(&uri);
     let payload_factory = ruby_analysis::core::FullyQualifiedName::namespace_with_kind(
         vec![ruby_analysis::core::RubyConstant::new("PayloadFactory")
             .expect("the synthetic class name must be valid")],
@@ -142,7 +142,7 @@ end
         ruby_analysis::engine::lookup::MethodWant::Return,
     );
     let method_return =
-        ruby_analysis::engine::lookup::method(&AnalysisQuery::new(&engine.read()), request)
+        ruby_analysis::engine::lookup::method(&AnalysisQuery::new(&engine.test_read()), request)
             .into_return_type()
             .map(|ruby_type| ruby_type.to_string());
     assert_eq!(
@@ -151,7 +151,7 @@ end
         "the cross-file method equation must retain its structural return"
     );
     assert_eq!(
-        AnalysisQuery::new(&engine.read())
+        AnalysisQuery::new(&engine.test_read())
             .expression_type_ending_at(document.analysis_file_id(), 20)
             .map(|ruby_type| ruby_type.to_string()),
         Some("{ id: Integer, name: String }".to_string()),

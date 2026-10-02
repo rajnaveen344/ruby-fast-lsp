@@ -52,8 +52,8 @@ async fn delayed_refresh(change: Change) {
         ))
     );
     let source_snapshot = workspace
-        .analysis_engine
-        .read()
+        .handle()
+        .test_read()
         .view()
         .source_snapshot_for_path(&path);
     if matches!(change, Change::Close) {
@@ -86,8 +86,8 @@ async fn delayed_refresh(change: Change) {
                 .await;
             assert_eq!(
                 workspace
-                    .analysis_engine
-                    .read()
+                    .handle()
+                    .test_read()
                     .view()
                     .source_snapshot_for_path(&path),
                 source_snapshot,
@@ -100,8 +100,8 @@ async fn delayed_refresh(change: Change) {
             editor.set(filename, "# corrected source\n").await;
             assert_eq!(
                 workspace
-                    .analysis_engine
-                    .read()
+                    .handle()
+                    .test_read()
                     .view()
                     .source_snapshot_for_path(&path),
                 source_snapshot,
@@ -119,8 +119,8 @@ async fn delayed_refresh(change: Change) {
                 .await;
             assert_eq!(
                 workspace
-                    .analysis_engine
-                    .read()
+                    .handle()
+                    .test_read()
                     .view()
                     .source_snapshot_for_path(&path),
                 source_snapshot,
@@ -164,7 +164,7 @@ async fn delayed_refresh(change: Change) {
     } else {
         expected.clone()
     };
-    assert_eq!(engine_diagnostics(&server.analysis_engine_for_uri(&uri).read().view(), &uri), expected_facts,
+    assert_eq!(engine_diagnostics(&server.project_for_uri(&uri).test_read().view(), &uri), expected_facts,
         "delayed dependency refresh must preserve current engine diagnostic facts as well as the UI");
     attempted.release();
     tokio::time::timeout(Duration::from_secs(15), refreshing)

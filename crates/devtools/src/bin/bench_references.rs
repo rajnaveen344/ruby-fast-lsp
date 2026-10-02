@@ -179,17 +179,15 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
     // observation.
     t.total = wall;
 
-    let analysis_engine = server.analysis_engine_for_uri(&workspace_uri);
-    let engine = analysis_engine.read();
-    info!(
-        "analysis after pass: {} symbols, {} methods, {} refs",
-        engine.view().all_symbol_facts().len(),
-        engine.view().all_method_facts().len(),
-        engine
-            .view()
-            .stats()
-            .get(ruby_analysis::engine::AnalysisStat::References)
-    );
+    server.project_for_uri(&workspace_uri).view(|view| {
+        info!(
+            "analysis after pass: {} symbols, {} methods, {} refs",
+            view.all_symbol_facts().len(),
+            view.all_method_facts().len(),
+            view.stats()
+                .get(ruby_analysis::engine::AnalysisStat::References)
+        );
+    });
 
     Ok(t)
 }

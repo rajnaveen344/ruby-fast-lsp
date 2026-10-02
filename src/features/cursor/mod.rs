@@ -4,24 +4,24 @@
 //! ranges to protocol locations.
 //!
 //! ```no_run
-//! use std::sync::Arc;
-//! use parking_lot::RwLock;
-//! use ruby_analysis::engine::AnalysisEngine;
 //! use ruby_fast_lsp::features::cursor::EngineQuery;
+//! use ruby_fast_lsp::server::RubyLanguageServer;
+//! use tower_lsp::lsp_types::Url;
 //!
-//! // Supply the owning project's populated engine when querying real sources.
-//! let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
-//! let query = EngineQuery::with_engine(engine);
-//! let files = query.with_view(|cursor| cursor.view.files().count());
+//! fn file_count(server: &RubyLanguageServer, uri: &Url) -> usize {
+//!     let query = EngineQuery::with_project(server.project_for_uri(uri));
+//!     query.with_view(|cursor| cursor.view.files().count())
+//! }
 //! ```
 
 pub(crate) mod analysis_location;
 pub(crate) mod method;
 
+use crate::server::ProjectHandle;
 use crate::utils::lsp::source_position;
 use parking_lot::RwLock;
 use ruby_analysis::core::SourceFileId;
-use ruby_analysis::engine::{AnalysisEngine, View};
+use ruby_analysis::engine::View;
 use ruby_analysis::indexer::{RubyDocument, RubyPrismAnalyzer};
 use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Url};
@@ -33,7 +33,7 @@ use tower_lsp::lsp_types::{Position, Url};
 #[derive(Clone)]
 pub struct EngineQuery {
     doc: Option<Arc<RwLock<RubyDocument>>>,
-    analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    project: ProjectHandle,
 }
 
 /// One request's read state: the open document, when the request has one, and
@@ -82,41 +82,34 @@ impl Cursor<'_> {
 
 impl EngineQuery {
     /// Run `read` over one consistent cursor: the document read guard, then
-    /// the engine read guard, each taken exactly once and released on return.
-    /// `read` is synchronous, so no guard is held across an `.await`.
+    /// one [`ProjectHandle::view`], each taken exactly once and released on
+    /// return. `read` is synchronous, so no guard is held across an `.await`.
     pub fn with_view<R>(&self, read: impl FnOnce(Cursor<'_>) -> R) -> R {
         let document = self.doc.as_ref().map(|document| document.read());
-        let engine = self.analysis_engine.read();
-        let view = engine.view();
-        read(Cursor {
-            view: &view,
-            document: document.as_deref(),
+        self.project.view(|view| {
+            read(Cursor {
+                view,
+                document: document.as_deref(),
+            })
         })
     }
 
-    /// Create an EngineQuery with document context and analysis engine access.
-    pub fn with_doc_and_engine(
-        doc: Arc<RwLock<RubyDocument>>,
-        analysis_engine: Arc<RwLock<AnalysisEngine>>,
-    ) -> Self {
+    /// A query over an open document and the project that owns it.
+    pub fn with_doc_and_project(doc: Arc<RwLock<RubyDocument>>, project: ProjectHandle) -> Self {
         Self {
             doc: Some(doc),
-            analysis_engine,
+            project,
         }
     }
 
-    /// Create an EngineQuery with analysis engine access and no document context.
-    pub fn with_engine(analysis_engine: Arc<RwLock<AnalysisEngine>>) -> Self {
-        Self {
-            doc: None,
-            analysis_engine,
-        }
+    /// A query over a project with no document context.
+    pub fn with_project(project: ProjectHandle) -> Self {
+        Self { doc: None, project }
     }
 
-    /// Get the analysis engine.
-    #[inline]
-    pub fn analysis_engine(&self) -> Option<&Arc<RwLock<AnalysisEngine>>> {
-        Some(&self.analysis_engine)
+    /// The project this query reads.
+    pub fn project(&self) -> &ProjectHandle {
+        &self.project
     }
 }
 

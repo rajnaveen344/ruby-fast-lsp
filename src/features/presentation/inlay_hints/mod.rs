@@ -61,7 +61,7 @@ pub async fn handle(
     let Some(document) = server.documents.read().get(&uri).cloned() else {
         return Ok(Some(Vec::new()));
     };
-    let hints = EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+    let hints = EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))
         .with_view(|cursor| inlay_hints_at(cursor, &range))
         .into_iter()
         .map(to_lsp_hint)
@@ -104,7 +104,7 @@ pub fn inlay_hints_at(cursor: Cursor<'_>, range: &Range) -> Vec<InlayHintData> {
     let document = cursor.document.expect_invariant(
         "inlay hints were read without a document",
         "the handler builds its cursor from the open document",
-        "construct EngineQuery with with_doc_and_engine()",
+        "construct EngineQuery with with_doc_and_project()",
     );
     let content = document.analysis_content();
     let parse_result = ruby_prism::parse(content.as_bytes());

@@ -1,5 +1,6 @@
 //! Ruby project ownership, longest-root routing, and external provenance.
 use super::RubyLanguageServer;
+mod handle;
 mod load_sink;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
@@ -10,6 +11,7 @@ use crate::loader::context::{
 use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingRun, ProjectIndexingStatus};
+pub use handle::ProjectHandle;
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;
@@ -19,20 +21,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
-fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
-    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+fn new_orphan_project() -> ProjectHandle {
+    let project = ProjectHandle::new(AnalysisEngine::new());
     crate::loader::sources::stdlib::IndexerStdlib::new(
         crate::loader::file_processor::FileProcessor::new(),
         None,
     )
-    .index_core_runtime_constants(None, engine.clone())
+    .index_core_runtime_constants(None, project.shared_engine().clone())
     .expect_invariant(
         "the orphan engine could not seed embedded Ruby core runtime constants",
         "loose files require the same universal constant facts as project engines",
         "keep the embedded core RBS overlay parseable and register it before orphan documents",
     );
-    engine.write().resolve();
-    engine
+    project.update(AnalysisEngine::resolve);
+    project
 }
 
 #[derive(Clone, Default)]
@@ -68,7 +70,7 @@ pub struct Workspace {
     pub root_uri: Url,
     pub root_path: PathBuf,
     pub indexing_status: Arc<ProjectIndexingStatus>,
-    pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    handle: ProjectHandle,
     pub runtime: ProjectRuntimeState,
     pub(crate) extension_project_context_seed: Arc<RwLock<ProjectContextSeed>>,
     pub(crate) navigation_demands: NavigationDemandController,
@@ -99,7 +101,7 @@ impl Workspace {
             root_uri,
             indexing_status: Arc::new(ProjectIndexingStatus::new(root_path.clone())),
             root_path,
-            analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            handle: ProjectHandle::new(AnalysisEngine::new()),
             runtime: ProjectRuntimeState::default(),
             extension_project_context_seed,
             navigation_demands: NavigationDemandController::default(),
@@ -108,6 +110,11 @@ impl Workspace {
                 workspace_folder_uri,
             ]))),
         }
+    }
+
+    /// The project's semantic state.
+    pub fn handle(&self) -> &ProjectHandle {
+        &self.handle
     }
 
     #[doc(hidden)]
@@ -160,14 +167,14 @@ impl Workspace {
 #[derive(Clone)]
 pub(super) struct ProjectRegistry {
     workspaces: Arc<RwLock<Vec<Workspace>>>,
-    orphan_engine: Arc<RwLock<AnalysisEngine>>,
+    orphan: ProjectHandle,
     external_documents: Arc<RwLock<HashMap<Url, Url>>>,
 }
 impl Default for ProjectRegistry {
     fn default() -> Self {
         Self {
             workspaces: Arc::default(),
-            orphan_engine: new_orphan_analysis_engine(),
+            orphan: new_orphan_project(),
             external_documents: Arc::default(),
         }
     }
@@ -178,8 +185,8 @@ impl ProjectRegistry {
         self.workspaces.read()
     }
 
-    pub(super) fn orphan_engine(&self) -> &Arc<RwLock<AnalysisEngine>> {
-        &self.orphan_engine
+    pub(super) fn orphan_project(&self) -> &ProjectHandle {
+        &self.orphan
     }
 }
 
@@ -224,8 +231,9 @@ impl RubyLanguageServer {
 }
 
 impl RubyLanguageServer {
-    pub fn orphan_engine(&self) -> &Arc<RwLock<AnalysisEngine>> {
-        self.projects.orphan_engine()
+    /// The project that owns documents outside every registered project.
+    pub fn orphan_project(&self) -> &ProjectHandle {
+        self.projects.orphan_project()
     }
     /// Find the registered workspace whose `root_path` is the longest prefix
     /// of the given URI's filesystem path. Returns `None` if the URI does not
@@ -234,10 +242,10 @@ impl RubyLanguageServer {
         self.projects.workspace_for_uri(uri)
     }
 
-    /// Return the isolated semantic engine that owns a document URI. Files
-    /// outside registered workspaces use the orphan engine.
-    pub fn analysis_engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>> {
-        self.projects.analysis_engine_for_uri(uri)
+    /// The isolated project that owns a document URI. Files outside
+    /// registered workspaces belong to the orphan project.
+    pub fn project_for_uri(&self, uri: &Url) -> ProjectHandle {
+        self.projects.project_for_uri(uri)
     }
 
     /// Absolute gem/stdlib require roots for the workspace that owns `uri`.
@@ -281,15 +289,11 @@ impl RubyLanguageServer {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let engine = self.analysis_engine_for_uri(uri);
-        let kind = {
-            let engine = engine.read();
-            engine
-                .view()
-                .file_id(&path)
-                .and_then(|file_id| engine.view().file(file_id).map(|file| file.kind))
+        let kind = self.project_for_uri(uri).view(|view| {
+            view.file_id(&path)
+                .and_then(|file_id| view.file(file_id).map(|file| file.kind))
                 .unwrap_or(SourceKind::Excluded)
-        };
+        });
         self.extension_project_context_for_uri(uri, kind)
     }
 
@@ -387,13 +391,13 @@ impl RubyLanguageServer {
             .release_external_documents_for_project(project_root_uri)
     }
 
-    /// Snapshot every active project engine plus the orphan engine.
-    pub fn analysis_engines(&self) -> Vec<Arc<RwLock<AnalysisEngine>>> {
-        self.projects.analysis_engines()
+    /// Snapshot every active project plus the orphan project.
+    pub fn projects(&self) -> Vec<ProjectHandle> {
+        self.projects.projects()
     }
 
-    pub fn remove_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
-        self.projects.remove_file_from_other_engines(uri, owner)
+    pub fn remove_file_from_other_projects(&self, uri: &Url, owner: &ProjectHandle) {
+        self.projects.remove_file_from_other_projects(uri, owner)
     }
 
     pub fn open_or_update_analysis_file(
@@ -483,10 +487,10 @@ impl ProjectRegistry {
         Self::workspace_for_path(&self.workspaces.read(), &file_path).cloned()
     }
 
-    pub fn analysis_engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>> {
+    pub fn project_for_uri(&self, uri: &Url) -> ProjectHandle {
         self.analysis_workspace_for_uri(uri)
-            .map(|workspace| workspace.analysis_engine)
-            .unwrap_or_else(|| self.orphan_engine().clone())
+            .map(|workspace| workspace.handle)
+            .unwrap_or_else(|| self.orphan_project().clone())
     }
 
     pub fn dependency_require_paths_for_uri(&self, uri: &Url) -> Vec<PathBuf> {
@@ -525,13 +529,7 @@ impl ProjectRegistry {
         let path = uri.to_file_path().ok()?;
         let mut owner = None;
         for workspace in self.workspaces.read().iter() {
-            if workspace
-                .analysis_engine
-                .read()
-                .view()
-                .file_id(&path)
-                .is_none()
-            {
+            if workspace.handle.view(|view| view.file_id(&path)).is_none() {
                 continue;
             }
             if owner.is_some() {
@@ -560,30 +558,31 @@ impl ProjectRegistry {
             .retain(|_, retained_root| retained_root != project_root_uri);
     }
 
-    pub fn analysis_engines(&self) -> Vec<Arc<RwLock<AnalysisEngine>>> {
-        let mut engines = self
+    pub fn projects(&self) -> Vec<ProjectHandle> {
+        let mut projects = self
             .workspaces
             .read()
             .iter()
-            .map(|workspace| workspace.analysis_engine.clone())
+            .map(|workspace| workspace.handle.clone())
             .collect::<Vec<_>>();
-        engines.push(self.orphan_engine().clone());
-        engines
+        projects.push(self.orphan_project().clone());
+        projects
     }
 
     /// Remove a rehomed document from every project except its new owner.
-    pub fn remove_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
+    pub fn remove_file_from_other_projects(&self, uri: &Url, owner: &ProjectHandle) {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        for analysis_engine in self.analysis_engines() {
-            if Arc::ptr_eq(&analysis_engine, owner) {
+        for project in self.projects() {
+            if project.is_same(owner) {
                 continue;
             }
-            let mut engine = analysis_engine.write();
-            if let Some(file_id) = engine.view().file_id(&path) {
-                engine.remove(file_id, ruby_analysis::engine::ResolveMode::Immediate);
-            }
+            project.update(|engine| {
+                if let Some(file_id) = engine.view().file_id(&path) {
+                    engine.remove(file_id, ruby_analysis::engine::ResolveMode::Immediate);
+                }
+            });
         }
     }
 
@@ -604,13 +603,14 @@ impl ProjectRegistry {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        self.analysis_engine_for_uri(uri).write().register_file(
-            ruby_analysis::engine::SourceFileInput {
+        let content = source.into();
+        self.project_for_uri(uri).update(|engine| {
+            engine.register_file(ruby_analysis::engine::SourceFileInput {
                 path,
-                content: source.into(),
+                content,
                 kind,
-            },
-        )
+            })
+        })
     }
 
     pub fn remove_workspace(&self, root_uri: &Url) {

@@ -22,11 +22,11 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 use log::info;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::AnalysisEngine;
+
 use ruby_fast_lsp::environment::config::IndexingConfig;
 use ruby_fast_lsp::loader::file_processor::{FileProcessor, ProjectFileCollectionTiming};
 use ruby_fast_lsp::loader::sources::project::files::collect_project_files;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::{ProjectHandle, RubyLanguageServer};
 use tower_lsp::lsp_types::Url;
 
 fn main() -> Result<()> {
@@ -84,7 +84,8 @@ fn main() -> Result<()> {
     })?;
     let server = RubyLanguageServer::default();
     server.add_workspace(project_uri.clone());
-    let analysis_engine = server.analysis_engine_for_uri(&project_uri);
+    let project = server.project_for_uri(&project_uri);
+    let analysis_engine = project.shared_engine().clone();
     let processor = FileProcessor::new();
 
     let read_started = Instant::now();
@@ -97,18 +98,14 @@ fn main() -> Result<()> {
     let read_elapsed = read_started.elapsed();
 
     let registration_started = Instant::now();
-    {
-        let mut engine = analysis_engine.write();
+    project.update(|engine| {
         for (path, content) in &inputs {
             engine.register_file_borrowed(path.clone(), content, SourceKind::Project);
         }
-    }
+    });
     let registration_elapsed = registration_started.elapsed();
 
-    let known_namespaces = Arc::new({
-        let engine = analysis_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
-    });
+    let known_namespaces = Arc::new(project.view(|view| view.known_namespace_fqns()));
 
     let mut timing = ProjectFileCollectionTiming::default();
     timing.registration += registration_elapsed;
@@ -148,7 +145,7 @@ fn main() -> Result<()> {
     }
     let wall = collect_started.elapsed();
 
-    print_summary(files.len(), read_elapsed, wall, &timing, &analysis_engine);
+    print_summary(files.len(), read_elapsed, wall, &timing, &project);
     Ok(())
 }
 
@@ -157,12 +154,9 @@ fn print_summary(
     read_elapsed: Duration,
     wall: Duration,
     timing: &ProjectFileCollectionTiming,
-    analysis_engine: &parking_lot::RwLock<AnalysisEngine>,
+    project: &ProjectHandle,
 ) {
-    let method_count = {
-        let engine = analysis_engine.read();
-        engine.view().all_method_facts().len()
-    };
+    let method_count = project.view(|view| view.all_method_facts().len());
     info!(
         "[PERF][sync project collection] files={} wall={:?} read={:?} \
          cpu_total={:?} registration={:?} parse={:?} jruby_plan={:?} \

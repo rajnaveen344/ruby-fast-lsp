@@ -112,9 +112,9 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
             SourceKind::Project,
         )
         .expect("cold nil-call collection succeeds");
-    let engine = editor.server().analysis_engine_for_uri(&uri);
+    let engine = editor.server().project_for_uri(&uri);
     let file_id = {
-        let mut engine = engine.write();
+        let mut engine = engine.test_write();
         engine.resolve();
         let file_id = engine
             .view()
@@ -138,7 +138,7 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
         file_id
     };
     editor.open(filename, source).await;
-    assert_eq!(engine.read().view().file_id(&path), Some(file_id));
+    assert_eq!(engine.test_read().view().file_id(&path), Some(file_id));
     assert_eq!(
         nil_calls(&editor, filename).await,
         vec![expected_nil_call()]

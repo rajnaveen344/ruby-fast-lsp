@@ -27,16 +27,14 @@ pub async fn handle(
 
     let start_time = Instant::now();
     let mut symbols = Vec::new();
-    for analysis_engine in lang_server.analysis_engines() {
-        symbols.extend(
-            EngineQuery::with_engine(analysis_engine).with_view(|cursor| {
-                if query_text.is_empty() {
-                    top_level_symbols(cursor.view)
-                } else {
-                    search_symbols(cursor.view, &query_text)
-                }
-            }),
-        );
+    for project in lang_server.projects() {
+        symbols.extend(EngineQuery::with_project(project).with_view(|cursor| {
+            if query_text.is_empty() {
+                top_level_symbols(cursor.view)
+            } else {
+                search_symbols(cursor.view, &query_text)
+            }
+        }));
     }
     symbols.sort_by(|left, right| {
         (

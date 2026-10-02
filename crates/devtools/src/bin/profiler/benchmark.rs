@@ -191,11 +191,11 @@ pub(crate) async fn run_production_benchmark(
         measure_writer_wait(server, &uri, method_position, iterations)
     });
 
-    let analysis_engine = server.analysis_engine_for_uri(&uri);
+    let project = server.project_for_uri(&uri);
     let mut diagnostic_samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = Instant::now();
-        let _ = engine_diagnostics(&analysis_engine.read().view(), &uri);
+        let _ = project.view(|view| engine_diagnostics(view, &uri));
         diagnostic_samples.push(start.elapsed());
     }
 
@@ -228,11 +228,7 @@ pub(crate) async fn run_production_benchmark(
         edit_samples.push(start.elapsed());
     }
 
-    let engine_heap_bytes = analysis_engine
-        .read()
-        .view()
-        .estimated_memory_stats()
-        .total();
+    let engine_heap_bytes = project.view(|view| view.estimated_memory_stats().total());
     Ok(ProductionMeasurements {
         cold_indexing,
         edit: LatencySummary::from_samples(&edit_samples),
@@ -250,7 +246,7 @@ pub(crate) async fn run_production_benchmark(
 /// writer waits; mixed so each reader thread holds the lock for a different span.
 const WRITER_WAIT_READERS: usize = 3;
 
-/// Time to acquire the project engine's write lock while reader threads loop
+/// Time to start a project update while reader threads loop
 /// over hover, definition, and references. A request that holds its read guard
 /// across unrelated work, or reacquires it while a writer is queued, shows up
 /// here as writer wait (or as a deadlock).
@@ -260,7 +256,7 @@ fn measure_writer_wait(
     position: Position,
     iterations: usize,
 ) -> LatencySummary {
-    let engine = server.analysis_engine_for_uri(uri);
+    let project = server.project_for_uri(uri);
     let runtime = tokio::runtime::Handle::current();
     let stop = AtomicBool::new(false);
     let started_readers = AtomicUsize::new(0);
@@ -282,9 +278,7 @@ fn measure_writer_wait(
         for _ in 0..iterations {
             std::thread::sleep(Duration::from_micros(500));
             let start = Instant::now();
-            let guard = engine.write();
-            samples.push(start.elapsed());
-            drop(guard);
+            project.update(|_| samples.push(start.elapsed()));
         }
         stop.store(true, Ordering::SeqCst);
     });

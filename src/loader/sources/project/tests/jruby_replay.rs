@@ -116,7 +116,7 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
     let imported =
         ruby_analysis::core::FullyQualifiedName::try_from("Demo").expect("valid fixture FQN");
     assert!(
-        !AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        !AnalysisQuery::new(&workspace_state.handle().test_read())
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == imported),
@@ -136,7 +136,7 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
 
     assert_eq!(replayed, 1, "ordinary Ruby files must not be replayed");
     assert!(
-        AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        AnalysisQuery::new(&workspace_state.handle().test_read())
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == imported),
@@ -180,7 +180,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
     let active = FullyQualifiedName::try_from("Active").unwrap();
     let tail = FullyQualifiedName::try_from("Tail").unwrap();
     assert!(
-        !AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        !AnalysisQuery::new(&workspace_state.handle().test_read())
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == active),
@@ -197,7 +197,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
         .unwrap();
 
     {
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
         assert!(
             symbols.iter().any(|fact| fact.fqn == tail),
@@ -222,7 +222,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
         .unwrap();
     assert_eq!(replayed, 1);
     assert!(
-        AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        AnalysisQuery::new(&workspace_state.handle().test_read())
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == active),
@@ -299,7 +299,7 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
     );
     let second = FullyQualifiedName::try_from("Second").unwrap();
     assert!(
-        AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        AnalysisQuery::new(&workspace_state.handle().test_read())
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == second),
@@ -315,7 +315,7 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
     assert_eq!(replayed, 1);
     let first = FullyQualifiedName::try_from("First").unwrap();
     assert!(
-        AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        AnalysisQuery::new(&workspace_state.handle().test_read())
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == first),
@@ -400,9 +400,9 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
                 &server.load_context_for_project(indexer.workspace_root()),
             )
             .unwrap();
-        workspace_state.analysis_engine.write().resolve();
+        workspace_state.handle().test_write().resolve();
 
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let first_signature_path = signature_cache.path().join("com/example/First.rb");
         let first_signature_id = engine
             .view()
@@ -511,9 +511,9 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
             replayed, 0,
             "an ordinary Ruby include expression must not enter the JRuby replay set"
         );
-        workspace_state.analysis_engine.write().resolve();
+        workspace_state.handle().test_write().resolve();
 
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let ordinary_id = engine.view().file_id(&ordinary_path).expect_invariant(
             "ordinary include fixture was not indexed",
             "the exhaustive batch must register every selected source",
@@ -600,8 +600,8 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
             )
             .unwrap();
         assert_eq!(replayed, 2);
-        workspace_state.analysis_engine.write().resolve();
-        let engine = workspace_state.analysis_engine.read();
+        workspace_state.handle().test_write().resolve();
+        let engine = workspace_state.handle().test_read();
         let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
         assert!(symbols.iter().any(|fact| fact.fqn == first));
         assert!(symbols.iter().any(|fact| fact.fqn == second));

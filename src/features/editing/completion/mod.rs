@@ -60,7 +60,7 @@ pub async fn find_completion_at_position(
     let Some(document) = server.documents.read().get(&uri).cloned() else {
         return CompletionResponse::Array(Vec::new());
     };
-    EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+    EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))
         .with_view(|cursor| completion_at(cursor, &uri, position, context.as_ref()))
 }
 

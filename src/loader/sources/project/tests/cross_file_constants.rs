@@ -92,7 +92,7 @@ end
     )
     .await;
     {
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let file_id = engine.view().file_id(&first_consumer_path).unwrap();
         let assignment_start = u32::try_from(first_consumer.find("code =").unwrap()).unwrap();
         assert_eq!(
@@ -122,9 +122,9 @@ end
     indexer
         .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
-    workspace_state.analysis_engine.write().resolve();
+    workspace_state.handle().test_write().resolve();
 
-    let engine = workspace_state.analysis_engine.read();
+    let engine = workspace_state.handle().test_read();
     let query = AnalysisQuery::new(&engine);
     for parts in [
         vec!["BaseCodes", "RETRY"],
@@ -274,7 +274,7 @@ end
     let assignment_start = u32::try_from(consumer.find("tags =").unwrap()).unwrap();
     let assignment_end = assignment_start + u32::try_from("tags".len()).unwrap();
     {
-        let engine = workspace_state.analysis_engine.read();
+        let engine = workspace_state.handle().test_read();
         let file_id = engine.view().file_id(&consumer_path).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
@@ -303,9 +303,9 @@ end
     indexer
         .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
-    workspace_state.analysis_engine.write().resolve();
+    workspace_state.handle().test_write().resolve();
 
-    let engine = workspace_state.analysis_engine.read();
+    let engine = workspace_state.handle().test_read();
     let file_id = engine.view().file_id(&consumer_path).unwrap();
     let expected = ruby_analysis::core::RubyType::Class(FullyQualifiedName::constant(vec![
         ruby_analysis::core::RubyConstant::new("Registry").unwrap(),

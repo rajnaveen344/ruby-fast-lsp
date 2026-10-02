@@ -270,7 +270,7 @@ end
         vec![process],
         RubyMethod::new("fork").expect("fork must be a valid Ruby method"),
     );
-    let engine = editor.server().orphan_engine().read();
+    let engine = editor.server().orphan_project().test_read();
     let facts = AnalysisQuery::new(&engine).method_facts_for(&fork);
     assert!(
         facts.iter().any(|fact| {

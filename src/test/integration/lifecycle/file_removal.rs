@@ -55,7 +55,7 @@ fn registered_paths(editor: &FakeEditor, filename: &str) -> Vec<PathBuf> {
     let workspace = editor
         .workspace_for(filename)
         .expect("file has a workspace");
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     let mut paths = engine
         .view()
         .files()
@@ -70,7 +70,7 @@ fn result_fingerprint(editor: &FakeEditor, filename: &str) -> SemanticResultFing
     let workspace = editor
         .workspace_for(filename)
         .expect("file has a workspace");
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     engine.view().semantic_result_fingerprint()
 }
 
@@ -177,7 +177,7 @@ async fn deleted_then_recreated_file_matches_a_fresh_index() {
         .await;
     let original_id = {
         let workspace = editor.workspace_for(&gateway).unwrap();
-        let engine = workspace.analysis_engine.read();
+        let engine = workspace.handle().test_read();
         engine
             .view()
             .file_id(Path::new(&gateway))
@@ -211,7 +211,7 @@ async fn deleted_then_recreated_file_matches_a_fresh_index() {
         .await;
     let recreated_id = {
         let workspace = editor.workspace_for(&gateway).unwrap();
-        let engine = workspace.analysis_engine.read();
+        let engine = workspace.handle().test_read();
         engine
             .view()
             .file_id(Path::new(&gateway))
@@ -245,8 +245,8 @@ async fn a_rehomed_open_document_leaves_its_previous_project() {
     let path = PathBuf::from(&source);
     assert!(editor
         .server()
-        .orphan_engine()
-        .read()
+        .orphan_project()
+        .test_read()
         .view()
         .file_id(&path)
         .is_some());
@@ -271,8 +271,8 @@ async fn a_rehomed_open_document_leaves_its_previous_project() {
     assert!(
         editor
             .server()
-            .orphan_engine()
-            .read()
+            .orphan_project()
+            .test_read()
             .view()
             .file_id(&path)
             .is_none(),
@@ -285,7 +285,7 @@ fn is_registered(editor: &FakeEditor, filename: &str) -> bool {
     let workspace = editor
         .workspace_for(filename)
         .expect("file has a workspace");
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     engine.view().file_id(Path::new(filename)).is_some()
 }
 

@@ -107,8 +107,8 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
         .unwrap()
         .commit(&ctx);
 
-    let engine = server.analysis_engine_for_uri(&uri);
-    let engine = engine.read();
+    let engine = server.project_for_uri(&uri);
+    let engine = engine.test_read();
     let source_file = AnalysisQuery::new(&engine)
         .file_id(&source_path)
         .expect("project source must be registered");

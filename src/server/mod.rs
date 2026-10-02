@@ -19,7 +19,7 @@ pub use products::{
     ProjectRuntimeStatus, RuntimeProductSnapshot, RuntimeStatus, RuntimeStatusParams,
 };
 use projects::ProjectRegistry;
-pub use projects::Workspace;
+pub use projects::{ProjectHandle, Workspace};
 use watched_files::WatchedFileChanges;
 
 use crate::environment::config::RubyFastLspConfig;

@@ -65,7 +65,7 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
         .collect_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
 
-    let engine = workspace.analysis_engine.read();
+    let engine = workspace.handle().test_read();
     let open_file = engine.view().file_id(&open_path).unwrap();
     let closed_file = engine.view().file_id(&closed_path).unwrap();
     let query = AnalysisQuery::new(&engine);
@@ -79,9 +79,9 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
     );
     drop(engine);
 
-    workspace.analysis_engine.write().resolve();
+    workspace.handle().test_write().resolve();
     assert!(
-        !AnalysisQuery::new(&workspace.analysis_engine.read())
+        !AnalysisQuery::new(&workspace.handle().test_read())
             .references_in_file(closed_file)
             .is_empty(),
         "the final complete resolution must materialize the deferred closed-file candidate"
@@ -118,13 +118,13 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     }
 
     let caller_file = workspace_state
-        .analysis_engine
-        .read()
+        .handle()
+        .test_read()
         .view()
         .file_id(&caller_path)
         .unwrap();
     assert!(
-        !AnalysisQuery::new(&workspace_state.analysis_engine.read())
+        !AnalysisQuery::new(&workspace_state.handle().test_read())
             .resolved_reference_definition_ranges_at(caller_file, 19)
             .is_empty(),
         "the open-document pass must initially resolve the singleton method"
@@ -138,9 +138,9 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     indexer
         .collect_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
-    workspace_state.analysis_engine.write().resolve();
+    workspace_state.handle().test_write().resolve();
 
-    let engine = workspace_state.analysis_engine.read();
+    let engine = workspace_state.handle().test_read();
     let utility_file = engine.view().file_id(&utility_path).unwrap();
     assert!(
         engine
@@ -183,10 +183,10 @@ fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
         indexer
             .collect_project_facts(&server.load_context_for_project(indexer.workspace_root()))
             .unwrap();
-        workspace_state.analysis_engine.write().resolve();
+        workspace_state.handle().test_write().resolve();
         let fingerprint = workspace_state
-            .analysis_engine
-            .read()
+            .handle()
+            .test_read()
             .view()
             .semantic_result_fingerprint();
         fingerprint

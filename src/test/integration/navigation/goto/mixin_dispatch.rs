@@ -128,8 +128,8 @@ async fn mixin_dispatch_unknown_override_does_not_reuse_default_type() {
     let return_type = |editor: &FakeEditor| {
         let engine = editor
             .server()
-            .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
-        let engine = engine.read();
+            .project_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
+        let engine = engine.test_read();
         let feature = FullyQualifiedName::namespace(vec![RubyConstant::new("Feature").unwrap()]);
         let request = ruby_analysis::engine::lookup::MethodRequest::new(
             ruby_analysis::engine::lookup::LookupReceiver::Namespace(&feature),

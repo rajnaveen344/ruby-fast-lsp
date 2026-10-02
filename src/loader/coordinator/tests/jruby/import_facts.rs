@@ -122,10 +122,10 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             .collect::<Vec<_>>(),
     );
     {
-        let engine = server.analysis_engine_for_uri(
+        let engine = server.project_for_uri(
             &Url::from_file_path(signature_cache_root.join("com/example/Demo.rb")).unwrap(),
         );
-        let engine = engine.read();
+        let engine = engine.test_read();
         let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
         assert_eq!(
             symbols.iter().filter(|fact| fact.fqn == proxy).count(),
@@ -151,8 +151,8 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         .commit(&ctx);
 
     let alias = FullyQualifiedName::try_from("Admin::RichFixture").unwrap();
-    let engine = server.analysis_engine_for_uri(&uri);
-    let engine = engine.read();
+    let engine = server.project_for_uri(&uri);
+    let engine = engine.test_read();
     assert_eq!(
         AnalysisQuery::new(&engine).symbol_facts_for(&alias).len(),
         1,
@@ -293,9 +293,9 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         .get(&uri)
         .cloned()
         .expect("processed JRuby document must exist");
-    let query = crate::features::cursor::EngineQuery::with_doc_and_engine(
+    let query = crate::features::cursor::EngineQuery::with_doc_and_project(
         document,
-        server.analysis_engine_for_uri(&uri),
+        server.project_for_uri(&uri),
     );
     let indexed_types = AnalysisQuery::new(&engine).type_facts_in_file(source_file);
     let rich_constant = FullyQualifiedName::try_from("Admin::RICH").unwrap();
@@ -364,8 +364,8 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         .analyze_file_current_file_resolution_forced(&uri, "module Admin\nend\n", &ctx)
         .unwrap()
         .commit(&ctx);
-    let engine = server.analysis_engine_for_uri(&uri);
-    let engine = engine.read();
+    let engine = server.project_for_uri(&uri);
+    let engine = engine.test_read();
     assert!(
         AnalysisQuery::new(&engine)
             .symbol_facts_for(&alias)
@@ -506,8 +506,8 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
         signature_cache.join("fixtures/RichFixture.rb").is_file(),
         "adding a static import must materialize its signature without restarting the project"
     );
-    let engine = server.analysis_engine_for_uri(&uri);
-    let engine = engine.read();
+    let engine = server.project_for_uri(&uri);
+    let engine = engine.test_read();
     let source_file = AnalysisQuery::new(&engine).file_id(&source_path).unwrap();
     let constructor_offset =
         u32::try_from(added.find("RichFixture.new").unwrap() + "RichFixture.".len()).unwrap();
@@ -554,8 +554,8 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
         },
     )
     .await;
-    let engine = server.analysis_engine_for_uri(&uri);
-    let engine = engine.read();
+    let engine = server.project_for_uri(&uri);
+    let engine = engine.test_read();
     assert!(
         AnalysisQuery::new(&engine)
             .resolved_reference_definition_ranges_at(source_file, constructor_offset)

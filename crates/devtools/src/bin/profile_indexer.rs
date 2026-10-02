@@ -60,11 +60,8 @@ fn main() -> anyhow::Result<()> {
                 info!(
                     "Total method facts: {}",
                     server
-                        .analysis_engine_for_uri(&workspace_uri)
-                        .read()
-                        .view()
-                        .all_method_facts()
-                        .len()
+                        .project_for_uri(&workspace_uri)
+                        .view(|view| view.all_method_facts().len())
                 );
             }
             Err(e) => info!("Indexing failed: {}", e),

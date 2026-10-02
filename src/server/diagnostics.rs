@@ -65,10 +65,8 @@ impl RubyLanguageServer {
         uri: &Url,
     ) -> Option<ruby_analysis::engine::SourceFileSnapshot> {
         let path = uri.to_file_path().ok()?;
-        self.analysis_engine_for_uri(uri)
-            .read()
-            .view()
-            .source_snapshot_for_path(path)
+        self.project_for_uri(uri)
+            .view(|view| view.source_snapshot_for_path(path))
     }
 
     pub(crate) fn retain_external_linter_diagnostics(
@@ -122,10 +120,10 @@ impl RubyLanguageServer {
     /// Compose `syntax` with the document's engine and linter diagnostics and
     /// enqueue the result while holding one engine read guard.
     pub(crate) fn publish_document_diagnostics(&self, uri: Url, syntax: Vec<Diagnostic>) {
-        let analysis_engine = self.analysis_engine_for_uri(&uri);
-        let engine = analysis_engine.read();
-        let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
-        self.queue_diagnostics(uri, diagnostics);
+        self.project_for_uri(&uri).view(|view| {
+            let diagnostics = self.compose_diagnostics(view, &uri, syntax);
+            self.queue_diagnostics(uri, diagnostics);
+        });
     }
 
     pub(crate) fn clear_external_linter_diagnostics(&self, uri: &Url) {
@@ -204,15 +202,11 @@ impl RubyLanguageServer {
         let refresh_started = Instant::now();
         let mut open_files = 0usize;
         let mut closed_files = 0usize;
-        let mut updates = {
-            let engine = workspace.analysis_engine.read();
-            engine
-                .view()
-                .files()
+        let mut updates = workspace.handle().view(|view| {
+            view.files()
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
-                    let candidates = engine
-                        .view()
+                    let candidates = view
                         .diagnostic_facts_in_file(file.id)
                         .into_iter()
                         .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
@@ -233,14 +227,11 @@ impl RubyLanguageServer {
                             "inspect corrupt file-store iteration",
                         );
                     }
-                    let snapshot = engine
-                        .view()
-                        .source_snapshot_for_path(&file.path)
-                        .expect_invariant(
-                            "a registered project file has no source snapshot",
-                            "delayed facts require exact source identity",
-                            "keep file registration and snapshot lookup aligned",
-                        );
+                    let snapshot = view.source_snapshot_for_path(&file.path).expect_invariant(
+                        "a registered project file has no source snapshot",
+                        "delayed facts require exact source identity",
+                        "keep file registration and snapshot lookup aligned",
+                    );
                     let uri = Url::from_file_path(&file.path).expect_invariant(
                         "a project source cannot form a file URI",
                         "registered project paths must be absolute",
@@ -249,7 +240,7 @@ impl RubyLanguageServer {
                     Some((file.path.clone(), uri, file.id, snapshot, candidates))
                 })
                 .collect::<Vec<_>>()
-        };
+        });
         updates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
 
         for (path, uri, file_id, snapshot, candidates) in updates {
@@ -285,7 +276,7 @@ impl RubyLanguageServer {
                 let Some(owner) = ProjectRegistry::workspace_for_path(&workspaces, &path) else {
                     break 'commit;
                 };
-                if !Arc::ptr_eq(&workspace.analysis_engine, &owner.analysis_engine) {
+                if !workspace.handle().is_same(owner.handle()) {
                     break 'commit;
                 }
                 // Retain the immutable root identity through commit/publication:
@@ -302,54 +293,52 @@ impl RubyLanguageServer {
                 {
                     break 'commit;
                 }
-                let mut engine = workspace.analysis_engine.write();
-                let status = workspace.indexing_status.snapshot();
-                if status.generation != generation
-                    || matches!(
-                        status.phase,
-                        IndexingPhase::Cancelled | IndexingPhase::Failed
-                    )
-                    || engine.view().source_snapshot_for_path(&path) != Some(snapshot)
-                {
-                    break 'commit;
-                }
-                let Some(file) = engine
-                    .view()
-                    .file_id(&path)
-                    .and_then(|id| engine.view().file(id))
-                else {
-                    break 'commit;
-                };
-                if !file.kind.contributes_project_diagnostics()
-                    || document.as_ref().is_some_and(|doc| {
-                        !engine.view().file_content_matches(file.id, &doc.content)
-                    })
-                {
-                    break 'commit;
-                }
-                // Project targets can change without changing the consumer's
-                // source or dependency roots. Resolve candidates against the
-                // current engine only after acquiring the commit guard.
-                let requires = reresolve_unresolved_require_diagnostics(
-                    &path,
-                    project_root,
-                    &load_paths,
-                    &feature_index,
-                    Some(&engine),
-                    &candidates,
-                );
-                if !engine
-                    .replace_unresolved_require_diagnostics_if_source_snapshot(snapshot, requires)
-                {
-                    break 'commit;
-                }
-                // Closed files retain engine facts but receive no publication.
-                // Synchronous enqueue keeps edits and resolution outside the
-                // projection-to-publication interval.
-                if let Some(syntax) = syntax {
-                    let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
-                    self.queue_diagnostics(uri, diagnostics);
-                }
+                workspace.handle().update(|engine| {
+                    let status = workspace.indexing_status.snapshot();
+                    if status.generation != generation
+                        || matches!(
+                            status.phase,
+                            IndexingPhase::Cancelled | IndexingPhase::Failed
+                        )
+                        || engine.view().source_snapshot_for_path(&path) != Some(snapshot)
+                    {
+                        return;
+                    }
+                    let view = engine.view();
+                    let Some(file) = view.file_id(&path).and_then(|id| view.file(id)) else {
+                        return;
+                    };
+                    if !file.kind.contributes_project_diagnostics()
+                        || document
+                            .as_ref()
+                            .is_some_and(|doc| !view.file_content_matches(file.id, &doc.content))
+                    {
+                        return;
+                    }
+                    // Project targets can change without changing the consumer's
+                    // source or dependency roots. Resolve candidates against the
+                    // current engine only inside the commit update.
+                    let requires = reresolve_unresolved_require_diagnostics(
+                        &path,
+                        project_root,
+                        &load_paths,
+                        &feature_index,
+                        Some(&view),
+                        &candidates,
+                    );
+                    if !engine.replace_unresolved_require_diagnostics_if_source_snapshot(
+                        snapshot, requires,
+                    ) {
+                        return;
+                    }
+                    // Closed files retain engine facts but receive no publication.
+                    // Synchronous enqueue keeps edits and resolution outside the
+                    // projection-to-publication interval.
+                    if let Some(syntax) = syntax {
+                        let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
+                        self.queue_diagnostics(uri, diagnostics);
+                    }
+                });
             }
             #[cfg(test)]
             self.indexing
@@ -433,7 +422,7 @@ impl RubyLanguageServer {
             })
         };
         let mut open_uris = self.documents.open_uris();
-        open_uris.retain(|uri| Arc::ptr_eq(engine, &self.analysis_engine_for_uri(uri)));
+        open_uris.retain(|uri| self.project_for_uri(uri).owns_engine(engine));
         open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
         for uri in open_uris {
@@ -464,7 +453,8 @@ impl RubyLanguageServer {
                 if state != IndexingRunState::Current {
                     return state;
                 }
-                if !Arc::ptr_eq(engine, &self.analysis_engine_for_uri(&uri)) {
+                let project = self.project_for_uri(&uri);
+                if !project.owns_engine(engine) {
                     continue;
                 }
                 let Some(document) = self.documents.open_document(&uri) else {
@@ -479,30 +469,27 @@ impl RubyLanguageServer {
                         &parse, &document,
                     )
                 };
-                let engine = engine.read();
-                let Some(file) = engine
-                    .view()
-                    .file_id(&path)
-                    .and_then(|id| engine.view().file(id))
-                else {
-                    continue;
-                };
-                if !file.kind.contributes_project_diagnostics()
-                    || !engine
-                        .view()
-                        .file_content_matches(file.id, &document.content)
-                {
-                    continue;
-                }
-                let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
-                let state = run_state();
-                if state != IndexingRunState::Current {
-                    return state;
-                }
-                // Keep the engine read lock through the synchronous enqueue:
+                // Keep one project view through the synchronous enqueue:
                 // cross-file resolution cannot invalidate this projection in
                 // between. Empty results must clear errors resolved at startup.
-                self.queue_diagnostics(uri, diagnostics);
+                let stopped = project.view(|view| {
+                    let file = view.file_id(&path).and_then(|id| view.file(id))?;
+                    if !file.kind.contributes_project_diagnostics()
+                        || !view.file_content_matches(file.id, &document.content)
+                    {
+                        return None;
+                    }
+                    let diagnostics = self.compose_diagnostics(view, &uri, syntax);
+                    let state = run_state();
+                    if state != IndexingRunState::Current {
+                        return Some(state);
+                    }
+                    self.queue_diagnostics(uri.clone(), diagnostics);
+                    None
+                });
+                if let Some(state) = stopped {
+                    return state;
+                }
             }
             #[cfg(test)]
             self.indexing

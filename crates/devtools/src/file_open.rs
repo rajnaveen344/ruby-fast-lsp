@@ -215,14 +215,15 @@ pub fn run() {
 
 fn analysis_fact_count(server: &RubyLanguageServer) -> u64 {
     server
-        .analysis_engines()
+        .projects()
         .into_iter()
-        .map(|analysis_engine| {
-            let engine = analysis_engine.read();
-            stats::count(engine.view().all_symbol_facts().len())
-                + stats::count(engine.view().all_method_facts().len())
-                + engine.view().stats().get(AnalysisStat::References)
-                + stats::count(engine.view().all_type_facts().len())
+        .map(|project| {
+            project.view(|view| {
+                stats::count(view.all_symbol_facts().len())
+                    + stats::count(view.all_method_facts().len())
+                    + view.stats().get(AnalysisStat::References)
+                    + stats::count(view.all_type_facts().len())
+            })
         })
         .sum()
 }

@@ -151,7 +151,7 @@ impl FileProcessor {
                     &project_root,
                     &load_paths,
                     &feature_index,
-                    Some(&engine),
+                    Some(&engine.view()),
                 ));
             }
             RequireDiagnosticRoots::Processor => {
@@ -166,7 +166,7 @@ impl FileProcessor {
                     project_root,
                     &self.require_load_paths,
                     &self.require_feature_index,
-                    Some(&engine),
+                    Some(&engine.view()),
                 ));
             }
         }

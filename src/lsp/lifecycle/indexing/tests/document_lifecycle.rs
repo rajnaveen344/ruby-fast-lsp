@@ -1,6 +1,7 @@
 //! Open and change notifications keep engine facts and diagnostics current.
 
 use super::*;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[tokio::test]
@@ -22,7 +23,7 @@ async fn did_open_registers_source_in_analysis_engine() {
     .await;
 
     let path = uri.to_file_path().expect("file URI must convert to path");
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let file_id = engine
         .view()
         .file_id(path)
@@ -276,7 +277,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
     let kernel = RubyConstant::new("Kernel").expect("test constant must be valid");
     let puts = RubyMethod::new("puts").expect("test method must be valid");
     let puts_fqn = FullyQualifiedName::method(vec![kernel], puts);
-    server.orphan_engine().write().update(
+    server.orphan_project().test_write().update(
         file_id,
         FileAnalysis {
             methods: vec![MethodFact::new(
@@ -303,7 +304,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
     .await;
 
     let path = uri.to_file_path().expect("file URI must convert to path");
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let file_id = engine
         .view()
         .file_id(path)
@@ -347,7 +348,7 @@ async fn did_change_updates_analysis_engine_source() {
     .await;
 
     let path = uri.to_file_path().expect("file URI must convert to path");
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let file_id = engine
         .view()
         .file_id(path)
@@ -392,7 +393,7 @@ async fn did_change_replaces_analysis_engine_symbol_facts() {
 
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let account_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     assert!(
         engine.view().symbol_facts_for(&user_fqn).is_empty(),
         "stale User symbol facts must be removed after reindex"
@@ -573,7 +574,7 @@ async fn did_open_mirrors_reference_facts_into_analysis_engine() {
     .await;
 
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = AnalysisQuery::new(&engine);
     assert_eq!(query.reference_facts_for(&user_fqn).len(), 2);
 }
@@ -598,7 +599,7 @@ async fn did_open_mirrors_graph_facts_into_analysis_engine() {
 
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = AnalysisQuery::new(&engine);
     let edges = query.graph_edges_from(&user_fqn);
     assert_eq!(edges.len(), 1);
@@ -639,7 +640,7 @@ async fn did_open_refreshes_late_resolved_graph_facts_into_analysis_engine() {
 
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = AnalysisQuery::new(&engine);
     let edges = query.graph_edges_from(&user_fqn);
     assert!(
@@ -671,7 +672,7 @@ async fn did_open_mirrors_normalized_extend_edges_into_analysis_engine() {
     let user_singleton =
         FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = AnalysisQuery::new(&engine);
     let edges = query.graph_edges_from(&user_singleton);
     assert!(
@@ -710,7 +711,7 @@ async fn did_open_mirrors_method_facts_into_analysis_engine() {
         RubyMethod::new("find").expect("test method must be valid"),
     );
 
-    let engine = server.orphan_engine().read();
+    let engine = server.orphan_project().test_read();
     let query = AnalysisQuery::new(&engine);
     let name_facts = query.method_facts_for(&name_fqn);
     assert_eq!(name_facts.len(), 1);
