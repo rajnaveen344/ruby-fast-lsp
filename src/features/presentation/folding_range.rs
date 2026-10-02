@@ -1,6 +1,29 @@
+//! Folding ranges: multi-line classes, modules, methods, control flow,
+//! literals, and blocks.
+
+use log::debug;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_prism::Visit;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind, FoldingRangeParams};
+
+use crate::server::RubyLanguageServer;
+
+/// Handle `textDocument/foldingRange`.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: FoldingRangeParams,
+) -> LspResult<Option<Vec<FoldingRange>>> {
+    let uri = &params.text_document.uri;
+    let Some(document) = server.get_doc(uri) else {
+        debug!("Document not found for URI: {}", uri);
+        return Ok(None);
+    };
+    let parse_result = document.parse();
+    let mut visitor = FoldingRangeVisitor::new(&document);
+    visitor.visit(&parse_result.node());
+    Ok(Some(visitor.folding_ranges()))
+}
 
 /// Visitor that collects folding ranges from Ruby AST nodes
 pub struct FoldingRangeVisitor<'a> {
@@ -185,20 +208,4 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
         // Continue visiting child nodes
         ruby_prism::visit_block_node(self, node);
     }
-}
-
-/// Handles folding range requests for Ruby documents
-pub async fn handle_folding_range(
-    document: &RubyDocument,
-    _params: FoldingRangeParams,
-) -> Result<Option<Vec<FoldingRange>>, tower_lsp::jsonrpc::Error> {
-    // Parse the Ruby code
-    let parse_result = document.parse();
-    let node = parse_result.node();
-
-    // Create visitor and collect folding ranges
-    let mut visitor = FoldingRangeVisitor::new(document);
-    visitor.visit(&node);
-
-    Ok(Some(visitor.folding_ranges()))
 }

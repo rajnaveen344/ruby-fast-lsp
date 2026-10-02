@@ -7,6 +7,7 @@ use crate::environment::config::runtime::EffectiveRuntimeSelection;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::environment::runtime::version::parse_ruby_family;
+use crate::features::presentation::semantic_tokens;
 use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::{self, indexing};
 use crate::server::RubyLanguageServer;
@@ -143,11 +144,14 @@ pub async fn handle_initialize(
         code_lens_provider: Some(CodeLensOptions {
             resolve_provider: Some(false),
         }),
-        inlay_hint_provider: Some(OneOf::Right(
-            capabilities::presentation::inlay_hints::get_inlay_hints_capability(),
-        )),
+        inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
+            InlayHintOptions {
+                work_done_progress_options: WorkDoneProgressOptions::default(),
+                resolve_provider: Some(false),
+            },
+        ))),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-            capabilities::presentation::semantic_tokens::get_semantic_tokens_options(),
+            semantic_tokens::get_semantic_tokens_options(),
         )),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(true),

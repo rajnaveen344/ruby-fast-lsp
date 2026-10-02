@@ -8,9 +8,7 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{position_in_range, position_params, ranges_overlap};
-use crate::lsp::capabilities::presentation::code_lens::handle_code_lens;
-use crate::lsp::capabilities::presentation::hover::handle_hover;
-use crate::lsp::capabilities::presentation::inlay_hints::handle_inlay_hints;
+use crate::features::presentation::{code_lens, hover, inlay_hints};
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::Tag;
 use crate::test::harness::{get_hint_label, get_hint_tooltip};
@@ -19,7 +17,7 @@ use crate::test::harness::{get_hint_label, get_hint_tooltip};
 /// are exactly the tagged ones. A label may omit the `: `/` -> ` prefix.
 /// `<hint none>` forbids hints inside its range.
 pub(super) async fn check_hints(server: &RubyLanguageServer, uri: &Url, tags: &[&Tag]) {
-    let hints = handle_inlay_hints(
+    let hints = inlay_hints::handle(
         server,
         InlayHintParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -27,7 +25,9 @@ pub(super) async fn check_hints(server: &RubyLanguageServer, uri: &Url, tags: &[
             work_done_progress_params: WorkDoneProgressParams::default(),
         },
     )
-    .await;
+    .await
+    .expect("inlay hint request failed")
+    .unwrap_or_default();
 
     for tag in tags.iter().filter(|tag| tag.none) {
         let inside: Vec<String> = hints
@@ -113,7 +113,7 @@ fn describe_hint(hint: &InlayHint) -> String {
 /// `<lens title="...">`: a lens on the tagged line has exactly this title.
 /// `<lens none>` forbids lenses inside its range.
 pub(super) async fn check_lenses(server: &RubyLanguageServer, uri: &Url, tags: &[&Tag]) {
-    let lenses = handle_code_lens(
+    let lenses = code_lens::handle(
         server,
         CodeLensParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -122,6 +122,7 @@ pub(super) async fn check_lenses(server: &RubyLanguageServer, uri: &Url, tags: &
         },
     )
     .await
+    .expect("code lens request failed")
     .unwrap_or_default();
     let described: Vec<(u32, Option<&str>)> = lenses
         .iter()
@@ -168,7 +169,7 @@ pub(super) async fn check_hover(server: &RubyLanguageServer, uri: &Url, tag: &Ta
         "<hover> needs `label` or `contains`"
     );
     let position = tag.range.start;
-    let hover = handle_hover(
+    let hover = hover::handle(
         server,
         HoverParams {
             text_document_position_params: position_params(uri, position),
@@ -176,6 +177,7 @@ pub(super) async fn check_hover(server: &RubyLanguageServer, uri: &Url, tag: &Ta
         },
     )
     .await
+    .expect("hover request failed")
     .unwrap_or_else(|| panic!("expected a hover at {position:?}"));
     let content = hover_text(&hover.contents);
 

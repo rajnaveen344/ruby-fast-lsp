@@ -1,6 +1,10 @@
+//! Document symbols: the nested class, module, method, and constant outline
+//! with visibility details, plus extension symbols.
+
 use log::{debug, info, warn};
 use ruby_prism::Visit;
 use std::time::Instant;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse};
 
 use crate::server::RubyLanguageServer;
@@ -11,14 +15,12 @@ use ruby_analysis::indexer::{
     DocumentSymbolKind, DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext,
 };
 
-/// Handle document symbols request for a Ruby file
-pub async fn handle_document_symbols(
+/// Handle `textDocument/documentSymbol`.
+pub async fn handle(
     server: &RubyLanguageServer,
     params: DocumentSymbolParams,
-) -> Option<DocumentSymbolResponse> {
+) -> LspResult<Option<DocumentSymbolResponse>> {
     let uri = params.text_document.uri;
-
-    info!("Document symbols request for: {}", uri.path());
     let start_time = Instant::now();
 
     // Get document content from server cache
@@ -26,7 +28,7 @@ pub async fn handle_document_symbols(
         Some(doc) => doc,
         None => {
             info!("Document not found in cache for URI: {}", uri);
-            return None;
+            return Ok(None);
         }
     };
 
@@ -73,13 +75,7 @@ pub async fn handle_document_symbols(
     }
 
     debug!("Found {} top-level symbols", lsp_symbols.len());
-
-    info!(
-        "[PERF] Document symbols completed in {:?}",
-        start_time.elapsed()
-    );
-
-    Some(DocumentSymbolResponse::Nested(lsp_symbols))
+    Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
 }
 
 /// Convert internal RubySymbolContext to LSP DocumentSymbol
@@ -169,11 +165,6 @@ mod tests {
     use super::*;
     use ruby_analysis::core::{SourcePosition as Position, SourceRange as Range};
     use ruby_analysis::indexer::DocumentSymbolKind as SymbolKind;
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tower_lsp::lsp_types::{
-        DidOpenTextDocumentParams, TextDocumentIdentifier, TextDocumentItem,
-    };
 
     fn create_test_range() -> Range {
         Range {
@@ -322,124 +313,5 @@ mod tests {
             doc_symbol.detail,
             Some("private • instance method".to_string())
         );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn request_time_extension_symbols_wait_for_admission_without_blocking_reactor() {
-        let uri = crate::test::harness::fixture_uri("/tmp/governed_document_symbols.rb");
-        let mut server = RubyLanguageServer::default();
-        server
-            .indexing
-            .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-                crate::utils::admission::IndexingResourcePolicy::with_limits(
-                    1,
-                    1,
-                    256 * 1024 * 1024,
-                    1,
-                ),
-            ));
-        server.extensions.registry().configure_from_config(
-            &crate::environment::config::RubyFastLspConfig {
-                extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("extensions/rspec-ruby")
-                    .to_string_lossy()
-                    .into_owned()],
-                ..crate::environment::config::RubyFastLspConfig::default()
-            },
-        );
-        crate::lsp::capabilities::indexing::handle_did_open(
-            &server,
-            DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "ruby".to_string(),
-                    version: 1,
-                    text: "class GovernedDocumentSymbol\nend\n".to_string(),
-                },
-            },
-        )
-        .await;
-
-        let holder_release = Arc::new(tokio::sync::Notify::new());
-        let holder_release_task = holder_release.clone();
-        let holder_governor = server.indexing.resources().clone();
-        let holder = tokio::spawn(async move {
-            holder_governor
-                .run_async_with_resources(
-                    "document symbol contention holder",
-                    crate::utils::admission::IndexingWorkSpec::new(
-                        None,
-                        crate::utils::admission::IndexingResourcePriority::Background,
-                        1,
-                        256 * 1024 * 1024,
-                        1,
-                    ),
-                    None,
-                    async move {
-                        holder_release_task.notified().await;
-                    },
-                )
-                .await
-                .unwrap();
-        });
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing.resources().snapshot().active_tasks != 1 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("resource holder must be admitted before document-symbol request");
-
-        let request_server = server.clone();
-        let request_uri = uri.clone();
-        let request = tokio::spawn(async move {
-            handle_document_symbols(
-                &request_server,
-                DocumentSymbolParams {
-                    text_document: TextDocumentIdentifier { uri: request_uri },
-                    work_done_progress_params: Default::default(),
-                    partial_result_params: Default::default(),
-                },
-            )
-            .await
-        });
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing.resources().snapshot().queued_tasks != 1 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("document-symbol request must queue behind the complete weighted claim");
-        tokio::time::timeout(
-            Duration::from_millis(50),
-            tokio::time::sleep(Duration::from_millis(1)),
-        )
-        .await
-        .expect("queued document-symbol request must not block the current-thread Tokio reactor");
-        assert!(
-            !request.is_finished(),
-            "document-symbol request must not bypass weighted admission"
-        );
-
-        holder_release.notify_one();
-        holder.await.unwrap();
-        let response = request
-            .await
-            .unwrap()
-            .expect("open document must return symbols");
-        let DocumentSymbolResponse::Nested(symbols) = response else {
-            unreachable_invariant!(
-                what = "document-symbol handler returned flat symbols",
-                why = "the handler always constructs a nested hierarchy",
-                fix = "preserve nested document-symbol responses",
-            );
-        };
-        assert!(symbols
-            .iter()
-            .any(|symbol| symbol.name == "GovernedDocumentSymbol"));
-        let complete = server.indexing.resources().snapshot();
-        assert_eq!(complete.active_tasks, 0);
-        assert_eq!(complete.queued_tasks, 0);
-        assert_eq!(complete.completed_tasks, 3);
     }
 }

@@ -8,6 +8,10 @@ use crate::features::navigation::{
     call_hierarchy, definition, document_highlights, implementation, references, type_hierarchy,
     workspace_symbols,
 };
+use crate::features::presentation::{
+    code_lens, document_symbols, folding_range, hover, inlay_hints, selection_ranges,
+    semantic_tokens,
+};
 use crate::lsp::capabilities::debug::{self, LookupParams, LookupResponse};
 use crate::lsp::handlers::{notification, request};
 use crate::server::RubyLanguageServer;
@@ -232,7 +236,7 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: SelectionRangeParams,
     ) -> LspResult<Option<Vec<SelectionRange>>> {
-        request::handle_selection_ranges(self, params).await
+        selection_ranges::handle(self, params).await
     }
 
     async fn signature_help(
@@ -258,7 +262,7 @@ impl LanguageServer for RubyLanguageServer {
             params.text_document.uri.path()
         );
         let start_time = Instant::now();
-        let result = request::handle_semantic_tokens_full(self, params).await;
+        let result = semantic_tokens::handle(self, params).await;
 
         info!(
             "[PERF] Semantic tokens completed in {:?}",
@@ -278,7 +282,7 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_inlay_hints(self, params).await;
+        let result = inlay_hints::handle(self, params).await;
 
         info!("[PERF] Inlay hint completed in {:?}", start_time.elapsed());
 
@@ -324,14 +328,14 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_document_symbols(self, params).await;
+        let result = document_symbols::handle(self, params).await;
 
         info!(
             "[PERF] Document symbols completed in {:?}",
             start_time.elapsed()
         );
 
-        Ok(result)
+        result
     }
 
     async fn symbol(
@@ -395,7 +399,7 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_folding_range(self, params).await;
+        let result = folding_range::handle(self, params).await;
 
         info!(
             "[PERF] Folding range completed in {:?}",
@@ -412,7 +416,7 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_code_lens(self, params).await;
+        let result = code_lens::handle(self, params).await;
 
         info!("[PERF] CodeLens completed in {:?}", start_time.elapsed());
 
@@ -433,7 +437,7 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_hover(self, params).await;
+        let result = hover::handle(self, params).await;
 
         info!("[PERF] Hover completed in {:?}", start_time.elapsed());
 

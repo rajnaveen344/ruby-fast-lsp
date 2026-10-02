@@ -1,4 +1,5 @@
-//! Presentation: hover, inlay hints, code lenses, and document structure views.
+//! Presentation features: hover, inlay hints, code lenses, and document
+//! structure views (symbols, folding, selection ranges, semantic tokens).
 
 pub mod code_lens;
 pub mod document_symbols;

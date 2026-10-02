@@ -4,7 +4,8 @@ use crate::invariant::ExpectInvariant;
 use devtools::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
 use ruby_fast_lsp::features::cursor::EngineQuery;
 use ruby_fast_lsp::features::navigation::{definition, references};
-use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing, presentation::hover};
+use ruby_fast_lsp::features::presentation::hover;
+use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
 use std::time::{Duration, Instant};
@@ -139,7 +140,9 @@ pub(crate) async fn run_production_benchmark(
     let mut hover_samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = Instant::now();
-        let result = hover::handle_hover(server, hover_params()).await;
+        let result = hover::handle(server, hover_params())
+            .await
+            .expect("hover request failed");
         hover_samples.push(start.elapsed());
         invariant!(
             result.is_some(),

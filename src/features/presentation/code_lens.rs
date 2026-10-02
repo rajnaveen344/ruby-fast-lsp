@@ -1,24 +1,101 @@
-//! Code Lens Query — adapts engine mixin data to LSP code lens data.
-//!
-//! For each `module` definition in the file, this queries the engine for:
-//! - Mixin usages (include, prepend, extend)
-//! - Class definitions that include the module
-//!
-//! The capability handler converts `CodeLensData` → LSP `CodeLens`.
-
-use crate::invariant::ExpectInvariant;
-use std::collections::HashMap;
-
-use log::debug;
-use ruby_analysis::engine::{AnalysisQuery, MixinUsageKind};
-use ruby_analysis::indexer::module_definitions_for_lens;
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
-
-use ruby_analysis::core::FullyQualifiedName;
+//! Code lenses: for each `module` definition, the mixin usages (include,
+//! prepend, extend) and classes that include it, plus extension lenses.
 
 use crate::features::cursor::analysis_location::location_for_range;
 use crate::features::cursor::EngineQuery;
+use crate::invariant::ExpectInvariant;
+use crate::server::RubyLanguageServer;
 use crate::utils::lsp::lsp_position;
+use log::{debug, warn};
+use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::engine::{AnalysisQuery, MixinUsageKind};
+use ruby_analysis::indexer::module_definitions_for_lens;
+use std::collections::HashMap;
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::*;
+
+/// Handle `textDocument/codeLens`: module usage lenses plus extension lenses.
+pub async fn handle(
+    lang_server: &RubyLanguageServer,
+    params: CodeLensParams,
+) -> LspResult<Option<Vec<CodeLens>>> {
+    let uri = &params.text_document.uri;
+
+    // 1. Config check (server concern).
+    let modules_enabled = {
+        let config = lang_server.config.lock();
+        config.code_lens_modules_enabled.unwrap_or(true)
+    };
+    if !modules_enabled {
+        return Ok(Some(Vec::new()));
+    }
+
+    // 2. Get document content and Arc.
+    let (content, doc_arc) = {
+        let docs = lang_server.documents.read();
+        let doc_arc = match docs.get(uri) {
+            Some(arc) => arc.clone(),
+            None => {
+                debug!("Document not found for URI: {}", uri);
+                return Ok(Some(Vec::new()));
+            }
+        };
+        let doc = doc_arc.read();
+        (doc.content.clone(), doc_arc.clone())
+    };
+
+    // 3. Create query with document context.
+    let mut lenses: Vec<CodeLens> = {
+        // EngineQuery owns read-side query context. Destroy it before awaiting
+        // governed extension work so the LSP future remains Send.
+        let query =
+            EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine_for_uri(uri));
+        query
+            .get_code_lenses(uri)
+            .into_iter()
+            .map(to_lsp_code_lens)
+            .collect()
+    };
+    let project_root = lang_server
+        .analysis_workspace_for_uri(uri)
+        .map(|workspace| workspace.root_path);
+    match lang_server
+        .extensions
+        .registry()
+        .code_lenses_governed(
+            lang_server.indexing.resources().clone(),
+            project_root,
+            uri.as_str().to_string(),
+            content,
+            lang_server.extension_project_context_for_document(uri),
+        )
+        .await
+    {
+        Ok(extension_lenses) => lenses.extend(extension_lenses),
+        Err(error) => warn!(
+            "Extension code-lens request failed for {}: {error:#}",
+            uri.path()
+        ),
+    }
+    Ok(Some(lenses))
+}
+
+/// Convert a `CodeLensData` into an LSP `CodeLens`.
+fn to_lsp_code_lens(data: CodeLensData) -> CodeLens {
+    CodeLens {
+        range: data.range,
+        command: Some(Command {
+            title: data.title,
+            command: data.command,
+            arguments: Some(vec![
+                serde_json::to_value(data.uri.as_str()).unwrap(),
+                serde_json::to_value(data.target_position).unwrap(),
+                serde_json::to_value(data.locations).unwrap(),
+            ]),
+        }),
+        data: None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum MixinType {
@@ -34,7 +111,7 @@ enum MixinType {
 /// Domain result for a single code lens item.
 ///
 /// LSP-agnostic: holds the data needed to build a `CodeLens`, but the final
-/// `Command` construction happens in the capability wrapper.
+/// `Command` construction happens in `to_lsp_code_lens`.
 pub struct CodeLensData {
     /// LSP range covering the `module` keyword through the constant name.
     pub range: Range,

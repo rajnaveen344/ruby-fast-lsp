@@ -1,17 +1,25 @@
+//! Selection ranges: the enclosing syntax chain at each requested position.
+
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::indexer::selection_range_chains;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{SelectionRange, SelectionRangeParams};
 
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::{lsp_text_range, source_position};
 
-pub async fn handle_selection_ranges(
+/// Handle `textDocument/selectionRange`.
+pub async fn handle(
     server: &RubyLanguageServer,
     params: SelectionRangeParams,
-) -> Option<Vec<SelectionRange>> {
-    let document = {
-        let docs = server.documents.read();
-        docs.get(&params.text_document.uri)?.clone()
+) -> LspResult<Option<Vec<SelectionRange>>> {
+    let Some(document) = server
+        .documents
+        .read()
+        .get(&params.text_document.uri)
+        .cloned()
+    else {
+        return Ok(None);
     };
     let document = document.read();
     let offsets = params
@@ -25,12 +33,12 @@ pub async fn handle_selection_ranges(
         &offsets,
     );
 
-    Some(
+    Ok(Some(
         chains
             .into_iter()
             .map(|chain| selection_range_from_chain(&document, chain))
             .collect(),
-    )
+    ))
 }
 
 fn selection_range_from_chain(

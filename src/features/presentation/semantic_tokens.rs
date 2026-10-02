@@ -1,10 +1,13 @@
+//! Semantic tokens: the token legend and full-document token stream.
+
 use log::{debug, info};
 use ruby_prism::Visit;
 use std::time::Instant;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult,
-    Url, WorkDoneProgressOptions,
+    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
+    SemanticTokensResult, Url, WorkDoneProgressOptions,
 };
 
 use crate::server::RubyLanguageServer;
@@ -13,6 +16,7 @@ use ruby_analysis::indexer::{
     TOKEN_TYPES,
 };
 
+/// The semantic-token capability advertised in `initialize`.
 pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
     SemanticTokensOptions {
         work_done_progress_options: WorkDoneProgressOptions {
@@ -30,7 +34,15 @@ pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
     }
 }
 
-pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> SemanticTokensResult {
+/// Handle `textDocument/semanticTokens/full`.
+pub async fn handle(
+    server: &RubyLanguageServer,
+    params: SemanticTokensParams,
+) -> LspResult<Option<SemanticTokensResult>> {
+    Ok(Some(full_tokens(server, params.text_document.uri)))
+}
+
+fn full_tokens(server: &RubyLanguageServer, uri: Url) -> SemanticTokensResult {
     let total_start = Instant::now();
 
     // Get the document from server cache

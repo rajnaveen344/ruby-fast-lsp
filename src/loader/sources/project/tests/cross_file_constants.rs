@@ -207,7 +207,7 @@ end
     );
     drop(engine);
 
-    let hints = crate::lsp::capabilities::presentation::inlay_hints::handle_inlay_hints(
+    let hints = crate::features::presentation::inlay_hints::handle(
         &server,
         InlayHintParams {
             work_done_progress_params: Default::default(),
@@ -217,7 +217,9 @@ end
             range: Range::new(Position::new(0, 0), Position::new(100, 0)),
         },
     )
-    .await;
+    .await
+    .unwrap()
+    .unwrap();
     let assignment_lines = first_consumer
         .lines()
         .enumerate()
@@ -331,7 +333,7 @@ end
     );
     drop(engine);
 
-    let hints = crate::lsp::capabilities::presentation::inlay_hints::handle_inlay_hints(
+    let hints = crate::features::presentation::inlay_hints::handle(
         &server,
         InlayHintParams {
             work_done_progress_params: Default::default(),
@@ -341,7 +343,9 @@ end
             range: Range::new(Position::new(0, 0), Position::new(20, 0)),
         },
     )
-    .await;
+    .await
+    .unwrap()
+    .unwrap();
     assert!(
         hints.iter().any(|hint| {
             hint.position.line == 4 && crate::test::harness::get_hint_label(hint) == ": Registry"

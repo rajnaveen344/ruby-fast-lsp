@@ -424,7 +424,7 @@ Delete this file when the last task is done. Git history keeps the record.
         definition, implementation, references, highlights, hierarchies,
         workspace symbols, and namespace tree into `features/navigation/`.
         One commit per two or three features.
-  - [ ] C3c. Presentation: hover, inlay hints, code lens, document symbols,
+  - [x] C3c. Presentation: hover, inlay hints, code lens, document symbols,
         folding, selection ranges, and semantic tokens into
         `features/presentation/`.
   - [ ] C3d. Editing: completion, signature help, formatting, rename, and code
