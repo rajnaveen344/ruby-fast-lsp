@@ -332,7 +332,9 @@ gate. A newer batch invalidates the older waiter and overwrites each URI with
 its final event before deterministic URI-order processing. Shutdown invalidates
 the pending batch. Ordinary closed project/RBS files use exact per-file
 replacement; a deleted or newly excluded file is removed from its project, so
-a later file at the same path starts from a fresh identity. Gemfile/lockfile, auto-runtime marker, trusted project-extension,
+a later file at the same path starts from a fresh identity. Open project
+documents in an affected project are then reprocessed and their diagnostics
+republished. Gemfile/lockfile, auto-runtime marker, trusted project-extension,
 and owning JRuby classpath inputs create one scheduler-owned replacement
 generation for the affected project, clearing its runtime/external semantic
 state only after the prior generation releases project admission.

@@ -780,13 +780,14 @@ pub async fn handle_watched_files_changed(
             &processor,
             server,
             &changed_dependency_uris,
-        );
+        )
+        .await;
         server.invalidate_namespace_tree_cache_debounced();
         debug!("Reindexed watched project files and invalidated namespace tree cache");
     }
 }
 
-fn refresh_open_project_files_for_dependency_engines(
+async fn refresh_open_project_files_for_dependency_engines(
     processor: &FileProcessor,
     server: &RubyLanguageServer,
     changed_uris: &[Url],
@@ -826,15 +827,22 @@ fn refresh_open_project_files_for_dependency_engines(
     open_project_files.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
     for (uri, content) in open_project_files {
-        if let Err(error) = processor.process_file_current_file_resolution_forced(
+        match processor.process_file_current_file_resolution_forced(
             &uri,
             &content,
             &server.load_context_for_uri(&uri),
         ) {
-            log::warn!(
+            Ok(result) => {
+                let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
+                let mut diagnostics = result.diagnostics;
+                diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
+                server.publish_diagnostics(uri, diagnostics).await;
+            }
+            Err(error) => log::warn!(
                 "Failed to refresh open project consumer after dependency change: {}: {error}",
                 uri.path()
-            );
+            ),
         }
     }
 }

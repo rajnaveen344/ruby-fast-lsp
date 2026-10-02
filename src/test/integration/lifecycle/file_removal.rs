@@ -1,5 +1,6 @@
 //! A deleted file leaves the project: its diagnostics are cleared, other
 //! files stop resolving into it, and a recreated file starts from fresh facts.
+//! Open consumers of a changed or deleted closed file are republished.
 
 use std::path::{Path, PathBuf};
 
@@ -127,6 +128,38 @@ async fn watched_delete_clears_diagnostics_and_cross_file_targets() {
         registered_paths(&editor, &billing),
         vec![PathBuf::from(&billing)]
     );
+    let consumer = editor.diagnostics(&billing).await;
+    assert!(
+        consumer
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("\"gateway\"")),
+        "the open consumer reports its require of the deleted file: {consumer:?}"
+    );
+}
+
+#[tokio::test]
+async fn watched_change_to_a_closed_definition_republishes_open_consumers() {
+    let project = Project::new();
+    let mut editor = project.editor().await;
+    let invoice = project.write("invoice.rb", "class Invoice\n  CURRENCY = \"USD\"\nend\n");
+    editor
+        .watched_file_changed(&invoice, FileChangeType::CREATED)
+        .await;
+    let consumer = "class Billing\n  def charge\n    Invoice::CURRENCY\n  end\nend\n";
+    let billing = project.write("billing.rb", consumer);
+    editor.open(&billing, consumer).await;
+    assert_eq!(editor.diagnostics(&billing).await, Vec::new());
+
+    project.write("invoice.rb", "class Invoice\nend\n");
+    editor
+        .watched_file_changed(&invoice, FileChangeType::CHANGED)
+        .await;
+    editor
+        .check(
+            &billing,
+            "class Billing\n  def charge\n    <err code=\"unresolved-constant\">Invoice::CURRENCY</err>\n  end\nend\n",
+        )
+        .await;
 }
 
 #[tokio::test]
