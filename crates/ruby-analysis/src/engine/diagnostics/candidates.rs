@@ -173,17 +173,17 @@ impl Project {
             vec![ruby_const],
             crate::core::NamespaceKind::Instance,
         );
-        if !self.has_graph_node(&ns_fqn) && !self.view().has_symbol_facts(&ns_fqn) {
+        if !self.view().has_graph_node(&ns_fqn) && !self.view().has_symbol_facts(&ns_fqn) {
             return true;
         }
 
         let mut current = ns_fqn;
         let mut visited = std::collections::HashSet::new();
         while visited.insert(current.clone()) {
-            if self.superclass_is_ambiguous(&current) {
+            if self.view().superclass_is_ambiguous(&current) {
                 return true;
             }
-            let Some(edge) = self.proven_superclass_edge(&current) else {
+            let Some(edge) = self.view().proven_superclass_edge(&current) else {
                 break;
             };
             let last = edge.target.namespace_parts().last().map(|c| c.to_string());

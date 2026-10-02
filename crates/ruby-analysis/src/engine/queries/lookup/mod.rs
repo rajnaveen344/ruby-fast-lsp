@@ -139,7 +139,7 @@ impl<'a> View<'a> {
 
     pub fn module_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
         let mut usages = Vec::new();
-        for edge in self.engine.all_graph_edges() {
+        for edge in self.all_graph_edges() {
             if edge.target.namespace_parts() != module_fqn.namespace_parts() {
                 continue;
             }
@@ -174,7 +174,7 @@ impl<'a> View<'a> {
             }
             visited.push(target.clone());
 
-            for edge in self.engine.all_graph_edges() {
+            for edge in self.all_graph_edges() {
                 if !matches!(
                     edge.kind,
                     GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
@@ -190,7 +190,7 @@ impl<'a> View<'a> {
                     continue;
                 }
 
-                let nodes = self.engine.graph_nodes_for(&edge.source);
+                let nodes = self.graph_nodes_for(&edge.source);
                 if nodes.iter().any(|node| node.kind == GraphNodeKind::Class) {
                     result.extend(
                         nodes

@@ -9,7 +9,7 @@ use crate::engine::queries::View;
 
 impl<'a> View<'a> {
     pub fn namespace_node_kind(&self, namespace_fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        self.engine.latest_graph_node_kind(namespace_fqn)
+        self.latest_graph_node_kind(namespace_fqn)
     }
 
     pub fn namespace_exists(&self, namespace_fqn: &FullyQualifiedName) -> bool {

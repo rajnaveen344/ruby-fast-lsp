@@ -194,8 +194,8 @@ fn removal_matches_a_project_that_never_added_the_file() {
     );
     assert_eq!(removed.stats(), never_added.stats());
     assert_eq!(
-        removed.unresolved_graph_edges().len(),
-        never_added.unresolved_graph_edges().len()
+        removed.view().unresolved_graph_edges().len(),
+        never_added.view().unresolved_graph_edges().len()
     );
 }
 
@@ -218,9 +218,10 @@ fn edges_into_the_removed_file_become_unresolved_again() {
             .filter(|fact| fact.code == "unresolved-constant")
             .count()
     };
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
     assert_eq!(unresolved_constants(&engine), 0);
     assert!(engine
+        .view()
         .graph_edges_from(&child)
         .iter()
         .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == namespace("Parent")));
@@ -229,12 +230,14 @@ fn edges_into_the_removed_file_become_unresolved_again() {
     assert!(engine.remove(parent_file, ResolveMode::Immediate));
     assert!(engine.query_cache_identity().1 > revision);
 
-    assert_eq!(engine.unresolved_graph_edges().len(), 2);
+    assert_eq!(engine.view().unresolved_graph_edges().len(), 2);
     assert!(!engine
+        .view()
         .graph_edges_from(&child)
         .iter()
         .any(|edge| { edge.target == namespace("Parent") || edge.target == namespace("Mixin") }));
     assert!(!engine
+        .view()
         .graph_edges_from(&child.to_singleton_namespace().unwrap())
         .iter()
         .any(|edge| edge.kind == GraphEdgeKind::Superclass));

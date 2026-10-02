@@ -24,6 +24,7 @@ use crate::invariant::ExpectInvariant;
 use super::decls::DeclIndex;
 use super::names::Names;
 use super::Project;
+use crate::engine::View;
 
 #[derive(Debug, Default)]
 pub(in crate::engine) struct Hierarchy {
@@ -530,46 +531,6 @@ impl Project {
 }
 
 impl Project {
-    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
-        let Some(fqn_id) = self.names.fqn_id(fqn) else {
-            return Vec::new();
-        };
-        self.hierarchy
-            .graph
-            .nodes_for(fqn_id)
-            .into_iter()
-            .map(|fact| expand_node_fact(&self.names, fact))
-            .collect()
-    }
-
-    pub fn has_graph_node(&self, fqn: &FullyQualifiedName) -> bool {
-        self.hierarchy.has_node(&self.names, fqn)
-    }
-
-    pub fn first_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        let fqn_id = self.names.fqn_id(fqn)?;
-        self.hierarchy.graph.first_node_kind(fqn_id)
-    }
-
-    pub fn latest_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        let fqn_id = self.names.fqn_id(fqn)?;
-        self.hierarchy.graph.latest_node_kind(fqn_id)
-    }
-
-    pub fn graph_node_has_kind(&self, fqn: &FullyQualifiedName, kind: GraphNodeKind) -> bool {
-        self.hierarchy.node_has_kind(&self.names, fqn, kind)
-    }
-
-    pub fn first_graph_node_definition(
-        &self,
-        fqn: &FullyQualifiedName,
-    ) -> Option<(GraphNodeKind, TextRange)> {
-        let fqn_id = self.names.fqn_id(fqn)?;
-        self.hierarchy.graph.first_node_definition(fqn_id)
-    }
-}
-
-impl Project {
     pub(in crate::engine) fn resolve_constant_reference(
         &self,
         parts: &[RubyConstant],
@@ -607,18 +568,6 @@ impl Project {
         self.hierarchy.unresolved_lookup_edge_sources(&self.names)
     }
 
-    pub fn graph_edges_from(&self, source: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
-        let Some(source_id) = self.names.fqn_id(source) else {
-            return Vec::new();
-        };
-        self.hierarchy
-            .graph
-            .edges_from(source_id)
-            .into_iter()
-            .map(|fact| expand_edge_fact(&self.names, fact))
-            .collect()
-    }
-
     pub(in crate::engine) fn graph_stored_edges_from_kind(
         &self,
         source: &FullyQualifiedName,
@@ -641,17 +590,144 @@ impl Project {
     }
 }
 
-impl Project {
+impl<'a> View<'a> {
+    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
+        let Some(fqn_id) = self.engine.names.fqn_id(fqn) else {
+            return Vec::new();
+        };
+        self.engine
+            .hierarchy
+            .graph
+            .nodes_for(fqn_id)
+            .into_iter()
+            .map(|fact| expand_node_fact(&self.engine.names, fact))
+            .collect()
+    }
+
+    pub fn has_graph_node(&self, fqn: &FullyQualifiedName) -> bool {
+        self.engine.hierarchy.has_node(&self.engine.names, fqn)
+    }
+
+    pub fn first_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        let fqn_id = self.engine.names.fqn_id(fqn)?;
+        self.engine.hierarchy.graph.first_node_kind(fqn_id)
+    }
+
+    pub fn latest_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        let fqn_id = self.engine.names.fqn_id(fqn)?;
+        self.engine.hierarchy.graph.latest_node_kind(fqn_id)
+    }
+
+    pub fn graph_node_has_kind(&self, fqn: &FullyQualifiedName, kind: GraphNodeKind) -> bool {
+        self.engine
+            .hierarchy
+            .node_has_kind(&self.engine.names, fqn, kind)
+    }
+
+    pub fn first_graph_node_definition(
+        &self,
+        fqn: &FullyQualifiedName,
+    ) -> Option<(GraphNodeKind, TextRange)> {
+        let fqn_id = self.engine.names.fqn_id(fqn)?;
+        self.engine.hierarchy.graph.first_node_definition(fqn_id)
+    }
+
+    pub fn graph_edges_from(&self, source: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
+        let Some(source_id) = self.engine.names.fqn_id(source) else {
+            return Vec::new();
+        };
+        self.engine
+            .hierarchy
+            .graph
+            .edges_from(source_id)
+            .into_iter()
+            .map(|fact| expand_edge_fact(&self.engine.names, fact))
+            .collect()
+    }
+
     /// Returns the one superclass that is statically proven for `source`.
     /// Explicit declarations outrank per-declaration implicit `Object` facts,
     /// but two distinct explicit targets or any unresolved explicit target
     /// make the superclass unknown. Duplicate declarations of the same target
     /// remain one semantic proof while retaining every file-owned fact.
     pub fn proven_superclass_edge(&self, source: &FullyQualifiedName) -> Option<GraphEdgeFact> {
-        self.proven_superclass_stored_edge(source)
-            .map(|edge| expand_edge_fact(&self.names, edge))
+        self.engine
+            .proven_superclass_stored_edge(source)
+            .map(|edge| expand_edge_fact(&self.engine.names, edge))
     }
 
+    pub fn superclass_is_ambiguous(&self, source: &FullyQualifiedName) -> bool {
+        self.engine.names.fqn_id(source).is_some_and(|source_id| {
+            self.engine.hierarchy.graph.superclass_resolution(source_id)
+                == StoredSuperclassResolution::Ambiguous
+        })
+    }
+
+    pub fn graph_edges_to(&self, target: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
+        let Some(target_id) = self.engine.names.fqn_id(target) else {
+            return Vec::new();
+        };
+        self.engine
+            .hierarchy
+            .graph
+            .edges_to(target_id)
+            .into_iter()
+            .map(|fact| expand_edge_fact(&self.engine.names, fact))
+            .collect()
+    }
+
+    pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
+        self.engine
+            .hierarchy
+            .graph
+            .nodes_in_file(file_id)
+            .into_iter()
+            .map(|fact| expand_node_fact(&self.engine.names, fact))
+            .collect()
+    }
+
+    pub fn graph_edges_in_file(&self, file_id: SourceFileId) -> Vec<GraphEdgeFact> {
+        self.engine
+            .hierarchy
+            .graph
+            .edges_in_file(file_id)
+            .into_iter()
+            .map(|fact| expand_edge_fact(&self.engine.names, fact))
+            .collect()
+    }
+
+    pub fn all_graph_nodes(&self) -> Vec<GraphNodeFact> {
+        self.engine
+            .hierarchy
+            .graph
+            .all_nodes()
+            .into_iter()
+            .map(|fact| expand_node_fact(&self.engine.names, fact))
+            .collect()
+    }
+
+    pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
+        self.engine
+            .hierarchy
+            .graph
+            .all_edges()
+            .into_iter()
+            .map(|fact| expand_edge_fact(&self.engine.names, fact))
+            .collect()
+    }
+
+    pub fn unresolved_graph_edges(&self) -> Vec<UnresolvedGraphEdgeFact> {
+        self.engine
+            .hierarchy
+            .graph
+            .unresolved_edges()
+            .into_iter()
+            .map(|edge| expand_unresolved_edge_fact(&self.engine.names, edge))
+            .collect()
+    }
+}
+
+impl Project {
     pub(in crate::engine) fn proven_superclass_stored_edge(
         &self,
         source: &FullyQualifiedName,
@@ -664,13 +740,6 @@ impl Project {
             StoredSuperclassResolution::Unique(edge) => Some(edge),
             StoredSuperclassResolution::Missing | StoredSuperclassResolution::Ambiguous => None,
         }
-    }
-
-    pub fn superclass_is_ambiguous(&self, source: &FullyQualifiedName) -> bool {
-        self.names.fqn_id(source).is_some_and(|source_id| {
-            self.hierarchy.graph.superclass_resolution(source_id)
-                == StoredSuperclassResolution::Ambiguous
-        })
     }
 
     fn superclass_source_has_unresolved_explicit_edge(&self, source: &FullyQualifiedName) -> bool {
@@ -689,63 +758,6 @@ impl Project {
         self.hierarchy
             .graph
             .has_unresolved_explicit_superclass(source_id)
-    }
-
-    pub fn graph_edges_to(&self, target: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
-        let Some(target_id) = self.names.fqn_id(target) else {
-            return Vec::new();
-        };
-        self.hierarchy
-            .graph
-            .edges_to(target_id)
-            .into_iter()
-            .map(|fact| expand_edge_fact(&self.names, fact))
-            .collect()
-    }
-
-    pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
-        self.hierarchy
-            .graph
-            .nodes_in_file(file_id)
-            .into_iter()
-            .map(|fact| expand_node_fact(&self.names, fact))
-            .collect()
-    }
-
-    pub fn graph_edges_in_file(&self, file_id: SourceFileId) -> Vec<GraphEdgeFact> {
-        self.hierarchy
-            .graph
-            .edges_in_file(file_id)
-            .into_iter()
-            .map(|fact| expand_edge_fact(&self.names, fact))
-            .collect()
-    }
-
-    pub fn all_graph_nodes(&self) -> Vec<GraphNodeFact> {
-        self.hierarchy
-            .graph
-            .all_nodes()
-            .into_iter()
-            .map(|fact| expand_node_fact(&self.names, fact))
-            .collect()
-    }
-
-    pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
-        self.hierarchy
-            .graph
-            .all_edges()
-            .into_iter()
-            .map(|fact| expand_edge_fact(&self.names, fact))
-            .collect()
-    }
-
-    pub fn unresolved_graph_edges(&self) -> Vec<UnresolvedGraphEdgeFact> {
-        self.hierarchy
-            .graph
-            .unresolved_edges()
-            .into_iter()
-            .map(|edge| expand_unresolved_edge_fact(&self.names, edge))
-            .collect()
     }
 
     pub(super) fn retry_unresolved_graph_edges(&mut self) {

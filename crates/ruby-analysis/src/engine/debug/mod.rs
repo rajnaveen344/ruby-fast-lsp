@@ -87,9 +87,8 @@ impl<'a> View<'a> {
         let mut nodes = HashMap::new();
 
         for (fqn, kind) in &nodes_by_fqn {
-            let outgoing = self.engine.graph_edges_from(fqn);
+            let outgoing = self.graph_edges_from(fqn);
             let superclass = self
-                .engine
                 .proven_superclass_edge(fqn)
                 .map(|edge| fqn_to_key(&edge.target));
             let includes = edge_targets(&outgoing, GraphEdgeKind::Include);
@@ -255,7 +254,7 @@ fn fqn_to_key(fqn: &FullyQualifiedName) -> String {
 
 fn graph_nodes_by_fqn(engine: &Project) -> HashMap<FullyQualifiedName, GraphNodeKind> {
     let mut nodes = HashMap::new();
-    for node in engine.all_graph_nodes() {
+    for node in engine.view().all_graph_nodes() {
         nodes.entry(node.fqn).or_insert(node.kind);
     }
     nodes
@@ -275,6 +274,7 @@ fn reverse_edge_sources(
     kind: GraphEdgeKind,
 ) -> Vec<String> {
     let mut result = engine
+        .view()
         .all_graph_edges()
         .into_iter()
         .filter(|edge| edge.kind == kind && edge.target == *target)
@@ -289,7 +289,7 @@ fn included_by_classes(engine: &Project, module_fqn: &FullyQualifiedName) -> Vec
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
 
-    for edge in engine.all_graph_edges() {
+    for edge in engine.view().all_graph_edges() {
         if edge.target == *module_fqn
             && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
             && visited.insert(edge.source.clone())
@@ -302,7 +302,7 @@ fn included_by_classes(engine: &Project, module_fqn: &FullyQualifiedName) -> Vec
         match node_kind(engine, &current) {
             Some(GraphNodeKind::Class) => result.push(fqn_to_key(&current)),
             Some(GraphNodeKind::Module) => {
-                for edge in engine.all_graph_edges() {
+                for edge in engine.view().all_graph_edges() {
                     if edge.target == current
                         && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
                         && visited.insert(edge.source.clone())

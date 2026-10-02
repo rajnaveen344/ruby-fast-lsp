@@ -355,7 +355,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.all_graph_nodes() {
+        for fact in self.view().all_graph_nodes() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -367,7 +367,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.all_graph_edges() {
+        for fact in self.view().all_graph_edges() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -381,7 +381,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.unresolved_graph_edges() {
+        for fact in self.view().unresolved_graph_edges() {
             push_component(
                 &mut components,
                 fact.range.file_id,

@@ -200,7 +200,7 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
     {
         let engine = workspace_state.analysis_engine.read();
         assert!(
-            engine.unresolved_graph_edges().iter().any(|edge| {
+            engine.view().unresolved_graph_edges().iter().any(|edge| {
                 edge.source == child && edge.kind == ruby_analysis::core::GraphEdgeKind::Superclass
             }),
             "a later batch must not observe namespaces introduced by an arbitrary earlier \
@@ -211,7 +211,7 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
     workspace_state.analysis_engine.write().resolve();
     let engine = workspace_state.analysis_engine.read();
     assert!(
-        engine.unresolved_graph_edges().iter().all(|edge| {
+        engine.view().unresolved_graph_edges().iter().all(|edge| {
             edge.source != child || edge.kind != ruby_analysis::core::GraphEdgeKind::Superclass
         }),
         "the coordinator's final semantic resolution must resolve the deferred superclass"

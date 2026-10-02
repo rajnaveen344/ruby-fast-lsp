@@ -14,9 +14,8 @@ use crate::invariant::ExpectInvariant;
 
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
-    DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphNodeKind,
-    MethodCalleeResolution, ReferenceFact, RubyType, SourceFileId, TextRange, TypeFact,
-    TypeResolution, TypeSubject, UnknownReason,
+    DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, ReferenceFact, RubyType,
+    SourceFileId, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
 };
 
 use crate::engine::{AnalysisQueryCache, Project};
@@ -276,43 +275,11 @@ impl<'a> View<'a> {
                     .is_some_and(unknown_reason_blocks_dispatch))
     }
 
-    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
-        self.engine.graph_nodes_for(fqn)
-    }
-
-    pub fn has_graph_node(&self, fqn: &FullyQualifiedName) -> bool {
-        self.engine.has_graph_node(fqn)
-    }
-
-    pub fn first_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        self.engine.first_graph_node_kind(fqn)
-    }
-
-    pub fn latest_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        self.engine.latest_graph_node_kind(fqn)
-    }
-
-    pub fn graph_edges_from(&self, fqn: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
-        self.engine.graph_edges_from(fqn)
-    }
-
-    pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
-        self.engine.all_graph_edges()
-    }
-
     pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
         self.engine.diagnostic_facts_in_file(file_id)
     }
 
     pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
         self.engine.all_diagnostic_facts()
-    }
-
-    pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
-        self.engine.graph_nodes_in_file(file_id)
-    }
-
-    pub fn graph_edges_in_file(&self, file_id: SourceFileId) -> Vec<GraphEdgeFact> {
-        self.engine.graph_edges_in_file(file_id)
     }
 }

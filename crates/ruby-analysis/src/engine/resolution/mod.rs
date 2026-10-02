@@ -129,7 +129,7 @@ pub(in crate::engine) fn namespace_target_exists(
     if parts.is_empty() {
         return true;
     }
-    if matches!(fqn, FullyQualifiedName::Namespace(_, _)) && engine.has_graph_node(fqn) {
+    if matches!(fqn, FullyQualifiedName::Namespace(_, _)) && engine.view().has_graph_node(fqn) {
         return true;
     }
     if let Some(kind) = fqn.namespace_kind() {
@@ -138,7 +138,7 @@ pub(in crate::engine) fn namespace_target_exists(
             crate::core::NamespaceKind::Singleton => crate::core::NamespaceKind::Instance,
         };
         let other = FullyQualifiedName::namespace_with_kind(parts.to_vec(), other_kind);
-        if engine.has_graph_node(&other) {
+        if engine.view().has_graph_node(&other) {
             return true;
         }
     } else {
@@ -150,7 +150,7 @@ pub(in crate::engine) fn namespace_target_exists(
             parts.to_vec(),
             crate::core::NamespaceKind::Singleton,
         );
-        if engine.has_graph_node(&instance) || engine.has_graph_node(&singleton) {
+        if engine.view().has_graph_node(&instance) || engine.view().has_graph_node(&singleton) {
             return true;
         }
     }
@@ -163,7 +163,9 @@ fn is_module_instance_namespace(engine: &crate::engine::Project, fqn: &FullyQual
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Instance) {
         return false;
     }
-    engine.graph_node_has_kind(fqn, GraphNodeKind::Module)
+    engine
+        .view()
+        .graph_node_has_kind(fqn, GraphNodeKind::Module)
 }
 
 /// Concrete receiver roots reachable through a module's reverse mixin edges.
@@ -181,7 +183,7 @@ pub(in crate::engine) fn module_instance_receivers(
     let mut visited = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
 
-    for edge in engine.graph_edges_to(module_fqn) {
+    for edge in engine.view().graph_edges_to(module_fqn) {
         if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
             && visited.insert(edge.source.clone())
         {
@@ -196,7 +198,7 @@ pub(in crate::engine) fn module_instance_receivers(
         }
 
         if node_kind(engine, &current) == Some(GraphNodeKind::Module) {
-            for edge in engine.graph_edges_to(&current) {
+            for edge in engine.view().graph_edges_to(&current) {
                 if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
                     && visited.insert(edge.source.clone())
                 {

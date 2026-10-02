@@ -35,7 +35,7 @@ Implementation folders are private to the engine.
 Each component owns its fields and exposes `pub(in crate::engine)` operations;
 components that need names take `&Names` or `&mut Names` as a parameter. A
 component's public reads are an `impl View` block in the component's module
-(`Files` and `DeclIndex` so far), so callers write `project.view().file_id(path)`. The
+(`Files`, `DeclIndex`, and `Hierarchy` so far), so callers write `project.view().file_id(path)`. The
 engine keeps only its identity, `semantic_revision`, `query_cache_identity`,
 and last resolve statistics.
 

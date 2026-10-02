@@ -30,7 +30,7 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
         },
         ResolveMode::Immediate,
     );
-    assert_eq!(engine.unresolved_graph_edges().len(), 1);
+    assert_eq!(engine.view().unresolved_graph_edges().len(), 1);
 
     engine.update(
         auth_file,
@@ -45,8 +45,9 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
     assert!(engine
+        .view()
         .graph_edges_from(&user)
         .iter()
         .any(|edge| edge.target == auth && edge.kind == GraphEdgeKind::Include));
@@ -129,31 +130,34 @@ fn retried_edges_return_to_unresolved_when_their_target_disappears() {
         ..Default::default()
     };
     engine.update(parent_file, parent_facts.clone(), ResolveMode::Immediate);
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
 
     engine.update(parent_file, FileAnalysis::default(), ResolveMode::Immediate);
 
     assert_eq!(
-        engine.unresolved_graph_edges().len(),
+        engine.view().unresolved_graph_edges().len(),
         2,
         "edges resolved into a replaced file must be retried as unresolved lookups"
     );
-    assert!(!engine.graph_edges_from(&child).iter().any(|edge| {
+    assert!(!engine.view().graph_edges_from(&child).iter().any(|edge| {
         (edge.kind == GraphEdgeKind::Superclass && edge.target == parent)
             || (edge.kind == GraphEdgeKind::Include && edge.target == mixin)
     }));
     assert!(!engine
+        .view()
         .graph_edges_from(&child_singleton)
         .iter()
         .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton));
 
     engine.update(parent_file, parent_facts, ResolveMode::Immediate);
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
     assert!(engine
+        .view()
         .graph_edges_from(&child)
         .iter()
         .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent));
     assert!(engine
+        .view()
         .graph_edges_from(&child_singleton)
         .iter()
         .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton));
@@ -196,7 +200,7 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
         },
         ResolveMode::Immediate,
     );
-    assert_eq!(engine.unresolved_graph_edges().len(), 1);
+    assert_eq!(engine.view().unresolved_graph_edges().len(), 1);
 
     engine.update(
         parent_file,
@@ -218,8 +222,9 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
     assert!(engine
+        .view()
         .graph_edges_from(&child_singleton)
         .iter()
         .any(|edge| { edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton }));
@@ -256,9 +261,10 @@ fn explicit_superclass_outranks_reopened_implicit_object_fact() {
         ResolveMode::Immediate,
     );
 
-    assert!(!engine.superclass_is_ambiguous(&child));
+    assert!(!engine.view().superclass_is_ambiguous(&child));
     assert_eq!(
         engine
+            .view()
             .proven_superclass_edge(&child)
             .map(|edge| edge.target),
         Some(parent)
@@ -325,7 +331,7 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
         },
         ResolveMode::Immediate,
     );
-    assert!(engine.proven_superclass_edge(&pending).is_none());
+    assert!(engine.view().proven_superclass_edge(&pending).is_none());
 
     engine.update(
         target_file,
@@ -352,10 +358,13 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
         ResolveMode::Immediate,
     );
 
-    assert!(engine.superclass_is_ambiguous(&pending));
-    assert!(engine.superclass_is_ambiguous(&pending_singleton));
-    assert!(engine.proven_superclass_edge(&pending).is_none());
-    assert!(engine.proven_superclass_edge(&pending_singleton).is_none());
+    assert!(engine.view().superclass_is_ambiguous(&pending));
+    assert!(engine.view().superclass_is_ambiguous(&pending_singleton));
+    assert!(engine.view().proven_superclass_edge(&pending).is_none());
+    assert!(engine
+        .view()
+        .proven_superclass_edge(&pending_singleton)
+        .is_none());
 }
 
 #[test]
@@ -448,16 +457,16 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
         vec![missing.clone()],
         "an edge-only namespace has no proven Object/Kernel ancestry and must not gain top-level method lookup"
     );
-    assert!(engine.has_graph_node(&parent));
+    assert!(engine.view().has_graph_node(&parent));
     assert!(
-        !engine.has_graph_node(&missing),
+        !engine.view().has_graph_node(&missing),
         "edge-only interned endpoints must not count as declared namespaces"
     );
     assert_eq!(
-        engine.latest_graph_node_kind(&parent),
+        engine.view().latest_graph_node_kind(&parent),
         Some(GraphNodeKind::Class)
     );
-    assert_eq!(engine.latest_graph_node_kind(&missing), None);
+    assert_eq!(engine.view().latest_graph_node_kind(&missing), None);
     assert_eq!(
         View::new(&engine).namespace_node_kind(&parent),
         Some(GraphNodeKind::Class)

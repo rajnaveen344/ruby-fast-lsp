@@ -35,6 +35,7 @@ fn compute_namespace_tree_hash(engine: &Project, show_external_types: bool) -> u
     show_external_types.hash(&mut hasher);
 
     let mut node_keys = engine
+        .view()
         .all_graph_nodes()
         .into_iter()
         .filter(|node| {
@@ -55,6 +56,7 @@ fn compute_namespace_tree_hash(engine: &Project, show_external_types: bool) -> u
     node_keys.hash(&mut hasher);
 
     let mut edge_keys = engine
+        .view()
         .all_graph_edges()
         .into_iter()
         .filter(|edge| {
@@ -196,7 +198,7 @@ fn partition_namespace_nodes(engine: &Project) -> PartitionedNamespaceNodes {
         gem_packages: HashMap::new(),
     };
 
-    for node in engine.all_graph_nodes() {
+    for node in engine.view().all_graph_nodes() {
         if node.fqn.has_generated_owner() {
             continue;
         }
@@ -289,7 +291,7 @@ fn collect_project_namespace_map(
 ) -> HashMap<String, NamespaceNode> {
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
 
-    for node in engine.all_graph_nodes() {
+    for node in engine.view().all_graph_nodes() {
         if node.fqn.has_generated_owner() {
             continue;
         }
@@ -331,6 +333,7 @@ fn build_namespace_map_from_grouped_nodes(
             .collect::<Vec<_>>();
 
         let proven_superclass = engine
+            .view()
             .proven_superclass_edge(&fqn)
             .into_iter()
             .collect::<Vec<_>>();
@@ -404,6 +407,7 @@ fn analysis_edges_from(
     kind: GraphEdgeKind,
 ) -> Vec<GraphEdgeFact> {
     engine
+        .view()
         .graph_edges_from(fqn)
         .iter()
         .filter(|edge| edge.kind == kind)
@@ -447,7 +451,7 @@ fn analysis_find_includers(
     queue.push_back((module_fqn.clone(), Vec::<ViaModuleInfo>::new()));
 
     while let Some((target, via_modules)) = queue.pop_front() {
-        for edge in engine.graph_edges_to(&target) {
+        for edge in engine.view().graph_edges_to(&target) {
             if !matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend) {
                 continue;
             }
@@ -485,11 +489,12 @@ fn analysis_find_includers(
 }
 
 fn analysis_node_kind(engine: &Project, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-    engine.first_graph_node_kind(fqn)
+    engine.view().first_graph_node_kind(fqn)
 }
 
 fn analysis_namespace_is_project(engine: &Project, fqn: &FullyQualifiedName) -> bool {
     engine
+        .view()
         .graph_nodes_for(fqn)
         .iter()
         .any(|node| analysis_range_is_project(engine, node.range))
@@ -504,6 +509,7 @@ fn analysis_range_is_project(engine: &Project, range: TextRange) -> bool {
 
 fn analysis_namespace_locations(engine: &Project, fqn: &FullyQualifiedName) -> Vec<LocationInfo> {
     engine
+        .view()
         .graph_nodes_for(fqn)
         .iter()
         .filter_map(|node| analysis_location_info(engine, node.range))

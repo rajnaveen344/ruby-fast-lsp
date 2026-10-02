@@ -99,7 +99,7 @@ impl<'a> View<'a> {
         ancestors: &[RubyConstant],
     ) -> Option<TypeHierarchyNode> {
         let fqn = self.resolve_constant_in_context(constant_parts, ancestors)?;
-        let (node_kind, range) = self.engine.first_graph_node_definition(&fqn)?;
+        let (node_kind, range) = self.first_graph_node_definition(&fqn)?;
         Some(TypeHierarchyNode {
             fqn,
             node_kind,
@@ -108,12 +108,12 @@ impl<'a> View<'a> {
     }
 
     pub fn supertypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        let primary_file_id = match self.engine.first_graph_node_definition(fqn) {
+        let primary_file_id = match self.first_graph_node_definition(fqn) {
             Some((_, range)) => range.file_id,
             None => return Vec::new(),
         };
 
-        let edges = self.engine.graph_edges_from(fqn);
+        let edges = self.graph_edges_from(fqn);
         let mut supertypes = Vec::new();
         push_supertype_entries(
             self.engine,
@@ -155,7 +155,7 @@ impl<'a> View<'a> {
     }
 
     pub fn subtypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        if !self.engine.has_graph_node(fqn) {
+        if !self.has_graph_node(fqn) {
             return Vec::new();
         }
 
@@ -164,7 +164,7 @@ impl<'a> View<'a> {
         let mut prepended_by_edges = Vec::new();
         let mut extended_by_edges = Vec::new();
 
-        for edge in self.engine.graph_edges_to(fqn) {
+        for edge in self.graph_edges_to(fqn) {
             match edge.kind {
                 GraphEdgeKind::Superclass => subclass_edges.push(edge.clone()),
                 GraphEdgeKind::Include
@@ -239,8 +239,7 @@ impl<'a> View<'a> {
         collect_all_implementors(self.engine, fqn)
             .iter()
             .filter_map(|impl_fqn| {
-                self.engine
-                    .first_graph_node_definition(impl_fqn)
+                self.first_graph_node_definition(impl_fqn)
                     .map(|(_, range)| range)
             })
             .collect()
@@ -328,7 +327,7 @@ fn push_unresolved_supertype_entries(
     fqn: &FullyQualifiedName,
     entries: &mut Vec<TypeHierarchyEntry>,
 ) {
-    for edge in engine.unresolved_graph_edges() {
+    for edge in engine.view().unresolved_graph_edges() {
         if edge.source != *fqn {
             continue;
         }
@@ -357,7 +356,7 @@ fn hierarchy_entry_for_node(
     edge_file_id: Option<SourceFileId>,
     unresolved: bool,
 ) -> Option<TypeHierarchyEntry> {
-    let (node_kind, range) = engine.first_graph_node_definition(fqn)?;
+    let (node_kind, range) = engine.view().first_graph_node_definition(fqn)?;
     Some(TypeHierarchyEntry {
         fqn: fqn.clone(),
         node_kind: Some(node_kind),
@@ -402,6 +401,7 @@ fn mixers(
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut mixers = engine
+        .view()
         .graph_edges_to(origin_fqn)
         .iter()
         .filter(|edge| {
@@ -429,7 +429,7 @@ fn descendants(
     seen.insert(origin_fqn.clone());
 
     while let Some(current) = queue.pop_front() {
-        for edge in engine.graph_edges_to(&current) {
+        for edge in engine.view().graph_edges_to(&current) {
             if edge.kind == GraphEdgeKind::Superclass && seen.insert(edge.source.clone()) {
                 result.push(edge.source.clone());
                 queue.push_back(edge.source.clone());

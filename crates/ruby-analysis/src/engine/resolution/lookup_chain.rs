@@ -225,7 +225,7 @@ fn method_lookup_chain_without_metaclass_with_fallback(
         fqn = fqn,
     );
 
-    if !engine.has_graph_node(fqn) {
+    if !engine.view().has_graph_node(fqn) {
         if fqn.namespace_parts().is_empty() {
             let mut chain = Vec::new();
             let mut visited = std::collections::HashSet::new();
@@ -301,7 +301,7 @@ pub(in crate::engine) fn method_lookup_chain_has_unresolved_dependency_from_grap
         if !visited.insert(current.clone()) {
             continue;
         }
-        if engine.superclass_is_ambiguous(&current) {
+        if engine.view().superclass_is_ambiguous(&current) {
             return true;
         }
 
@@ -360,7 +360,10 @@ pub(super) fn metaclass_namespace_for_object(
         })],
         crate::core::NamespaceKind::Instance,
     );
-    engine.has_graph_node(&metaclass).then_some(metaclass)
+    engine
+        .view()
+        .has_graph_node(&metaclass)
+        .then_some(metaclass)
 }
 
 pub(in crate::engine) fn method_lookup_chain_for_reference_cached<'cache>(
@@ -441,7 +444,7 @@ fn compute_universal_object_fallback(engine: &crate::engine::Project) -> Vec<Ful
     let mut fallback = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let object = top_level_object_instance_fqn();
-    if engine.has_graph_node(&object) {
+    if engine.view().has_graph_node(&object) {
         build_mro(engine, &object, &mut fallback, &mut visited, false);
     }
     engine.cache_universal_object_method_lookup_chain(fallback.clone());
@@ -511,7 +514,7 @@ fn compute_top_level_instance_fallback(
     build_mro(engine, &root, chain, visited, true);
 
     let object_fqn = top_level_object_instance_fqn();
-    if engine.has_graph_node(&object_fqn) {
+    if engine.view().has_graph_node(&object_fqn) {
         build_mro(engine, &object_fqn, chain, visited, true);
     }
 }
@@ -664,5 +667,5 @@ pub(in crate::engine) fn node_kind(
     engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> Option<GraphNodeKind> {
-    engine.first_graph_node_kind(fqn)
+    engine.view().first_graph_node_kind(fqn)
 }

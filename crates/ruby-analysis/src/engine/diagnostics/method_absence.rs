@@ -39,7 +39,7 @@ impl Project {
             return true;
         }
         if owner.namespace_kind() == Some(NamespaceKind::Singleton) {
-            let metaclass = match self.first_graph_node_kind(owner) {
+            let metaclass = match self.view().first_graph_node_kind(owner) {
                 Some(GraphNodeKind::Class) => Some("Class"),
                 Some(GraphNodeKind::Module) => Some("Module"),
                 None => None,
@@ -54,7 +54,9 @@ impl Project {
                         error = error,
                     )
                 });
-                !self.has_graph_node(&FullyQualifiedName::namespace(vec![constant]))
+                !self
+                    .view()
+                    .has_graph_node(&FullyQualifiedName::namespace(vec![constant]))
             }) {
                 return true;
             }
@@ -68,7 +70,7 @@ impl Project {
             if *cache
                 .ambiguous_superclasses
                 .entry(current.clone())
-                .or_insert_with(|| self.superclass_is_ambiguous(&current))
+                .or_insert_with(|| self.view().superclass_is_ambiguous(&current))
             {
                 return true;
             }
@@ -83,7 +85,8 @@ impl Project {
                 return true;
             }
             pending.extend(
-                self.graph_edges_from(&current)
+                self.view()
+                    .graph_edges_from(&current)
                     .into_iter()
                     .filter(|edge| {
                         matches!(
@@ -129,7 +132,7 @@ impl Project {
             ),
         };
 
-        for edge in self.graph_edges_from(&instance_namespace) {
+        for edge in self.view().graph_edges_from(&instance_namespace) {
             let callbacks: &[&str] = match edge.kind {
                 GraphEdgeKind::Include => &["included", "append_features"],
                 GraphEdgeKind::Prepend => &["prepended", "prepend_features"],
@@ -142,7 +145,7 @@ impl Project {
             }
         }
 
-        for edge in self.graph_edges_from(namespace) {
+        for edge in self.view().graph_edges_from(namespace) {
             if edge.kind == GraphEdgeKind::Extend
                 && self.namespace_defines_any_singleton_method(
                     &edge.target,
@@ -224,8 +227,8 @@ impl Project {
             parts.clone(),
             crate::core::NamespaceKind::Singleton,
         );
-        self.has_graph_node(&instance_fqn)
-            || self.has_graph_node(&singleton_fqn)
+        self.view().has_graph_node(&instance_fqn)
+            || self.view().has_graph_node(&singleton_fqn)
             || self
                 .view()
                 .has_symbol_facts(&FullyQualifiedName::constant(parts))

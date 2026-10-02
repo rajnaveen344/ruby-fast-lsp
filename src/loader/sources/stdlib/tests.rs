@@ -497,6 +497,7 @@ fn runtime_stdlib_deferred_collection_leaves_resolution_to_the_coordinator() {
     assert!(
         engine
             .read()
+            .view()
             .unresolved_graph_edges()
             .iter()
             .any(|edge| edge.target_parts == vec![runtime_base]),
@@ -507,6 +508,7 @@ fn runtime_stdlib_deferred_collection_leaves_resolution_to_the_coordinator() {
     assert!(
         engine
             .read()
+            .view()
             .unresolved_graph_edges()
             .iter()
             .all(|edge| edge.target_parts != vec![runtime_base]),

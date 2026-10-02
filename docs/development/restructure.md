@@ -165,7 +165,7 @@ Delete this file when the last task is done. Git history keeps the record.
           `all_method_visibility_overrides`, `method_names_for_owner`; fold
           the `View` duplicates `symbols_for_fqn`, `methods_for_fqn`, and
           `has_symbols` into them.
-    - [ ] B4e3. Hierarchy: the `graph_*` node and edge reads,
+    - [x] B4e3. Hierarchy: the `graph_*` node and edge reads,
           `proven_superclass_edge`, `superclass_is_ambiguous`, and
           `unresolved_graph_edges`.
     - [ ] B4e4. Uses and types: `reference_facts_for` (folding

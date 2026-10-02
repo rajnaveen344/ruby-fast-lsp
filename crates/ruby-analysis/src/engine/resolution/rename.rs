@@ -334,7 +334,7 @@ impl<'a> View<'a> {
             if !visited.insert(current.clone()) {
                 continue;
             }
-            if self.engine.superclass_is_ambiguous(&current) {
+            if self.superclass_is_ambiguous(&current) {
                 return true;
             }
             if unresolved_sources.contains(&current.namespace_parts()) {
@@ -510,6 +510,6 @@ fn constant_name_collides(
     let namespace = FullyQualifiedName::namespace(parts.clone());
     let constant = FullyQualifiedName::constant(parts);
     engine.view().has_symbol_facts(&namespace)
-        || engine.has_graph_node(&namespace)
+        || engine.view().has_graph_node(&namespace)
         || engine.view().has_symbol_facts(&constant)
 }
