@@ -614,8 +614,12 @@ Delete this file when the last task is done. Git history keeps the record.
     - [x] `const_get` eval receivers were accepted by the cursor walk only.
     - [x] Module alias reopening was followed by the seed only; the collector
       now follows it too.
-    - Class and module alias reopening is not followed by the cursor walk
-      (`identifiers/declarations/class_node.rs` pushes the syntactic name).
+    - [x] Class and module alias reopening was not followed by the cursor
+      walk, which pushed the syntactic name. It now opens every declaration
+      frame, records the class and module values of constants this file
+      declares or assigns, and applies the shared alias rule. An alias
+      declared in another file is still not followed there: the walk has no
+      project knowledge until the query adapter passes it in (D1f).
     - The seed turns every `initialize` into singleton `new`, including in
       modules. The collector requires a proven class. Decide what a module's
       `initialize` should navigate to before writing the test.

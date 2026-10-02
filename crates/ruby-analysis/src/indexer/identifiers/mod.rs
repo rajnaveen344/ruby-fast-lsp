@@ -5,8 +5,11 @@ mod scope;
 pub(in crate::indexer) mod types;
 mod variables;
 
-use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant};
+use crate::core::{
+    ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant, RubyType,
+};
 use crate::invariant::ExpectInvariant;
+use std::collections::HashMap;
 
 use crate::indexer::documents::scope_rules;
 use crate::indexer::{Identifier, LVScopeId, ScopeTracker};
@@ -37,6 +40,9 @@ pub struct IdentifierVisitor {
     byte_offset: u32,
     scope_tracker: ScopeTracker,
     execution_context: Option<ExecutionContextFact>,
+    /// Class and module values of constants this file declares or assigns
+    /// before the current node; the walk has no project knowledge.
+    file_constant_types: HashMap<Vec<RubyConstant>, RubyType>,
 
     // Output
     pub ns_stack_at_pos: Vec<RubyConstant>,
@@ -68,6 +74,7 @@ impl IdentifierVisitor {
             byte_offset,
             scope_tracker,
             execution_context,
+            file_constant_types: HashMap::new(),
             ns_stack_at_pos: Vec::new(),
             namespace_kind_at_pos: None,
             lv_scope_id_at_pos: None,
@@ -245,6 +252,11 @@ impl Visit<'_> for IdentifierVisitor {
         self.process_constant_write_node_entry(node);
         visit_constant_write_node(self, node);
         self.process_constant_write_node_exit(node);
+    }
+
+    fn visit_constant_path_write_node(&mut self, node: &ruby_prism::ConstantPathWriteNode<'_>) {
+        self.record_constant_path_write(node);
+        visit_constant_path_write_node(self, node);
     }
 
     fn visit_constant_or_write_node(&mut self, node: &ruby_prism::ConstantOrWriteNode<'_>) {
