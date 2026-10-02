@@ -406,15 +406,15 @@ Delete this file when the last task is done. Git history keeps the record.
         because the version step re-read the global setting instead of the
         project's effective selection. The version step now reads the legacy
         family from the selection the runtime step resolved.
-  - [ ] C7c. One parser and one version type. `RubyVersion` moves from
+  - [x] C7c. One parser and one version type. `RubyVersion` moves from
         `loader/version` to `environment/runtime/version.rs` and uses the
         catalog's `RuntimeImplementation` instead of a second
-        implementation enum. `RubyVersion::parse_family` replaces
-        `Config::get_ruby_version`, `config::runtime::parse_family`, and the
-        coordinator's `ruby_version_for_runtime`. The version step reads the
-        legacy family from `EffectiveRuntimeSelection`. Survivor: the
-        `u16` parse that selection already used; families that do not fit a
-        `u8` keep today's bundled fallback. Not merged: the catalog's
+        implementation enum. `parse_ruby_family` (with `RubyVersion::parse`
+        and `from_family`) replaces `Config::get_ruby_version`,
+        `config::runtime::parse_family`, and the coordinator's
+        `ruby_version_for_runtime`. Survivor: the `u16` parse that selection
+        already used; families that do not fit a `u8` keep today's bundled
+        fallback. Not merged: the catalog's
         `clean_version`/`version_family`, which parse free-form `ruby -v`
         output rather than a family string.
   - [ ] C7d. RSpec (blocked on a product decision). There are two

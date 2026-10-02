@@ -4,9 +4,9 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
 use crate::environment::config::runtime::{EffectiveRuntimeSelection, SelectedRuntimeDescriptor};
 use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::environment::runtime::version::RubyVersion;
 use crate::loader::context::LoadContext;
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
-use crate::loader::version::ruby_version::{RubyImplementation, RubyVersion};
 use anyhow::Result;
 use log::info;
 use std::time::Instant;
@@ -46,27 +46,12 @@ pub(super) async fn runtime_stdlib_paths_for_project(
     Ok(product.as_ref().clone())
 }
 
-fn ruby_version_for_runtime(runtime: &SelectedRuntimeDescriptor) -> Option<RubyVersion> {
-    let mut components = runtime.compatibility_version.split('.');
-    let major = components.next()?.parse::<u8>().ok()?;
-    let minor = components.next()?.parse::<u8>().ok()?;
-    let implementation = match runtime.implementation {
-        RuntimeImplementation::Mri => RubyImplementation::Mri,
-        RuntimeImplementation::Jruby => RubyImplementation::JRuby,
-        RuntimeImplementation::Truffleruby => RubyImplementation::TruffleRuby,
-    };
-    Some(RubyVersion::new_with_implementation(
-        major,
-        minor,
-        implementation,
-    ))
-}
-
 impl IndexingCoordinator {
     /// Step 1: Select the Ruby version for the already resolved runtime.
     pub(super) async fn detect_ruby_version_off_reactor(&mut self) -> Result<Option<RubyVersion>> {
         if let Some(runtime) = &self.effective_runtime {
-            let version = ruby_version_for_runtime(runtime);
+            let version =
+                RubyVersion::parse(&runtime.compatibility_version, runtime.implementation);
             self.detected_ruby_version = version;
             return Ok(version);
         }
@@ -98,12 +83,8 @@ impl IndexingCoordinator {
                     .await?
             }
             EffectiveRuntimeSelection::LegacyMriCompatibility { major, minor } => {
-                // A family outside the bundled stub range keeps the bundled
-                // fallback rather than a truncated version.
-                self.legacy_compatibility = u8::try_from(major)
-                    .ok()
-                    .zip(u8::try_from(minor).ok())
-                    .map(RubyVersion::from_tuple);
+                self.legacy_compatibility =
+                    RubyVersion::from_family((major, minor), RuntimeImplementation::Mri);
                 None
             }
         };

@@ -3,9 +3,9 @@
 //! This module handles gem discovery and indexing for the Ruby Language Server.
 //! It supports both Bundler-based (Gemfile) and global gem discovery.
 
+use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::loader::cache::dependency_product::{GemDependencyManifest, GemDependencyProduct};
 use crate::loader::file_processor::FileProcessor;
-use crate::loader::version::ruby_version::RubyImplementation;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -194,7 +194,7 @@ impl IndexerGem {
     pub fn set_selected_runtime(
         &mut self,
         executable: PathBuf,
-        implementation: RubyImplementation,
+        implementation: RuntimeImplementation,
         java_home: Option<PathBuf>,
     ) {
         invariant!(
@@ -206,8 +206,10 @@ impl IndexerGem {
         self.ruby_executable = Some(executable);
         self.java_home = java_home;
         self.active_ruby_engine = match implementation {
-            RubyImplementation::JRuby => ActiveRubyEngine::JRuby,
-            RubyImplementation::Mri | RubyImplementation::TruffleRuby => ActiveRubyEngine::Other,
+            RuntimeImplementation::Jruby => ActiveRubyEngine::JRuby,
+            RuntimeImplementation::Mri | RuntimeImplementation::Truffleruby => {
+                ActiveRubyEngine::Other
+            }
         };
     }
 

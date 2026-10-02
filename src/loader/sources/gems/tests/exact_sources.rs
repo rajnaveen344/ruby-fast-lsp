@@ -466,7 +466,7 @@ fn wrong_installed_platform_uses_exact_vendor_archive_fallback() {
     let mut indexer = create_cached_gem_indexer(workspace.path(), extraction_cache.path());
     indexer.set_selected_runtime(
         crate::test::harness::fixture_path("/runtimes/jruby/bin/jruby"),
-        RubyImplementation::JRuby,
+        RuntimeImplementation::Jruby,
         Some(crate::test::harness::fixture_path("/jdks/17")),
     );
     indexer.discovered_gems.insert(

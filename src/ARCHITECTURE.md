@@ -677,11 +677,16 @@ Handlers manage the routing of LSP requests and notifications.
 - **Primary Responsibility**: Receive requests from the service facade (`src/lsp/service.rs`) and route them to capabilities
 - **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
 
-### 8. Ruby Version (`src/loader/version/`)
+### 8. Ruby Runtime and Version (`src/environment/runtime/`)
 
-Ruby version detection and version-manager integration.
+Runtime discovery and Ruby version identity. `catalog` is the only reader of
+`.ruby-version` and `.tool-versions` markers and the only probe of a runtime's
+implementation and compatibility. `version` is the only parser of a
+`major.minor` family string; configuration validation, legacy compatibility,
+and core stub selection all use it. The loader takes the project's version
+from its effective runtime selection.
 
-- **Key Types**: `RubyVersion`
+- **Key Types**: `DiscoveredRuntime`, `RuntimeImplementation`, `RubyVersion`
 
 ## Key Workflows
 

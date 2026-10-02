@@ -3,11 +3,11 @@
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass, MIB};
 use super::runtime::runtime_stdlib_paths_for_project;
 use super::IndexingCoordinator;
+use crate::environment::runtime::version::RubyVersion;
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::sources::stdlib::IndexerStdlib;
-use crate::loader::version::ruby_version::RubyVersion;
 use crate::utils::admission::{IndexingResourcePriority, IndexingWorkSpec};
 use anyhow::Result;
 use log::info;

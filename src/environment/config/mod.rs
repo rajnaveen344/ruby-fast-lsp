@@ -271,20 +271,4 @@ impl RubyFastLspConfig {
         log::set_max_level(level);
         log::info!("Log level set to: {}", self.log_level);
     }
-
-    /// Parse Ruby version from configuration
-    pub fn get_ruby_version(&self) -> Option<(u8, u8)> {
-        if self.ruby_version == "auto" {
-            None // Will trigger auto-detection
-        } else {
-            // Parse version like "3.0" -> (3, 0)
-            let parts: Vec<&str> = self.ruby_version.split('.').collect();
-            if parts.len() >= 2 {
-                if let (Ok(major), Ok(minor)) = (parts[0].parse::<u8>(), parts[1].parse::<u8>()) {
-                    return Some((major, minor));
-                }
-            }
-            None
-        }
-    }
 }

@@ -6,6 +6,7 @@
 use crate::environment::config::runtime::EffectiveRuntimeSelection;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::environment::runtime::version::parse_ruby_family;
 use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::{self, indexing};
 use crate::server::RubyLanguageServer;
@@ -238,7 +239,7 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
 
     let config = server.config.lock().clone();
 
-    if let Some(version) = config.get_ruby_version() {
+    if let Some(version) = parse_ruby_family(&config.ruby_version) {
         info!("Using configured Ruby compatibility version: {version:?}");
     } else {
         info!("Ruby runtime and compatibility will be resolved independently per project");
@@ -850,7 +851,7 @@ pub async fn handle_did_change_configuration(
 
                 *server.config.lock() = config.clone();
 
-                if let Some(version) = config.get_ruby_version() {
+                if let Some(version) = parse_ruby_family(&config.ruby_version) {
                     info!("Using configured Ruby compatibility version: {version:?}");
                 } else {
                     info!(

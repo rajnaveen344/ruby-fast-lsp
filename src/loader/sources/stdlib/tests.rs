@@ -20,7 +20,7 @@ fn bundled_jruby_core_seed_is_cross_process_stable() {
             Some(RubyVersion::new_with_implementation(
                 2,
                 5,
-                RubyImplementation::JRuby,
+                RuntimeImplementation::Jruby,
             )),
         );
         indexer.set_extension_path(extension_root);
@@ -199,7 +199,7 @@ async fn every_supported_jruby_series_composes_its_exact_runtime_overlay() {
             Some(RubyVersion::new_with_implementation(
                 major,
                 minor,
-                RubyImplementation::JRuby,
+                RuntimeImplementation::Jruby,
             )),
         );
         indexer.set_extension_path(extension.path().to_path_buf());
@@ -558,7 +558,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         Some(RubyVersion::new_with_implementation(
             2,
             5,
-            RubyImplementation::JRuby,
+            RuntimeImplementation::Jruby,
         )),
     );
     jruby_indexer.set_extension_path(extension.path().to_path_buf());

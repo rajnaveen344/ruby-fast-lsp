@@ -46,7 +46,7 @@ fn standalone_project_without_explicit_gems_skips_runtime_discovery() {
     let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
     indexer.set_selected_runtime(
         workspace.path().join("missing-ruby"),
-        RubyImplementation::Mri,
+        RuntimeImplementation::Mri,
         None,
     );
 
@@ -78,7 +78,7 @@ fn standalone_project_discovers_only_explicitly_included_global_gems() {
     std::fs::set_permissions(&fake_ruby, permissions).unwrap();
 
     let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
-    indexer.set_selected_runtime(fake_ruby, RubyImplementation::Mri, None);
+    indexer.set_selected_runtime(fake_ruby, RuntimeImplementation::Mri, None);
     indexer.set_explicitly_included_gems(HashSet::from(["example".to_string()]));
 
     assert!(
@@ -120,7 +120,7 @@ fn auto_installed_gem_discovery_uses_one_runtime_process() {
     std::fs::set_permissions(&fake_ruby, permissions).unwrap();
 
     let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
-    indexer.set_selected_runtime(fake_ruby, RubyImplementation::JRuby, None);
+    indexer.set_selected_runtime(fake_ruby, RuntimeImplementation::Jruby, None);
     indexer.discover_auto_gems().unwrap();
 
     assert_eq!(std::fs::read_to_string(invocation_log).unwrap(), "x");

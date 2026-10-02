@@ -6,11 +6,9 @@ use super::priority::{
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
 use crate::environment::config::IndexingConfig;
-use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
 use crate::loader::sources::gems::IndexerGem;
-use crate::loader::version::ruby_version::RubyImplementation;
 use anyhow::{anyhow, Result};
 use futures::stream::{self, StreamExt};
 use log::info;
@@ -67,12 +65,11 @@ impl IndexingCoordinator {
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
         if let Some(runtime) = self.effective_runtime.clone() {
-            let implementation = match runtime.implementation {
-                RuntimeImplementation::Mri => RubyImplementation::Mri,
-                RuntimeImplementation::Jruby => RubyImplementation::JRuby,
-                RuntimeImplementation::Truffleruby => RubyImplementation::TruffleRuby,
-            };
-            gem_indexer.set_selected_runtime(runtime.executable, implementation, runtime.java_home);
+            gem_indexer.set_selected_runtime(
+                runtime.executable,
+                runtime.implementation,
+                runtime.java_home,
+            );
         }
         gem_indexer
     }

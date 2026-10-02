@@ -71,7 +71,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         Some(RubyVersion::new_with_implementation(
             2,
             5,
-            RubyImplementation::JRuby
+            RuntimeImplementation::Jruby
         ))
     );
     coordinator.setup_jruby_import_provider().unwrap();

@@ -7,8 +7,9 @@
 //! VS Code extension on first activation. The LSP server reads from the
 //! extracted directories with proper file:// URIs.
 
+use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::environment::runtime::version::RubyVersion;
 use crate::loader::file_processor::FileProcessor;
-use crate::loader::version::ruby_version::{RubyImplementation, RubyVersion};
 use crate::utils;
 use crate::utils::stub_loader::find_stubs_directory;
 use anyhow::{anyhow, Context, Result};
@@ -370,7 +371,7 @@ impl IndexerStdlib {
         let Some(version) = self.ruby_version else {
             return Ok(());
         };
-        if version.implementation != RubyImplementation::JRuby {
+        if version.implementation != RuntimeImplementation::Jruby {
             return Ok(());
         }
         let Some(series) = jruby_series_for_compatibility(version.to_tuple()) else {

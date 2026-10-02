@@ -103,7 +103,7 @@ async fn auto_runtime_marker_becomes_the_exact_effective_runtime() {
         Some(RubyVersion::new_with_implementation(
             2,
             5,
-            RubyImplementation::JRuby
+            RuntimeImplementation::Jruby
         ))
     );
     assert_eq!(
