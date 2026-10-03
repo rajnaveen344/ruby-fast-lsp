@@ -710,10 +710,19 @@ Delete this file when the last task is done. Git history keeps the record.
         shim, build config, patches, vendored gems, Docker builder).
         `crates/devtools/src/package_sources.rs` fails when the sources no
         longer match it, so the checked-in Wasm cannot go stale silently.
-    - [ ] C7d2. Ship the RSpec package in the npm platform packages and have
+    - [x] C7d2. Ship the RSpec package in the npm platform packages and have
           the server load packages bundled next to its executable by
           default, at the lowest priority, so a configured package with the
           same ID wins. The VSIX keeps passing its packages explicitly.
+      - Done: `ExtensionPathSource::Bundled` discovers `extensions/` beside
+        the executable or beside its `bin/` directory, ranked after every
+        other source. A package whose ID is already loaded is skipped before
+        its Wasm compiles; a bundled package still loads when the configured
+        one with its ID fails. `stage_package_assets.js` stages `rspec-ruby`
+        into each npm platform package, and the npm smoke requires
+        `ruby-fast-lsp/extensions/status` to report it loaded. The VSIX
+        binary sits in `bin/<platform>/`, so it never discovers the VSIX's
+        own `extensions/` a second time.
     - [ ] C7d3. Port the RSpec integration cases to load the package. Each
           fixture lives in a project with a minimal neutral `Gemfile.lock`
           that locks `rspec-core` 3.x.

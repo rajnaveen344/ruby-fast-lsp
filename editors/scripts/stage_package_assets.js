@@ -8,6 +8,9 @@ const path = require('node:path');
 const CFR_SHA256 = 'f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2';
 const STUB_SERIES = ['common', '9.0', '9.1', '9.2', '9.3', '9.4', '10.0', '10.1'];
 const EXTENSIONS = ['rspec-ruby', 'rails-ruby', 'minitest-ruby', 'sinatra-rust', 'cucumber-rust'];
+// The npm server loads these from its package's `extensions/` directory at the
+// lowest priority; the VSIX passes its packages to the server explicitly.
+const NPM_EXTENSIONS = ['rspec-ruby'];
 
 function artifactError(name, reason) {
   return new Error(`Invalid package artifact ${name}: ${reason}. Fix: restore or rebuild the required repository asset before packaging.`);
@@ -116,7 +119,10 @@ function stagePackageAssets({ root, destination, kind }) {
   verifyChecksum('CFR cfr-0.152.jar', cfr.bytes, CFR_SHA256);
   assets.push(...decompiler.map(file => ({ ...file, name: path.join('jruby-decompiler', file.name) })));
 
-  const directories = ['core-rbs', 'jruby-decompiler'];
+  const directories = ['core-rbs', 'jruby-decompiler', 'extensions'];
+  for (const extension of kind === 'vsix' ? EXTENSIONS : NPM_EXTENSIONS) {
+    assets.push(...extensionAssets(sourceRoot, extension));
+  }
   if (kind === 'vsix') {
     for (const series of STUB_SERIES) {
       const source = path.join('support/jruby/stubs', series);
@@ -124,10 +130,7 @@ function stagePackageAssets({ root, destination, kind }) {
       assets.push(...readDirectory(sourceRoot, source)
         .map(file => ({ ...file, name: path.join('jruby-stubs', series, file.name) })));
     }
-    for (const extension of EXTENSIONS) {
-      assets.push(...extensionAssets(sourceRoot, extension));
-    }
-    directories.push('jruby-stubs', 'extensions');
+    directories.push('jruby-stubs');
   }
 
   // Validate and retain the exact bytes first, so invalid inputs cannot erase an

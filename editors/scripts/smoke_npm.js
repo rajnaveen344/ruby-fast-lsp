@@ -58,6 +58,17 @@ const coreRuntimeConstants = path.join(
     'core-rbs',
     'constants.rbs'
 );
+const rspecManifest = path.join(
+    moduleRoot,
+    '@ruby-fast',
+    `lsp-${packageDir}`,
+    'extensions',
+    'rspec-ruby',
+    'extension.toml'
+);
+if (!fs.existsSync(rspecManifest)) {
+    throw new Error(`npm platform package is missing the bundled RSpec extension: ${rspecManifest}`);
+}
 if (!fs.existsSync(cfrJar) || !fs.existsSync(cfrLicense)) {
     throw new Error(`npm platform package is missing CFR or its license: ${cfrJar}`);
 }
@@ -77,6 +88,7 @@ let stdout = Buffer.alloc(0);
 let stderr = '';
 let settled = false;
 let navigationStarted = false;
+let initialized = false;
 let timer;
 
 function finish(error) {
@@ -89,7 +101,7 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`npm wrapper initialized Ruby Fast LSP and verified JRuby implementation navigation on ${platformKey}.\n`);
+        process.stdout.write(`npm wrapper initialized Ruby Fast LSP with its bundled RSpec extension and verified JRuby implementation navigation on ${platformKey}.\n`);
     }
 }
 
@@ -97,21 +109,37 @@ child.stderr.on('data', chunk => { stderr += chunk.toString(); });
 child.on('error', error => finish(error));
 child.on('exit', code => {
     if (!settled && !navigationStarted) {
-        finish(new Error(`npm wrapper exited before initialize response with status ${code}`));
+        finish(new Error(`npm wrapper exited before ${initialized ? 'extension status' : 'initialize'} response with status ${code}`));
     }
 });
-child.stdout.on('data', chunk => {
-    stdout = Buffer.concat([stdout, chunk]);
-    const headerEnd = stdout.indexOf('\r\n\r\n');
-    if (headerEnd < 0) return;
-    const header = stdout.subarray(0, headerEnd).toString();
-    const length = Number(header.match(/Content-Length:\s*(\d+)/i)?.[1]);
-    if (!Number.isInteger(length)) return finish(new Error('LSP response omitted Content-Length'));
-    const bodyStart = headerEnd + 4;
-    if (stdout.length < bodyStart + length) return;
-    const response = JSON.parse(stdout.subarray(bodyStart, bodyStart + length).toString());
-    if (response.id !== 1 || !response.result?.capabilities) {
-        return finish(new Error(`Unexpected initialize response: ${JSON.stringify(response)}`));
+function frame(message) {
+    const body = JSON.stringify(message);
+    return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
+}
+
+function handleResponse(response) {
+    if (response.id === 1) {
+        if (!response.result?.capabilities) {
+            return finish(new Error(`Unexpected initialize response: ${JSON.stringify(response)}`));
+        }
+        initialized = true;
+        child.stdin.write(frame({ jsonrpc: '2.0', method: 'initialized', params: {} }));
+        child.stdin.write(frame({
+            jsonrpc: '2.0',
+            id: 2,
+            method: 'ruby-fast-lsp/extensions/status',
+            params: {}
+        }));
+        return;
+    }
+    if (response.id !== 2) return;
+    const statuses = response.result?.extensions;
+    if (!Array.isArray(statuses)) {
+        return finish(new Error(`Unexpected extension status response: ${JSON.stringify(response)}`));
+    }
+    const rspec = statuses.find(status => status.id === 'rspec-ruby');
+    if (!rspec || rspec.status !== 'loaded') {
+        return finish(new Error(`Bundled RSpec extension did not load: ${JSON.stringify(statuses)}`));
     }
     navigationStarted = true;
     if (timer) {
@@ -124,16 +152,32 @@ child.stdout.on('data', chunk => {
         env: { NODE_PATH: moduleRoot },
         label: 'Packaged npm Ruby Fast LSP'
     }).then(() => finish()).catch(error => finish(error));
+}
+
+child.stdout.on('data', chunk => {
+    stdout = Buffer.concat([stdout, chunk]);
+    while (true) {
+        const headerEnd = stdout.indexOf('\r\n\r\n');
+        if (headerEnd < 0) return;
+        const header = stdout.subarray(0, headerEnd).toString();
+        const length = Number(header.match(/Content-Length:\s*(\d+)/i)?.[1]);
+        if (!Number.isInteger(length)) return finish(new Error('LSP response omitted Content-Length'));
+        const bodyStart = headerEnd + 4;
+        if (stdout.length < bodyStart + length) return;
+        const response = JSON.parse(stdout.subarray(bodyStart, bodyStart + length).toString());
+        stdout = stdout.subarray(bodyStart + length);
+        handleResponse(response);
+        if (settled) return;
+    }
 });
 
-const request = JSON.stringify({
+child.stdin.write(frame({
     jsonrpc: '2.0',
     id: 1,
     method: 'initialize',
     params: { capabilities: {} }
-});
-child.stdin.write(`Content-Length: ${Buffer.byteLength(request)}\r\n\r\n${request}`);
+}));
 
 timer = setTimeout(() => {
-    finish(new Error('Timed out waiting for npm wrapper initialize response'));
+    finish(new Error(`Timed out waiting for npm wrapper ${initialized ? 'extension status' : 'initialize'} response`));
 }, 10000);

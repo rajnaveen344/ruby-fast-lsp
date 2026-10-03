@@ -21,6 +21,9 @@ pub(in crate::environment::extensions) enum ExtensionPathSource {
     Environment,
     ProjectLocal,
     InitializationOptions,
+    /// Packages installed next to the server executable. They are defaults:
+    /// a package with the same ID from any other source replaces them.
+    Bundled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +88,8 @@ impl ExtensionLoadConfig {
         load_config
     }
 
+    /// Packages named by environment variables, plus the packages bundled
+    /// next to the server executable.
     pub(in crate::environment::extensions) fn from_environment() -> Self {
         let mut config = Self::default();
         if let Some(paths) = std::env::var_os("RUBY_FAST_LSP_EXTENSION_PATHS") {
@@ -103,8 +108,35 @@ impl ExtensionLoadConfig {
                 });
             }
         }
+        if let Some(path) = std::env::current_exe()
+            .ok()
+            .and_then(|executable| bundled_extension_directory(&executable))
+        {
+            config.directory_paths.push(ConfiguredExtensionPath {
+                path,
+                source: ExtensionPathSource::Bundled,
+            });
+        }
         config
     }
+}
+
+/// The `extensions` directory an installed server ships beside its
+/// executable: next to it, or next to its `bin` directory (the npm platform
+/// packages place the executable in `bin/` and its assets at the package
+/// root, as they do for `core-rbs`).
+pub(in crate::environment::extensions) fn bundled_extension_directory(
+    executable: &Path,
+) -> Option<PathBuf> {
+    let executable_dir = executable.parent()?;
+    let adjacent = executable_dir.join("extensions");
+    if adjacent.is_dir() {
+        return Some(adjacent);
+    }
+    executable_dir
+        .parent()
+        .map(|parent| parent.join("extensions"))
+        .filter(|path| path.is_dir())
 }
 
 fn discover_project_extension_packages(workspace_root: &Path) -> Vec<PathBuf> {

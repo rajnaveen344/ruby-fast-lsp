@@ -19,6 +19,8 @@ editors/npm/win32-x64/bin/
 # Packaged core RBS copies (generated from crates/rbs-parser/rbs_types/core)
 editors/npm/*/core-rbs/
 editors/vscode/vsix/core-rbs/
+# Packaged extension copies (staged from extensions/ by stage_package_assets.js)
+editors/npm/*/extensions/
 
 # Local automation configuration and Python bytecode
 .codex/

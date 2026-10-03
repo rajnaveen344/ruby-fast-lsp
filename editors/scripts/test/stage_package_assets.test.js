@@ -79,18 +79,24 @@ test('changed CFR bytes fail the pinned checksum without replacing existing asse
     'previous verified constants');
 });
 
-test('npm stages exact core and CFR bytes and preserves the platform binary', t => {
+test('npm stages exact core, CFR, and RSpec package bytes and preserves the platform binary', t => {
   const options = fixture(t);
   write(options.destination, 'bin/ruby-fast-lsp', 'platform binary');
   write(options.destination, 'core-rbs/stale.rbs', 'obsolete');
   write(options.destination, 'jruby-decompiler/obsolete.jar', 'obsolete');
+  write(options.destination, 'extensions/obsolete/extension.toml', 'obsolete');
   stagePackageAssets({ ...options, kind: 'npm' });
   const decompilerSource = path.join(options.root, 'support/jruby/decompiler');
   const decompilerFiles = files(decompilerSource);
   assert.deepEqual(files(options.destination), [
     'bin/ruby-fast-lsp', 'core-rbs/constants.rbs',
     ...decompilerFiles.map(name => `jruby-decompiler/${name}`),
+    ...['extension.toml', 'README.md', WASM_PATH].map(name => `extensions/rspec-ruby/${name}`),
   ].sort());
+  for (const name of ['extension.toml', 'README.md', WASM_PATH]) {
+    assert.deepEqual(fs.readFileSync(path.join(options.destination, 'extensions/rspec-ruby', name)),
+      fs.readFileSync(path.join(options.root, 'extensions/rspec-ruby', name)), name);
+  }
   assert.deepEqual(fs.readFileSync(path.join(options.destination, 'core-rbs/constants.rbs')),
     fs.readFileSync(path.join(options.root, 'crates/rbs-parser/rbs_types/core/constants.rbs')));
   for (const name of decompilerFiles) {
@@ -138,6 +144,13 @@ test('changed extension Wasm fails its manifest checksum before staging', t => {
   const options = fixture(t);
   write(options.root, `extensions/rspec-ruby/${WASM_PATH}`, 'changed wasm');
   assert.throws(() => stagePackageAssets({ ...options, kind: 'vsix' }), /rspec-ruby.*checksum/i);
+  assert.equal(fs.existsSync(options.destination), false);
+});
+
+test('npm rejects a changed RSpec package Wasm before staging', t => {
+  const options = fixture(t);
+  write(options.root, `extensions/rspec-ruby/${WASM_PATH}`, 'changed wasm');
+  assert.throws(() => stagePackageAssets({ ...options, kind: 'npm' }), /rspec-ruby.*checksum/i);
   assert.equal(fs.existsSync(options.destination), false);
 });
 

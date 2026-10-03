@@ -512,3 +512,112 @@ permissions = []
         fix = "validate checksum_sha256 before wasm instantiation",
     );
 }
+
+#[test]
+fn bundled_extension_directory_sits_beside_the_executable_or_its_bin_directory() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    let package_root = temp_dir.path().join("platform-package");
+    let executable = package_root.join("bin").join("ruby-fast-lsp");
+    fs::create_dir_all(executable.parent().unwrap()).expect("bin directory must be created");
+    assert_eq!(bundled_extension_directory(&executable), None);
+
+    fs::create_dir_all(package_root.join("extensions")).expect("extensions must be created");
+    assert_eq!(
+        bundled_extension_directory(&executable),
+        Some(package_root.join("extensions"))
+    );
+
+    fs::create_dir_all(package_root.join("bin/extensions")).expect("extensions must be created");
+    assert_eq!(
+        bundled_extension_directory(&executable),
+        Some(package_root.join("bin/extensions")),
+        "a directory beside the executable wins over one beside `bin`"
+    );
+}
+
+#[test]
+fn bundled_package_loads_when_no_other_source_provides_its_id() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    copy_rspec_package(&temp_dir.path().join("rspec-ruby"), "0.1.0-bundled");
+    let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+        package_paths: Vec::new(),
+        directory_paths: vec![ConfiguredExtensionPath {
+            path: temp_dir.path().to_path_buf(),
+            source: ExtensionPathSource::Bundled,
+        }],
+        project_package_paths: Vec::new(),
+        settings: BTreeMap::new(),
+    });
+
+    let reports = registry.status_reports();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "rspec-ruby");
+    assert_eq!(reports[0].version.as_deref(), Some("0.1.0-bundled"));
+    assert_eq!(reports[0].status, "loaded");
+}
+
+#[test]
+fn configured_package_replaces_bundled_package_with_the_same_id() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    let bundled = temp_dir.path().join("bundled");
+    let configured = temp_dir.path().join("configured");
+    copy_rspec_package(&bundled.join("rspec-ruby"), "0.1.0-bundled");
+    copy_rspec_package(&configured, "0.1.0-configured");
+    for source in [
+        ExtensionPathSource::InitializationOptions,
+        ExtensionPathSource::ProjectLocal,
+        ExtensionPathSource::Environment,
+    ] {
+        let config = ExtensionLoadConfig {
+            package_paths: vec![ConfiguredExtensionPath {
+                path: configured.clone(),
+                source,
+            }],
+            directory_paths: vec![ConfiguredExtensionPath {
+                path: bundled.clone(),
+                source: ExtensionPathSource::Bundled,
+            }],
+            project_package_paths: Vec::new(),
+            settings: BTreeMap::new(),
+        };
+
+        let reports = ExtensionRegistry::load(&config).status_reports();
+        assert_eq!(reports.len(), 1, "{source:?}");
+        assert_eq!(
+            reports[0].version.as_deref(),
+            Some("0.1.0-configured"),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn bundled_package_loads_when_the_configured_package_with_its_id_fails() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    let bundled = temp_dir.path().join("bundled");
+    let configured = temp_dir.path().join("configured");
+    copy_rspec_package(&bundled.join("rspec-ruby"), "0.1.0-bundled");
+    copy_rspec_package(&configured, "0.1.0-configured");
+    fs::write(
+        configured.join("target/wasm32-wasip1/release/rspec-ruby.wasm"),
+        b"\0asm\x01\0\0\0",
+    )
+    .expect("configured Wasm must be replaced");
+    let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+        package_paths: vec![ConfiguredExtensionPath {
+            path: configured,
+            source: ExtensionPathSource::InitializationOptions,
+        }],
+        directory_paths: vec![ConfiguredExtensionPath {
+            path: bundled,
+            source: ExtensionPathSource::Bundled,
+        }],
+        project_package_paths: Vec::new(),
+        settings: BTreeMap::new(),
+    });
+
+    let reports = registry.status_reports();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!(reports[0].version.as_deref(), Some("0.1.0-bundled"));
+    assert_eq!(reports[0].status, "loaded");
+}

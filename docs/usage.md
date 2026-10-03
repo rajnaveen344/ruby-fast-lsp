@@ -63,6 +63,10 @@ manifests define the accepted dependency ranges and extension capabilities:
 [Sinatra](../extensions/sinatra-rust/extension.toml), and
 [Cucumber](../extensions/cucumber-rust/extension.toml).
 Activation ranges are not an exhaustive framework compatibility guarantee.
+The VS Code extension passes all five packages to its server. The npm server
+loads the RSpec package from its platform package's `extensions/` directory;
+a package with the same ID from `extensionPackages`, `extensionDirs`, a
+trusted project, or the environment replaces it.
 
 RSpec and Minitest declarations offer Run/Debug lenses. RSpec uses
 `bundle exec rspec file:line`; Minitest uses a Rails runner when available or an

@@ -57,6 +57,7 @@ pub(in crate::environment::extensions) fn extension_packages_fingerprint(
             ExtensionPathSource::Environment => 0,
             ExtensionPathSource::ProjectLocal => 1,
             ExtensionPathSource::InitializationOptions => 2,
+            ExtensionPathSource::Bundled => 3,
         }]);
         digest.update([u8::from(package.explicit_package)]);
         let path = package.wasm_path.to_string_lossy();
@@ -90,23 +91,41 @@ pub(in crate::environment::extensions) fn load_wasm_extensions_from_packages_wit
     persistent_cache: Option<&PersistentDerivedProductCache>,
 ) -> Vec<Arc<LoadedWasmExtension>> {
     let mut extension_ids = BTreeSet::new();
-    packages
-        .into_iter()
-        .filter_map(|package| match load_wasm_extension_with_cache(package, persistent_cache) {
-            Ok(extension) if extension_ids.insert(extension.metadata.id.clone()) => Some(extension),
-            Ok(extension) => {
+    let mut extensions = Vec::new();
+    for package in packages {
+        // A higher-priority package already provides this ID: skip it before
+        // compiling its Wasm. Bundled packages are defaults, so replacing one
+        // is expected and not worth a warning.
+        if let Some(manifest) = package
+            .manifest
+            .as_ref()
+            .filter(|manifest| extension_ids.contains(&manifest.id))
+        {
+            if package.source == ExtensionPathSource::Bundled {
+                log::debug!(
+                    "Using the configured Ruby Fast LSP extension `{}` instead of the bundled one",
+                    manifest.id
+                );
+            } else {
                 warn!(
                     "Skipping duplicate Ruby Fast LSP extension id `{}` from lower-priority package",
-                    extension.metadata.id
+                    manifest.id
                 );
-                None
             }
-            Err(err) => {
-                warn!("Skipping Ruby Fast LSP extension: {}", err);
-                None
+            continue;
+        }
+        match load_wasm_extension_with_cache(package, persistent_cache) {
+            Ok(extension) if extension_ids.insert(extension.metadata.id.clone()) => {
+                extensions.push(extension)
             }
-        })
-        .collect::<Vec<_>>()
+            Ok(extension) => warn!(
+                "Skipping duplicate Ruby Fast LSP extension id `{}` from lower-priority package",
+                extension.metadata.id
+            ),
+            Err(err) => warn!("Skipping Ruby Fast LSP extension: {}", err),
+        }
+    }
+    extensions
 }
 
 #[derive(Debug)]
@@ -123,6 +142,7 @@ fn extension_package_priority(package: &ExtensionPackage) -> (u8, u8) {
         ExtensionPathSource::InitializationOptions => 0,
         ExtensionPathSource::ProjectLocal => 1,
         ExtensionPathSource::Environment => 2,
+        ExtensionPathSource::Bundled => 3,
     };
     let discovery = if package.explicit_package { 0 } else { 1 };
     (source, discovery)

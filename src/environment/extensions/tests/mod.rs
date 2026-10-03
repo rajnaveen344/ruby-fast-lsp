@@ -22,7 +22,7 @@ use ruby_fast_lsp_extension_api::{
 
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::loading::config::{
-    ConfiguredExtensionPath, ExtensionLoadConfig, ExtensionPathSource,
+    bundled_extension_directory, ConfiguredExtensionPath, ExtensionLoadConfig, ExtensionPathSource,
 };
 use crate::environment::extensions::loading::manifest::{
     build_watched_file_matcher, parse_manifest_method_targets, parse_manifest_namespace_targets,

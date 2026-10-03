@@ -103,11 +103,16 @@ and `projectExtensionsEnabled: true` (the default). VS Code maps this to its
 workspace trust/Restricted Mode state and restarts the server when trust is
 granted. Other clients must opt in explicitly; omitting trust is fail-closed.
 
+An installed server also loads the packages in an `extensions/` directory
+beside its executable or beside its `bin/` directory. The npm platform
+packages ship `rspec-ruby` there. These bundled packages are defaults.
+
 Precedence is deterministic: editor/configured packages and directories win,
-then project-local packages, then environment/development paths. Explicit
-packages win over directory discovery within a source, and filesystem path is
-the final tie-break. A lower-priority valid package may load only when every
-higher-priority package with the same ID fails validation.
+then project-local packages, then environment/development paths, then bundled
+packages. Explicit packages win over directory discovery within a source, and
+filesystem path is the final tie-break. A lower-priority valid package may load
+only when every higher-priority package with the same ID fails validation; a
+package whose ID is already loaded is skipped before its Wasm is compiled.
 
 Wasm extensions handle matching calls first; built-in native extensions are
 fallback.
@@ -552,8 +557,9 @@ Current registry slice:
 
 - `ExtensionRegistry` owns loaded Wasm extension slots.
 - Discovery precedence is deterministic: initialization-option sources override
-  environment sources, explicit package paths override directory discovery
-  within the same source, and filesystem path breaks remaining ties.
+  project-local, then environment, then bundled sources; explicit package paths
+  override directory discovery within the same source, and filesystem path
+  breaks remaining ties.
 - Extension identity is unique. After the highest-priority valid package for an
   `id` loads, lower-priority duplicates are rejected before they can dispatch
   events or contribute semantic patches.
