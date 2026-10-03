@@ -22,6 +22,9 @@ use crate::indexer::fact_collector::FactCollector;
 
 impl FactCollector {
     pub(super) fn process_call_reference_candidate(&mut self, node: &CallNode) {
+        if !self.options.collect_call_references {
+            return;
+        }
         let static_send_target = static_send_target_name_and_range(self, node);
         let method_name = static_send_target
             .as_ref()

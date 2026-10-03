@@ -350,6 +350,9 @@ impl FileProcessor {
         if source_kind.is_dependency_source() {
             visitor = visitor.without_body_inference();
         }
+        if !source_kind.contributes_references() {
+            visitor = visitor.without_call_references();
+        }
         visitor.set_extension_project_context(extension_project_context.clone());
         visitor.visit(&node);
         let visitor_elapsed = visitor_start.elapsed();

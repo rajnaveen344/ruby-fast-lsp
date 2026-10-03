@@ -631,6 +631,9 @@ impl FileProcessor {
         if source_kind.is_dependency_source() {
             fact_collector = fact_collector.without_body_inference();
         }
+        if !source_kind.contributes_references() {
+            fact_collector = fact_collector.without_call_references();
+        }
         fact_collector.set_extension_project_context(extension_project_context.clone());
         let shared_direct_known_namespaces = known_namespaces
             .unwrap_or_else(|| Arc::new(collect_known_namespaces(&*analysis_engine)));
