@@ -10,10 +10,8 @@ use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolR
 use crate::server::Server;
 use crate::utils::lsp::lsp_range;
 
-use ruby_analysis::core::NamespaceKind;
-use ruby_analysis::indexer::{
-    DocumentSymbolKind, DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext,
-};
+use ruby_analysis::core::{MethodVisibility, NamespaceKind};
+use ruby_analysis::indexer::{DocumentSymbolKind, DocumentSymbolsVisitor, RubySymbolContext};
 
 /// Handle `textDocument/documentSymbol`.
 pub async fn handle(

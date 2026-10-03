@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::core::{NamespaceKind, RubyConstant, SourceRange};
+use crate::core::{MethodVisibility, NamespaceKind, RubyConstant, SourceRange};
+use crate::indexer::documents::scope_rules::{visibility_call, VisibilityCall};
 use crate::indexer::{LVScopeKind, RubyDocument, ScopeTracker};
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_write_node, visit_def_node,
@@ -27,13 +28,6 @@ impl DocumentSymbolKind {
 
 use DocumentSymbolKind as SymbolKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MethodVisibility {
-    Public,
-    Protected,
-    Private,
-}
-
 /// Internal representation of a Ruby symbol with additional context.
 #[derive(Debug, Clone)]
 pub struct RubySymbolContext {
@@ -50,7 +44,6 @@ pub struct RubySymbolContext {
 pub struct DocumentSymbolsVisitor<'a> {
     flat_symbols: Vec<(RubySymbolContext, Option<usize>)>, // (symbol, parent_index)
     document: &'a RubyDocument,
-    visibility_stack: Vec<MethodVisibility>, // Stack of visibility states for nested scopes
     scope_tracker: ScopeTracker,
     scope_to_symbol_index: HashMap<usize, usize>, // scope_id -> symbol_index
     scope_id_stack: Vec<usize>,                   // Stack of scope_ids for hierarchy building
@@ -61,38 +54,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         Self {
             flat_symbols: Vec::new(),
             document,
-            visibility_stack: vec![MethodVisibility::Public], // Start with public visibility
             scope_tracker: ScopeTracker::new(),
             scope_to_symbol_index: std::collections::HashMap::new(),
             scope_id_stack: Vec::new(),
-        }
-    }
-
-    /// Get the current visibility (top of the stack)
-    fn current_visibility(&self) -> MethodVisibility {
-        *self
-            .visibility_stack
-            .last()
-            .unwrap_or(&MethodVisibility::Public)
-    }
-
-    /// Push a new visibility scope (when entering a class/module)
-    fn push_visibility_scope(&mut self) {
-        // New scopes start with public visibility
-        self.visibility_stack.push(MethodVisibility::Public);
-    }
-
-    /// Pop the current visibility scope (when exiting a class/module)
-    fn pop_visibility_scope(&mut self) {
-        if self.visibility_stack.len() > 1 {
-            self.visibility_stack.pop();
-        }
-    }
-
-    /// Set the visibility in the current scope
-    fn set_current_visibility(&mut self, visibility: MethodVisibility) {
-        if let Some(current) = self.visibility_stack.last_mut() {
-            *current = visibility;
         }
     }
 
@@ -174,7 +138,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             detail: None, // Can be enhanced later with more detailed information
             range,
             selection_range: range,
-            visibility: Some(self.current_visibility()),
+            visibility: Some(self.scope_tracker.current_visibility()),
             namespace_kind,
             children: Vec::new(),
         }
@@ -184,29 +148,31 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         matches!(method_name, "attr_reader" | "attr_writer" | "attr_accessor")
     }
 
-    fn is_visibility_modifier(&self, node: &CallNode) -> bool {
-        let method_name = String::from_utf8_lossy(node.name().as_slice());
-        matches!(method_name.as_ref(), "private" | "protected" | "public")
-    }
-
     fn extract_attr_names(&self, _node: &CallNode) -> Vec<String> {
         // Simplified implementation - can be enhanced later
         Vec::new()
     }
 
+    /// Push the namespace frame, with its public visibility, that a class or
+    /// module body opens. Malformed source such as `class foo` has no
+    /// constant name and opens no frame, so its exit must not pop one.
+    fn push_namespace_scope(&mut self, name: &str) -> bool {
+        let Ok(namespace) = RubyConstant::new(name) else {
+            return false;
+        };
+        self.scope_tracker.push_ns_scope(namespace);
+        true
+    }
+
     // Process methods for scope tracking and symbol creation
-    fn process_class_node_entry(&mut self, node: &ClassNode) {
+    fn process_class_node_entry(&mut self, node: &ClassNode) -> bool {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
         // Create and add symbol
         let symbol = self.create_symbol(name.clone(), SymbolKind::CLASS, &node.location(), None);
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
-        // Handle scope tracking similar to FactCollector
-        // Push namespace scope
-        if let Ok(namespace) = RubyConstant::new(&name) {
-            self.scope_tracker.push_ns_scope(namespace);
-        }
+        let pushed = self.push_namespace_scope(&name);
 
         // Push local variable scope kind
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
@@ -215,31 +181,25 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let scope_id = node.location().start_offset() + 1;
         self.scope_to_symbol_index.insert(scope_id, symbol_index);
         self.scope_id_stack.push(scope_id);
-
-        // Push new visibility scope (classes start with public visibility)
-        self.push_visibility_scope();
+        pushed
     }
 
-    fn process_class_node_exit(&mut self, _node: &ClassNode) {
-        self.scope_tracker.pop_ns_scope();
+    fn process_class_node_exit(&mut self, pushed: bool) {
+        if pushed {
+            self.scope_tracker.pop_ns_scope();
+        }
         self.scope_tracker.pop_scope_kind();
         self.scope_id_stack.pop();
-        // Pop visibility scope when exiting class
-        self.pop_visibility_scope();
     }
 
-    fn process_module_node_entry(&mut self, node: &ModuleNode) {
+    fn process_module_node_entry(&mut self, node: &ModuleNode) -> bool {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
         // Create and add symbol
         let symbol = self.create_symbol(name.clone(), SymbolKind::MODULE, &node.location(), None);
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
-        // Handle scope tracking
-        // Push namespace scope
-        if let Ok(namespace) = RubyConstant::new(&name) {
-            self.scope_tracker.push_ns_scope(namespace);
-        }
+        let pushed = self.push_namespace_scope(&name);
 
         // Push local variable scope kind
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
@@ -248,29 +208,23 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let scope_id = node.location().start_offset() + 1;
         self.scope_to_symbol_index.insert(scope_id, symbol_index);
         self.scope_id_stack.push(scope_id);
-
-        // Push new visibility scope (modules start with public visibility)
-        self.push_visibility_scope();
+        pushed
     }
 
-    fn process_module_node_exit(&mut self, _node: &ModuleNode) {
-        self.scope_tracker.pop_ns_scope();
+    fn process_module_node_exit(&mut self, pushed: bool) {
+        if pushed {
+            self.scope_tracker.pop_ns_scope();
+        }
         self.scope_tracker.pop_scope_kind();
         self.scope_id_stack.pop();
-        // Pop visibility scope when exiting module
-        self.pop_visibility_scope();
     }
 
     fn process_singleton_class_node_entry(&mut self, _node: &SingletonClassNode) {
         self.scope_tracker.enter_singleton();
-        // Push new visibility scope for singleton class (starts with public visibility)
-        self.push_visibility_scope();
     }
 
     fn process_singleton_class_node_exit(&mut self, _node: &SingletonClassNode) {
         self.scope_tracker.exit_singleton();
-        // Pop visibility scope when exiting singleton class
-        self.pop_visibility_scope();
     }
 
     fn process_def_node_entry(&mut self, node: &DefNode) {
@@ -307,14 +261,13 @@ impl<'a> DocumentSymbolsVisitor<'a> {
     fn process_call_node_entry(&mut self, node: &CallNode) {
         let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
-        if self.is_visibility_modifier(node) {
-            match method_name.as_str() {
-                "private" => self.set_current_visibility(MethodVisibility::Private),
-                "protected" => self.set_current_visibility(MethodVisibility::Protected),
-                "public" => self.set_current_visibility(MethodVisibility::Public),
-                _ => {}
+        if node.receiver().is_none() {
+            if let Some(VisibilityCall::Default(visibility)) = visibility_call(node) {
+                self.scope_tracker.set_current_visibility(visibility);
+                return;
             }
-        } else if self.is_attr_method(&method_name) {
+        }
+        if self.is_attr_method(&method_name) {
             let attr_names = self.extract_attr_names(node);
             for attr_name in attr_names {
                 let symbol =
@@ -323,19 +276,45 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             }
         }
     }
+
+    /// Give the methods a visibility call names that visibility once its
+    /// arguments, including a `def`, have been visited.
+    fn process_call_node_exit(&mut self, node: &CallNode) {
+        if node.receiver().is_some() {
+            return;
+        }
+        let Some(VisibilityCall::Methods(visibility, methods)) = visibility_call(node) else {
+            return;
+        };
+        let side = if self.scope_tracker.in_singleton() {
+            NamespaceKind::Singleton
+        } else {
+            NamespaceKind::Instance
+        };
+        let parent = self.find_current_parent_index();
+        for (symbol, parent_index) in &mut self.flat_symbols {
+            if *parent_index == parent
+                && symbol.kind == SymbolKind::METHOD
+                && symbol.namespace_kind == Some(side)
+                && methods.iter().any(|(name, _)| *name == symbol.name)
+            {
+                symbol.visibility = Some(visibility);
+            }
+        }
+    }
 }
 
 impl<'a> Visit<'a> for DocumentSymbolsVisitor<'a> {
     fn visit_class_node(&mut self, node: &ClassNode<'a>) {
-        self.process_class_node_entry(node);
+        let pushed = self.process_class_node_entry(node);
         visit_class_node(self, node);
-        self.process_class_node_exit(node);
+        self.process_class_node_exit(pushed);
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode<'a>) {
-        self.process_module_node_entry(node);
+        let pushed = self.process_module_node_entry(node);
         visit_module_node(self, node);
-        self.process_module_node_exit(node);
+        self.process_module_node_exit(pushed);
     }
 
     fn visit_def_node(&mut self, node: &DefNode<'a>) {
@@ -352,6 +331,7 @@ impl<'a> Visit<'a> for DocumentSymbolsVisitor<'a> {
     fn visit_call_node(&mut self, node: &CallNode<'a>) {
         self.process_call_node_entry(node);
         visit_call_node(self, node);
+        self.process_call_node_exit(node);
     }
 
     fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'a>) {

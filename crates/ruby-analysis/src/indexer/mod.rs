@@ -36,7 +36,7 @@ pub use lowering::analysis_indexer::AnalysisIndexer;
 pub use lowering::rbs_indexer::index_rbs;
 pub use queries::code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use queries::document_symbols::{
-    DocumentSymbolKind, DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext,
+    DocumentSymbolKind, DocumentSymbolsVisitor, RubySymbolContext,
 };
 pub use queries::hover::{identifier_to_hover_target, HoverTarget};
 pub use queries::receivers::{

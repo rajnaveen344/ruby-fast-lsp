@@ -948,3 +948,24 @@ TOP_LEVEL_CONSTANT = 42
     assert!(has_method);
     assert!(has_constant);
 }
+
+#[test]
+fn test_malformed_class_name_keeps_enclosing_visibility() {
+    let content = r#"
+class Outer
+  private
+
+  class lowercase_name
+  end
+
+  def after_malformed
+  end
+end
+"#;
+    let symbols = extract_symbols_from_content(content);
+    let method = symbols
+        .iter()
+        .find(|s| s.name == "after_malformed")
+        .unwrap();
+    assert_eq!(method.visibility, Some(MethodVisibility::Private));
+}
