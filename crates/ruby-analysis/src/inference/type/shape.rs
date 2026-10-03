@@ -7,7 +7,85 @@
 use crate::core::{
     FullyQualifiedName, LiteralKey, RubyType, ShapeFieldPresence, ShapeType, UnknownReason,
 };
+use crate::inference::r#type::literal::literal_key;
 use crate::invariant::ExpectInvariant;
+use ruby_prism::Node;
+
+/// The Hash read a call performs on a shape receiver. Every walk selects
+/// the read from the call's method name and arguments, then applies it to
+/// the receiver's proven type.
+pub(crate) enum CallRead<'a> {
+    Index(Option<LiteralKey>),
+    Fetch(Option<LiteralKey>, Option<&'a RubyType>),
+    Dig(Vec<Option<LiteralKey>>),
+    KeyPresence(Option<LiteralKey>),
+    Keys,
+    Values,
+    Each { has_block: bool },
+}
+
+impl<'a> CallRead<'a> {
+    /// The read `method_name` performs with these arguments, or `None` when
+    /// the call is not a supported shape read. `argument_types` holds the
+    /// inferred type of each argument node.
+    pub(crate) fn select(
+        method_name: &str,
+        arguments: &[Node<'_>],
+        argument_types: &'a [RubyType],
+        has_block: bool,
+    ) -> Option<Self> {
+        let first_key = || arguments.first().and_then(literal_key);
+        match method_name {
+            "[]" if arguments.len() == 1 => Some(Self::Index(first_key())),
+            "fetch" if matches!(arguments.len(), 1 | 2) => {
+                Some(Self::Fetch(first_key(), argument_types.get(1)))
+            }
+            "dig" if !arguments.is_empty() => {
+                Some(Self::Dig(arguments.iter().map(literal_key).collect()))
+            }
+            "key?" | "has_key?" | "include?" | "member?" if arguments.len() == 1 => {
+                Some(Self::KeyPresence(first_key()))
+            }
+            "keys" if arguments.is_empty() => Some(Self::Keys),
+            "values" if arguments.is_empty() => Some(Self::Values),
+            "each" | "each_pair" | "each_key" | "each_value" if arguments.is_empty() => {
+                Some(Self::Each { has_block })
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `method_name` names a shape read with any arguments.
+    pub(crate) fn is_read_method(method_name: &str) -> bool {
+        matches!(
+            method_name,
+            "[]" | "fetch"
+                | "dig"
+                | "key?"
+                | "has_key?"
+                | "include?"
+                | "member?"
+                | "keys"
+                | "values"
+                | "each"
+                | "each_pair"
+                | "each_key"
+                | "each_value"
+        )
+    }
+
+    pub(crate) fn apply(&self, receiver: &RubyType) -> Result<RubyType, UnknownReason> {
+        match self {
+            Self::Index(key) => indexed_read(receiver, key.as_ref()),
+            Self::Fetch(key, default) => fetch(receiver, key.as_ref(), *default),
+            Self::Dig(keys) => dig(receiver, keys),
+            Self::KeyPresence(key) => key_presence(receiver, key.as_ref()),
+            Self::Keys => keys(receiver),
+            Self::Values => values(receiver),
+            Self::Each { has_block } => each_return(receiver, *has_block),
+        }
+    }
+}
 
 pub(crate) fn indexed_read(
     receiver: &RubyType,
@@ -142,12 +220,7 @@ pub(crate) fn argument_free_method_return(
     receiver: &RubyType,
     method_name: &str,
 ) -> Option<Result<RubyType, UnknownReason>> {
-    match method_name {
-        "keys" => Some(keys(receiver)),
-        "values" => Some(values(receiver)),
-        "each" | "each_pair" | "each_key" | "each_value" => Some(each_return(receiver, false)),
-        _ => None,
-    }
+    CallRead::select(method_name, &[], &[], false).map(|read| read.apply(receiver))
 }
 
 pub(crate) fn operation_requires_call_arguments(method_name: &str) -> bool {

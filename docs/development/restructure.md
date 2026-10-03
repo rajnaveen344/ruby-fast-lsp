@@ -988,8 +988,8 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] D2b. One pattern-capture typing for `case`/`in` in
         `inference::type::pattern`; the tracker first reads a local's
         flow type, the collector infers the value expression.
-  - [ ] D2c. One shape-read dispatch (`[]`, `fetch`, `dig`, `key?`, `keys`,
-        `values`, `each*`) in `inference::type::shape`.
+  - [x] D2c. One shape-read dispatch (`[]`, `fetch`, `dig`, `key?`, `keys`,
+        `values`, `each*`) in `inference::type::shape::CallRead`.
   - [ ] D2d. One RBS and analysis method-return resolution for a receiver
         (collector `method_return.rs`, tracker `expressions/calls.rs`).
   - [ ] D2e. Evaluate the collector consuming expression evidence the

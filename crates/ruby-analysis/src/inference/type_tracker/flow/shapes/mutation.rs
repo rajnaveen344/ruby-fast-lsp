@@ -25,43 +25,15 @@ impl TypeTracker {
             .iter()
             .map(|argument| self.track_node(argument))
             .collect::<Vec<_>>();
-        match method_name {
-            "[]" if argument_nodes.len() == 1 => Some(
-                shape_reads::indexed_read(receiver_type, literal_key(&argument_nodes[0]).as_ref())
-                    .unwrap_or(RubyType::Unknown),
-            ),
-            "fetch" if matches!(argument_nodes.len(), 1 | 2) => Some(
-                shape_reads::fetch(
-                    receiver_type,
-                    literal_key(&argument_nodes[0]).as_ref(),
-                    argument_types.get(1),
-                )
-                .unwrap_or(RubyType::Unknown),
-            ),
-            "dig" if !argument_nodes.is_empty() => {
-                let keys = argument_nodes.iter().map(literal_key).collect::<Vec<_>>();
-                Some(shape_reads::dig(receiver_type, &keys).unwrap_or(RubyType::Unknown))
-            }
-            "key?" | "has_key?" | "include?" | "member?" if argument_nodes.len() == 1 => Some(
-                shape_reads::key_presence(receiver_type, literal_key(&argument_nodes[0]).as_ref())
-                    .unwrap_or(RubyType::Unknown),
-            ),
-            "keys" if argument_nodes.is_empty() => {
-                Some(shape_reads::keys(receiver_type).unwrap_or(RubyType::Unknown))
-            }
-            "values" if argument_nodes.is_empty() => {
-                Some(shape_reads::values(receiver_type).unwrap_or(RubyType::Unknown))
-            }
-            "each" | "each_pair" | "each_key" | "each_value" if argument_nodes.is_empty() => Some(
-                shape_reads::each_return(receiver_type, call.block().is_some())
-                    .unwrap_or(RubyType::Unknown),
-            ),
-            "[]" | "fetch" | "dig" | "key?" | "has_key?" | "include?" | "member?" | "keys"
-            | "values" | "each" | "each_pair" | "each_key" | "each_value" => {
-                Some(RubyType::Unknown)
-            }
-            _ => None,
+        if let Some(read) = shape_reads::CallRead::select(
+            method_name,
+            &argument_nodes,
+            &argument_types,
+            call.block().is_some(),
+        ) {
+            return Some(read.apply(receiver_type).unwrap_or(RubyType::Unknown));
         }
+        shape_reads::CallRead::is_read_method(method_name).then_some(RubyType::Unknown)
     }
 
     pub(in crate::inference::type_tracker) fn infer_shape_call_effect(
@@ -111,70 +83,20 @@ impl TypeTracker {
             return None;
         }
 
-        match method_name {
-            "[]" if argument_nodes.len() == 1 => Some(
-                shape_reads::indexed_read(
-                    &self
-                        .shape_identity_type(&receiver_identities)
-                        .unwrap_or(RubyType::Unknown),
-                    literal_key(&argument_nodes[0]).as_ref(),
-                )
-                .unwrap_or(RubyType::Unknown),
-            ),
-            "fetch" if matches!(argument_nodes.len(), 1 | 2) => Some(
-                shape_reads::fetch(
-                    &self
-                        .shape_identity_type(&receiver_identities)
-                        .unwrap_or(RubyType::Unknown),
-                    literal_key(&argument_nodes[0]).as_ref(),
-                    argument_types.get(1),
-                )
-                .unwrap_or(RubyType::Unknown),
-            ),
-            "dig" if !argument_nodes.is_empty() => {
-                let keys = argument_nodes.iter().map(literal_key).collect::<Vec<_>>();
-                Some(
-                    shape_reads::dig(
-                        &self
-                            .shape_identity_type(&receiver_identities)
-                            .unwrap_or(RubyType::Unknown),
-                        &keys,
-                    )
-                    .unwrap_or(RubyType::Unknown),
-                )
-            }
-            "key?" | "has_key?" | "include?" | "member?" if argument_nodes.len() == 1 => Some(
-                shape_reads::key_presence(
-                    &self
-                        .shape_identity_type(&receiver_identities)
-                        .unwrap_or(RubyType::Unknown),
-                    literal_key(&argument_nodes[0]).as_ref(),
-                )
-                .unwrap_or(RubyType::Unknown),
-            ),
-            "keys" if argument_nodes.is_empty() => Some(
-                shape_reads::keys(
-                    &self
-                        .shape_identity_type(&receiver_identities)
-                        .unwrap_or(RubyType::Unknown),
-                )
-                .unwrap_or(RubyType::Unknown),
-            ),
-            "values" if argument_nodes.is_empty() => Some(
-                shape_reads::values(
-                    &self
-                        .shape_identity_type(&receiver_identities)
-                        .unwrap_or(RubyType::Unknown),
-                )
-                .unwrap_or(RubyType::Unknown),
-            ),
-            "each" | "each_pair" | "each_key" | "each_value" if argument_nodes.is_empty() => Some(
+        if let Some(read) = shape_reads::CallRead::select(
+            method_name,
+            &argument_nodes,
+            &argument_types,
+            call.block().is_some(),
+        ) {
+            return Some(
                 self.shape_identity_type(&receiver_identities)
-                    .and_then(|receiver_type| {
-                        shape_reads::each_return(&receiver_type, call.block().is_some())
-                    })
+                    .and_then(|receiver_type| read.apply(&receiver_type))
                     .unwrap_or(RubyType::Unknown),
-            ),
+            );
+        }
+
+        match method_name {
             "[]=" if argument_nodes.len() == 2 => {
                 let Some(key) = literal_key(&argument_nodes[0]) else {
                     self.environment.invalidate_identities(

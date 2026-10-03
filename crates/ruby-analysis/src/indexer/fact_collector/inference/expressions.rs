@@ -5,7 +5,7 @@ use crate::core::{
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::control_flow;
 use crate::inference::r#type::literal::{
-    infer_array_literal_type_fallible, infer_hash_literal_type_fallible, literal_key,
+    infer_array_literal_type_fallible, infer_hash_literal_type_fallible,
     literal_shape_construction_unknown_reason, project_immediate_hash_receiver_type,
     LiteralAnalyzer,
 };
@@ -298,36 +298,13 @@ impl FactCollector {
                 .iter()
                 .map(|argument| self.infer_type_from_value_with_locals(argument, local_types))
                 .collect::<Vec<_>>();
-            let precise = match method_name.as_ref() {
-                "[]" if argument_nodes.len() == 1 => Some(shape_reads::indexed_read(
-                    &receiver_type,
-                    literal_key(&argument_nodes[0]).as_ref(),
-                )),
-                "fetch" if matches!(argument_nodes.len(), 1 | 2) => Some(shape_reads::fetch(
-                    &receiver_type,
-                    literal_key(&argument_nodes[0]).as_ref(),
-                    argument_types.get(1),
-                )),
-                "dig" if !argument_nodes.is_empty() => {
-                    let keys = argument_nodes.iter().map(literal_key).collect::<Vec<_>>();
-                    Some(shape_reads::dig(&receiver_type, &keys))
-                }
-                "key?" | "has_key?" | "include?" | "member?" if argument_nodes.len() == 1 => {
-                    Some(shape_reads::key_presence(
-                        &receiver_type,
-                        literal_key(&argument_nodes[0]).as_ref(),
-                    ))
-                }
-                "keys" if argument_nodes.is_empty() => Some(shape_reads::keys(&receiver_type)),
-                "values" if argument_nodes.is_empty() => Some(shape_reads::values(&receiver_type)),
-                "each" | "each_pair" | "each_key" | "each_value" if argument_nodes.is_empty() => {
-                    Some(shape_reads::each_return(
-                        &receiver_type,
-                        call_node.block().is_some(),
-                    ))
-                }
-                _ => None,
-            };
+            let precise = shape_reads::CallRead::select(
+                method_name.as_ref(),
+                &argument_nodes,
+                &argument_types,
+                call_node.block().is_some(),
+            )
+            .map(|read| read.apply(&receiver_type));
             if let Some(outcome) = precise {
                 return match outcome {
                     Ok(ruby_type) => TypeInferenceOutcome::proven(ruby_type),
