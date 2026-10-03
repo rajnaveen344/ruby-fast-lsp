@@ -723,9 +723,10 @@ Delete this file when the last task is done. Git history keeps the record.
         `ruby-fast-lsp/extensions/status` to report it loaded. The VSIX
         binary sits in `bin/<platform>/`, so it never discovers the VSIX's
         own `extensions/` a second time.
-    - [ ] C7d3. Port the RSpec integration cases to load the package. Each
+    - [x] C7d3. Port the RSpec integration cases to load the package. Each
           fixture lives in a project with a minimal neutral `Gemfile.lock`
           that locks `rspec-core` 3.x.
+      - Done: `semantic` runs all 24 cases through `Rspec::Package`.
     - [ ] C7d4. Delete `crates/extension-rspec` and the host special case
           that runs it, from the workspace, `build.rs` fingerprints, and
           docs. The producer identity changes, which forces one cold gem

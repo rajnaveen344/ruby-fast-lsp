@@ -4,7 +4,7 @@
 //! Each case runs in a project that locks `rspec-core` 3.x, through either
 //! the native fallback or the `extensions/rspec-ruby` package, and returns a
 //! transcript of what it observed so the two implementations can be compared.
-//! `semantic` runs every case through the implementation the server uses, and
+//! `semantic` runs every case through the package, the supported implementation, and
 //! `parity` requires both implementations to observe the same results.
 
 mod harness;
@@ -15,7 +15,7 @@ mod scopes;
 use harness::{Rspec, RspecEditor};
 
 /// The implementation the semantic cases exercise.
-const SEMANTIC_IMPLEMENTATION: Rspec = Rspec::NativeFallback;
+const SEMANTIC_IMPLEMENTATION: Rspec = Rspec::Package;
 
 macro_rules! rspec_cases {
     ($($module:ident::$case:ident),* $(,)?) => {
