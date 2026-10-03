@@ -62,7 +62,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         additional_sources: Vec::new(),
     }];
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(&root).unwrap());
     let mut coordinator = IndexingCoordinator::new(root.clone(), config);
     coordinator.set_cache_root(fixture.path().join("user-cache"));
@@ -441,7 +441,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
         additional_sources: Vec::new(),
     }];
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(&root).unwrap());
     let mut coordinator = IndexingCoordinator::new(root.clone(), config);
     coordinator.set_cache_root(fixture.path().join("user-cache"));

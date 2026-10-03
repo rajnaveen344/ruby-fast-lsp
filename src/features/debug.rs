@@ -6,11 +6,11 @@ pub use ruby_analysis::engine::{ExportGraphResponse, LookupResponse};
 use serde::{Deserialize, Serialize};
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
-use crate::server::{ProjectHandle, RubyLanguageServer};
+use crate::server::{ProjectHandle, Server};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::Url;
 
-fn project(server: &RubyLanguageServer, uri: Option<&str>) -> ProjectHandle {
+fn project(server: &Server, uri: Option<&str>) -> ProjectHandle {
     uri.and_then(|value| Url::parse(value).ok())
         .map(|uri| server.project_for_uri(&uri))
         .or_else(|| {
@@ -49,10 +49,7 @@ pub struct ExportGraphParams {
 // ============================================================================
 
 /// Handle `ruby-fast-lsp/debug/lookup` - query analysis state for an FQN.
-pub async fn handle_lookup(
-    server: &RubyLanguageServer,
-    params: LookupParams,
-) -> LspResult<LookupResponse> {
+pub async fn handle_lookup(server: &Server, params: LookupParams) -> LspResult<LookupResponse> {
     info!("Debug lookup request received for: {}", params.fqn);
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
     Ok(project(server, params.uri.as_deref()).view(|view| view.debug_lookup(&params.fqn)))
@@ -60,7 +57,7 @@ pub async fn handle_lookup(
 
 /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.
 pub async fn handle_export_graph(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: ExportGraphParams,
 ) -> LspResult<ExportGraphResponse> {
     info!("Export graph request received");
@@ -70,7 +67,7 @@ pub async fn handle_export_graph(
 
 /// Handle `ruby-fast-lsp/extensions/status` - list loaded extension states.
 pub async fn handle_extension_status(
-    server: &RubyLanguageServer,
+    server: &Server,
     _params: ExtensionStatusParams,
 ) -> LspResult<ExtensionStatusResponse> {
     info!("Extension status request received");

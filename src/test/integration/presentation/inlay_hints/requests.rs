@@ -3,7 +3,7 @@
 
 use crate::features::presentation::inlay_hints;
 use crate::lsp::lifecycle::indexing;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use std::sync::Arc;
 use std::time::Duration;
 use tower_lsp::lsp_types::{
@@ -13,8 +13,8 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 
-async fn create_test_server() -> RubyLanguageServer {
-    let server = RubyLanguageServer::default();
+async fn create_test_server() -> Server {
+    let server = Server::default();
     let _ = server.initialize(InitializeParams::default()).await;
     server
 }
@@ -114,7 +114,7 @@ async fn inlay_hints_wait_for_the_current_document_semantic_commit() {
     let source = "module ErrorCatalog\n  RETRY = \"retry\".freeze\nend\n\ndef value\n  code = ErrorCatalog::RETRY\n  code\nend\n";
     std::fs::write(&path, source).unwrap();
 
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(crate::utils::admission::IndexingResourceGovernor::new(

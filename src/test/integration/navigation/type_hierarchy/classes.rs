@@ -406,7 +406,7 @@ mod cross_file_tests {
 
     /// Helper to find a class/module by searching through lines
     async fn find_type_at_name(
-        server: &crate::server::RubyLanguageServer,
+        server: &crate::server::Server,
         uri: &tower_lsp::lsp_types::Url,
         content: &str,
         type_name: &str,

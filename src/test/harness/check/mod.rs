@@ -42,7 +42,7 @@ use tower_lsp::lsp_types::{
 
 use super::fake_editor::FakeEditor;
 use super::fixture::{parse_fixture, Fixture, Tag, TagKind};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// Open a single fixture as `inline_test.rb` and run its assertions.
 pub async fn check(fixture_text: &str) {
@@ -79,7 +79,7 @@ pub(super) struct FixtureFile {
 }
 
 /// Run every assertion in an already-opened set of fixtures.
-pub(super) async fn run_fixture_checks(server: &RubyLanguageServer, files: &[FixtureFile]) {
+pub(super) async fn run_fixture_checks(server: &Server, files: &[FixtureFile]) {
     assert!(
         files.iter().any(|file| file.fixture.has_markers()),
         "fixture asserts nothing: add tags, or assert the expected result directly"

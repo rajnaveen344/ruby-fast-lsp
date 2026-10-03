@@ -7,7 +7,7 @@ use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse};
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::lsp_range;
 
 use ruby_analysis::core::NamespaceKind;
@@ -17,7 +17,7 @@ use ruby_analysis::indexer::{
 
 /// Handle `textDocument/documentSymbol`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DocumentSymbolParams,
 ) -> LspResult<Option<DocumentSymbolResponse>> {
     let uri = params.text_document.uri;

@@ -6,12 +6,12 @@ use crate::environment::config::runtime::EffectiveRuntimeSelection;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::lsp::lifecycle::indexing;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::{info, warn};
 use tower_lsp::lsp_types::*;
 
 pub async fn handle_did_change_watched_files(
-    server: &RubyLanguageServer,
+    server: &Server,
     mut params: DidChangeWatchedFilesParams,
 ) {
     let debounce_generation = server.queue_watched_file_changes(params.changes);
@@ -164,7 +164,7 @@ fn project_extension_input_changed(
 }
 
 pub(super) async fn rebuild_runtime_owned_project_state(
-    server: &RubyLanguageServer,
+    server: &Server,
     workspace: crate::server::Workspace,
 ) {
     info!(

@@ -1,5 +1,5 @@
 //! Editor projection cache; semantic identity stays with the analysis engine.
-use super::RubyLanguageServer;
+use super::Server;
 use log::debug;
 use parking_lot::Mutex;
 use ruby_analysis::engine::NamespaceTreeResponse;
@@ -24,7 +24,7 @@ impl NamespaceTreeCache {
         *self.response.lock() = Some((hash, response));
     }
 }
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn cached_namespace_tree(&self, hash: u64) -> Option<NamespaceTreeResponse> {
         self.namespace_tree.get(hash)
     }
@@ -66,7 +66,7 @@ impl NamespaceTreeCache {
         });
     }
 }
-impl RubyLanguageServer {
+impl Server {
     pub fn invalidate_namespace_tree_cache_debounced(&self) {
         self.namespace_tree.invalidate_debounced();
     }

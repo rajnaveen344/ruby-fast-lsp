@@ -4,7 +4,7 @@ use ruby_fast_lsp::features::diagnostics::engine_diagnostics;
 use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::loader::scheduling::status;
 use ruby_fast_lsp::lsp::lifecycle::indexing;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -24,7 +24,7 @@ pub(crate) struct PreparedDefinitionProbe {
 }
 
 pub(crate) async fn prepare_live_definition_probes(
-    server: &RubyLanguageServer,
+    server: &Server,
     workspace_path: &std::path::Path,
     probes: &[ReferenceProbe],
 ) -> anyhow::Result<Vec<PreparedDefinitionProbe>> {
@@ -73,7 +73,7 @@ pub(crate) async fn prepare_live_definition_probes(
 }
 
 pub(crate) async fn observe_first_live_definition(
-    server: &RubyLanguageServer,
+    server: &Server,
     probe: PreparedDefinitionProbe,
     indexing_started: Instant,
 ) -> serde_json::Value {
@@ -175,7 +175,7 @@ pub(crate) async fn observe_first_live_definition(
 }
 
 pub(crate) async fn sample_references(
-    server: &RubyLanguageServer,
+    server: &Server,
     workspace_path: &std::path::Path,
     probes: &[ReferenceProbe],
 ) -> anyhow::Result<()> {
@@ -224,7 +224,7 @@ pub(crate) async fn sample_references(
 }
 
 pub(crate) async fn sample_definitions(
-    server: &RubyLanguageServer,
+    server: &Server,
     workspace_path: &std::path::Path,
     probes: &[ReferenceProbe],
 ) -> anyhow::Result<()> {
@@ -274,7 +274,7 @@ pub(crate) async fn sample_definitions(
 }
 
 pub(crate) async fn sample_open_file_diagnostics(
-    server: &RubyLanguageServer,
+    server: &Server,
     workspace_path: &std::path::Path,
     relative_paths: &[PathBuf],
 ) -> anyhow::Result<()> {

@@ -16,14 +16,14 @@ use super::find_definition_at_position;
 use crate::loader::scheduling::navigation_demand::{
     NavigationDemandOutcome, NavigationDemandStage,
 };
-use crate::server::{RubyLanguageServer, Workspace};
+use crate::server::{Server, Workspace};
 use crate::utils::lsp::source_position;
 
 const PROJECT_NAVIGATION_DEMAND_WAIT: Duration = Duration::from_secs(5);
 const DEPENDENCY_NAVIGATION_DEMAND_WAIT: Duration = Duration::from_secs(15);
 
 pub(crate) fn navigation_demand_keys_at_position(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     position: Position,
 ) -> Option<DefinitionNavigationDemandKeys> {
@@ -39,7 +39,7 @@ pub(crate) fn navigation_demand_keys_at_position(
 /// after each completion. Returns an indexing-in-progress error when the
 /// definition still depends on pending indexing.
 pub(super) async fn wait_for_demanded_definition(
-    server: &RubyLanguageServer,
+    server: &Server,
     project: &Workspace,
     demand_keys: &DefinitionNavigationDemandKeys,
     uri: &Url,

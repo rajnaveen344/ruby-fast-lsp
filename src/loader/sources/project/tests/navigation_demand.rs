@@ -86,7 +86,7 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
     std::fs::write(&active_path, "class User\nend\n").unwrap();
     std::fs::write(&background_path, "class Report\nend\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -141,7 +141,7 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
     std::fs::write(root.join("account_record.rb"), "class AccountRecord\nend\n").unwrap();
     std::fs::write(root.join("report.rb"), "class Report\nend\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -198,7 +198,7 @@ fn navigation_demand_completes_when_the_frontier_already_processed_its_file() {
     std::fs::write(root.join("account.rb"), "class AccountRecord\nend\n").unwrap();
     std::fs::write(root.join("report.rb"), "class Report\nend\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),

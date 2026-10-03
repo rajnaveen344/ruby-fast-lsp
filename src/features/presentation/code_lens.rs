@@ -4,7 +4,7 @@
 use crate::features::cursor::analysis_location::location_for_range;
 use crate::features::cursor::{Cursor, EngineQuery};
 use crate::invariant::ExpectInvariant;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::lsp_position;
 use log::{debug, warn};
 use ruby_analysis::core::FullyQualifiedName;
@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::*;
 
 /// Handle `textDocument/codeLens`: module usage lenses plus extension lenses.
 pub async fn handle(
-    lang_server: &RubyLanguageServer,
+    lang_server: &Server,
     params: CodeLensParams,
 ) -> LspResult<Option<Vec<CodeLens>>> {
     let uri = &params.text_document.uri;

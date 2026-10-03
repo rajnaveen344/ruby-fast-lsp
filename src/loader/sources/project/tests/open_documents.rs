@@ -40,7 +40,7 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
     std::fs::write(&closed_path, "User.new\n").unwrap();
     std::fs::write(&definition_path, "class User\nend\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace = server.add_workspace(Url::from_directory_path(root).unwrap());
     let open_uri = Url::from_file_path(&open_path).unwrap();
     crate::lsp::lifecycle::indexing::handle_did_open(
@@ -103,7 +103,7 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     std::fs::write(&utility_path, stale_disk_source).unwrap();
     std::fs::write(&caller_path, caller_source).unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     for (path, text) in [(&utility_path, open_source), (&caller_path, caller_source)] {
         crate::lsp::lifecycle::indexing::handle_did_open(
@@ -172,7 +172,7 @@ fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
     std::fs::write(&path, source).unwrap();
 
     let collect = |preindex: bool| {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         if preindex {
             let uri = Url::from_file_path(&path).unwrap();

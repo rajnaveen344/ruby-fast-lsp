@@ -23,7 +23,7 @@ use anyhow::{anyhow, Context, Result};
 use devtools::corpus;
 use log::{info, LevelFilter};
 use ruby_fast_lsp::loader::coordinator::{IndexingCoordinator, IndexingTimings};
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -160,7 +160,7 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
     let workspace_uri = Url::from_file_path(workspace_path)
         .map_err(|_| anyhow!("invalid workspace path: {}", workspace_path.display()))?;
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(workspace_uri.clone());
 
     let config = server.configuration_snapshot();

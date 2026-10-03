@@ -186,7 +186,7 @@ fn container_workspace_registration_expands_to_isolated_gemfile_projects() {
     fs::create_dir_all(workspace.path().join("vendor/cache/dependency")).unwrap();
     fs::write(workspace.path().join("vendor/cache/dependency/Gemfile"), "").unwrap();
 
-    let server = crate::server::RubyLanguageServer::default();
+    let server = crate::server::Server::default();
     let uri = Url::from_directory_path(workspace.path()).unwrap();
     let projects = server.add_workspace_folder(uri).unwrap();
 

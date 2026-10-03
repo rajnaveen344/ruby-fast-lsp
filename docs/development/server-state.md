@@ -1,6 +1,6 @@
 # Server state ownership
 
-`RubyLanguageServer` groups protocol state into owners with separate lifetimes
+`Server` groups protocol state into owners with separate lifetimes
 and locks. The semantic database remains isolated per Ruby project.
 
 Start with [server.rs](../../src/server/mod.rs): it constructs the owners. The LSP
@@ -58,9 +58,9 @@ from configuration and workspace trust, with one dynamic watcher registration.
 `diagnostics` is the single outbound diagnostic queue for the client, so
 publication stays latest-per-URI across projects. `file_changes` debounces the
 client's watcher events before they are routed to projects. `namespace_tree`
-caches one response for the whole Ruby Index view. The type keeps its name,
-`RubyLanguageServer`: renaming it to `Server` touches more than a hundred files
-for no change in ownership, so it waits for a quiet tree.
+caches one response for the whole Ruby Index view. The six server-wide
+services stay direct fields rather than one `services` group: each has its own
+lock and lifetime, and a grouping field would only add a hop to every access.
 
 No server field is public outside the crate. Fields used by sibling modules
 are explicitly `pub(crate)`; server-owned fields are explicitly `pub(self)`.
@@ -112,7 +112,7 @@ schema and counter fields remain unchanged.
 
 ```mermaid
 flowchart TD
-    LSP[Editor requests and notifications] --> Service[lsp/service.rs: protocol facade] --> Server[RubyLanguageServer: state owners]
+    LSP[Editor requests and notifications] --> Service[lsp/service.rs: protocol facade] --> Server[Server: state owners]
     Server --> Documents[OpenDocuments: buffers and lifecycle locks]
     Server --> Projects[ProjectRegistry: routing and provenance]
     Projects --> A[Project A: isolated engine::Project]

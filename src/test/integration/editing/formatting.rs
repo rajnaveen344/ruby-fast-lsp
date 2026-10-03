@@ -1,5 +1,5 @@
 use crate::environment::config::{FormatterKind, RubyFastLspConfig};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 #[cfg(unix)]
 use crate::test::harness::with_process_clock;
 use crate::test::harness::FakeEditor;
@@ -11,7 +11,7 @@ use tower_lsp::LanguageServer;
 
 #[tokio::test]
 async fn initialization_advertises_full_document_formatting() {
-    let initialized = RubyLanguageServer::default()
+    let initialized = Server::default()
         .initialize(InitializeParams::default())
         .await
         .unwrap();

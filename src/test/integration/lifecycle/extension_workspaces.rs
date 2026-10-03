@@ -13,7 +13,7 @@ use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::tests::{
     copy_rspec_package, write_watched_file_failure_package,
 };
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 #[tokio::test]
 async fn trusted_workspace_discovers_project_local_extension_package() {
@@ -22,7 +22,7 @@ async fn trusted_workspace_discovers_project_local_extension_package() {
     copy_rspec_package(&package, "0.1.0-project");
     let root_uri = Url::from_directory_path(temp_dir.path())
         .expect("test workspace path must convert to a file URI");
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
 
     server
         .initialize(InitializeParams {
@@ -56,7 +56,7 @@ async fn dynamic_workspace_change_reconfigures_project_extensions() {
         uri: root_uri,
         name: "dynamic".to_string(),
     };
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server
         .initialize(InitializeParams {
             initialization_options: Some(serde_json::json!({
@@ -105,7 +105,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
         extension_packages: vec![package.to_string_lossy().into_owned()],
         ..RubyFastLspConfig::default()
     };
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(root_uri);
     server.extensions.registry().configure_from_config(&config);
     assert_eq!(
@@ -154,7 +154,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
     );
 }
 
-fn project_holds_rspec_describe(server: &RubyLanguageServer, root_uri: &Url) -> bool {
+fn project_holds_rspec_describe(server: &Server, root_uri: &Url) -> bool {
     server.project_for_uri(root_uri).view(|view| {
         view.all_method_facts().iter().any(|fact| {
             matches!(
@@ -189,7 +189,7 @@ async fn runtime_rebuild_restores_extension_semantic_seed() {
         extension_packages: vec![package.to_string_lossy().into_owned()],
         ..RubyFastLspConfig::default()
     };
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     *server.config.lock() = config.clone();
     server.add_workspace(root_uri.clone());
     server.extensions.registry().configure_from_config(&config);

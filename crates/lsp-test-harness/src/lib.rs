@@ -7,7 +7,7 @@ use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use ruby_fast_lsp::environment::extensions::{ExtensionStatusParams, ExtensionStatusReport};
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use tower_lsp::jsonrpc::ErrorCode;
 use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
@@ -25,7 +25,7 @@ const GOTO_DEFINITION_RETRIGGER_BACKOFF: std::time::Duration = std::time::Durati
 const INDEXING_COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub struct FakeEditor {
-    server: RubyLanguageServer,
+    server: Server,
     buffers: HashMap<String, (String, i32)>,
 }
 
@@ -37,7 +37,7 @@ impl FakeEditor {
     pub async fn new_with_initialization_options(
         initialization_options: Option<serde_json::Value>,
     ) -> Self {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         server
             .initialize(InitializeParams {
                 initialization_options,
@@ -45,7 +45,7 @@ impl FakeEditor {
             })
             .await
             .expect_invariant(
-                "FakeEditor failed to initialize RubyLanguageServer",
+                "FakeEditor failed to initialize Server",
                 "tests require a valid LSP initialization",
                 "keep server initialization valid for default params",
             );
@@ -80,7 +80,7 @@ impl FakeEditor {
         I: IntoIterator<Item = P>,
         P: AsRef<std::path::Path>,
     {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let root_uri = Url::from_directory_path(workspace_root.as_ref()).expect_invariant(
             "black-box workspace root is not a valid file URI",
             "project-context tests require a real filesystem root",
@@ -102,7 +102,7 @@ impl FakeEditor {
             })
             .await
             .expect_invariant(
-                "project-aware FakeEditor failed to initialize RubyLanguageServer",
+                "project-aware FakeEditor failed to initialize Server",
                 "the supplied workspace and extension package are valid",
                 "inspect initialization routing",
             );

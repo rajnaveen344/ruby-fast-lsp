@@ -9,7 +9,7 @@ use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use ruby_prism::{DefNode, Visit};
 use tower_lsp::lsp_types::Url;
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 use crate::utils::lsp::source_position;
 
@@ -35,7 +35,7 @@ impl TypeKind {
 /// `<type label="T" kind="...">`: the type inferred for the identifier at the
 /// point displays exactly as `T`. `kind` additionally asserts what the
 /// identifier is.
-pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str, tags: &[&Tag]) {
+pub(super) fn check_types(server: &Server, uri: &Url, content: &str, tags: &[&Tag]) {
     let document = server
         .documents
         .read()

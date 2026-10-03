@@ -7,7 +7,7 @@ use log::{info, LevelFilter};
 use ruby_fast_lsp::environment::config::RubyFastLspConfig;
 use ruby_fast_lsp::environment::extensions::ExtensionRegistryHandle;
 use ruby_fast_lsp::loader::file_processor::FileProcessor;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use tower_lsp::lsp_types::Url;
 
 fn main() -> Result<()> {
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
     }
     let extension_registry = ExtensionRegistryHandle::from_config(&config);
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(workspace_uri);
     let processor = FileProcessor::with_extension_registry(extension_registry);
 

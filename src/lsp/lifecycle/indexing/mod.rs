@@ -4,7 +4,7 @@ use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::project::files::ProjectFilePolicy;
-use crate::server::{ProjectHandle, RubyLanguageServer};
+use crate::server::{ProjectHandle, Server};
 use ruby_analysis::core::SourceKind;
 
 use log::{debug, info};
@@ -21,7 +21,7 @@ enum DocumentSemanticMode {
     Full,
 }
 
-fn interactive_file_processor(server: &RubyLanguageServer, uri: &Url) -> FileProcessor {
+fn interactive_file_processor(server: &Server, uri: &Url) -> FileProcessor {
     let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     server
         .jruby_add_on_for_uri(uri)
@@ -31,7 +31,7 @@ fn interactive_file_processor(server: &RubyLanguageServer, uri: &Url) -> FilePro
 
 async fn process_interactive_file(
     indexer: &FileProcessor,
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     content: &str,
     mode: DocumentSemanticMode,
@@ -97,7 +97,7 @@ async fn process_interactive_file(
 /// document's version is already indexed.
 fn reanalyze_open_file(
     processor: &FileProcessor,
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     content: &str,
 ) -> anyhow::Result<crate::loader::file_processor::ProcessResult> {
@@ -109,14 +109,14 @@ fn reanalyze_open_file(
 /// Initialize workspace and run complete indexing.
 ///
 pub async fn init_workspace(
-    server: &RubyLanguageServer,
+    server: &Server,
     folder_uri: Url,
 ) -> anyhow::Result<crate::loader::coordinator::IndexingTimings> {
     init_workspace_inner(server, folder_uri, None).await
 }
 
 pub async fn init_workspace_for_run(
-    server: &RubyLanguageServer,
+    server: &Server,
     folder_uri: Url,
     run: crate::loader::scheduling::status::IndexingRun,
 ) -> anyhow::Result<crate::loader::coordinator::IndexingTimings> {
@@ -124,7 +124,7 @@ pub async fn init_workspace_for_run(
 }
 
 async fn init_workspace_inner(
-    server: &RubyLanguageServer,
+    server: &Server,
     folder_uri: Url,
     run: Option<crate::loader::scheduling::status::IndexingRun>,
 ) -> anyhow::Result<crate::loader::coordinator::IndexingTimings> {
@@ -153,7 +153,7 @@ async fn init_workspace_inner(
     Ok(coordinator.last_timings())
 }
 
-pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
+pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams) {
     let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
     let semantic_lock = server.document_semantic_lock(&uri);
@@ -265,7 +265,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
 
 async fn refresh_open_project_files_after_dependency_open(
     indexer: &FileProcessor,
-    server: &RubyLanguageServer,
+    server: &Server,
     opened_uri: &Url,
 ) {
     let owning_project = server.project_for_uri(opened_uri);
@@ -300,7 +300,7 @@ async fn refresh_open_project_files_after_dependency_open(
     }
 }
 
-fn source_kind_for_new_open_file(server: &RubyLanguageServer, uri: &Url) -> SourceKind {
+fn source_kind_for_new_open_file(server: &Server, uri: &Url) -> SourceKind {
     let Some(workspace) = server.workspace_for_uri(uri) else {
         return if server.list_workspaces().is_empty() {
             SourceKind::Project
@@ -322,7 +322,7 @@ fn source_kind_for_new_open_file(server: &RubyLanguageServer, uri: &Url) -> Sour
     }
 }
 
-fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKind> {
+fn analysis_file_kind(server: &Server, uri: &Url) -> Option<SourceKind> {
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
@@ -333,7 +333,7 @@ fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKi
     })
 }
 
-pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTextDocumentParams) {
+pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentParams) {
     let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
     let semantic_lock = server.document_semantic_lock(&uri);
@@ -425,7 +425,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
 }
 
 async fn refresh_bounded_open_diagnostics(
-    server: &RubyLanguageServer,
+    server: &Server,
     indexer: &FileProcessor,
     changed_uri: &Url,
 ) -> usize {
@@ -444,7 +444,7 @@ async fn refresh_bounded_open_diagnostics(
 }
 
 fn bounded_open_diagnostic_refresh_targets(
-    server: &RubyLanguageServer,
+    server: &Server,
     changed_uri: &Url,
 ) -> Vec<(Url, String)> {
     let mut open_documents = {
@@ -466,7 +466,7 @@ fn bounded_open_diagnostic_refresh_targets(
     open_documents
 }
 
-pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
+pub async fn handle_did_save(server: &Server, params: DidSaveTextDocumentParams) {
     let uri = params.text_document.uri;
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
@@ -512,7 +512,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     server.refresh_inlay_hints().await;
 }
 
-pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextDocumentParams) {
+pub async fn handle_did_close(server: &Server, params: DidCloseTextDocumentParams) {
     let uri = params.text_document.uri.clone();
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
@@ -537,7 +537,7 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
 }
 
 pub async fn handle_watched_files_changed(
-    server: &RubyLanguageServer,
+    server: &Server,
     mut params: DidChangeWatchedFilesParams,
 ) {
     debug!("Watched files changed: {} files", params.changes.len());
@@ -645,7 +645,7 @@ pub async fn handle_watched_files_changed(
 
 async fn refresh_open_project_files_for_dependency_engines(
     processor: &FileProcessor,
-    server: &RubyLanguageServer,
+    server: &Server,
     changed_uris: &[Url],
 ) {
     let mut changed_projects: Vec<ProjectHandle> = Vec::new();
@@ -690,18 +690,18 @@ async fn refresh_open_project_files_for_dependency_engines(
     }
 }
 
-fn remove_project_file(server: &RubyLanguageServer, uri: &Url) -> bool {
+fn remove_project_file(server: &Server, uri: &Url) -> bool {
     remove_file_if_kind(server, uri, SourceKind::Project)
 }
 
-fn clear_project_file_facts(server: &RubyLanguageServer, uri: &Url) -> bool {
+fn clear_project_file_facts(server: &Server, uri: &Url) -> bool {
     clear_file_facts_if_kind(server, uri, SourceKind::Project)
 }
 
 /// Remove a file that no longer exists or no longer belongs to its project.
 /// Other files stop resolving into it, and a later registration at the same
 /// path starts from a fresh identity.
-fn remove_file_if_kind(server: &RubyLanguageServer, uri: &Url, expected_kind: SourceKind) -> bool {
+fn remove_file_if_kind(server: &Server, uri: &Url, expected_kind: SourceKind) -> bool {
     server
         .project_for_uri(uri)
         .remove_path_of_kind(&uri_path(uri), expected_kind)
@@ -710,11 +710,7 @@ fn remove_file_if_kind(server: &RubyLanguageServer, uri: &Url, expected_kind: So
 /// Keep a file that still exists on disk but could not be read or analyzed
 /// registered as an empty source, so require resolution still finds it while
 /// none of its previous facts survive.
-fn clear_file_facts_if_kind(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    expected_kind: SourceKind,
-) -> bool {
+fn clear_file_facts_if_kind(server: &Server, uri: &Url, expected_kind: SourceKind) -> bool {
     server
         .project_for_uri(uri)
         .clear_path_facts_of_kind(&uri_path(uri), expected_kind)

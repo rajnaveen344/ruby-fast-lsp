@@ -5,7 +5,7 @@ use crate::features::navigation::definition;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::scheduling::navigation_demand::NavigationDemandStage;
 use crate::loader::scheduling::status::IndexingPhase;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use std::sync::Arc;
 use std::time::Duration;
 use tower_lsp::lsp_types::*;
@@ -21,7 +21,7 @@ async fn early_definition_request_waits_for_its_exact_project_demand_and_retries
     let caller = "AccountRecord.lookup\n";
     std::fs::write(&caller_path, caller).unwrap();
 
-    let server = Arc::new(RubyLanguageServer::default());
+    let server = Arc::new(Server::default());
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
     let run = workspace.begin_indexing_run();
     workspace
@@ -113,7 +113,7 @@ async fn dependency_demand_can_resolve_before_the_project_stage_completes() {
     let caller = "BSON::ObjectId.new\n";
     std::fs::write(&caller_path, caller).unwrap();
 
-    let server = Arc::new(RubyLanguageServer::default());
+    let server = Arc::new(Server::default());
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
     let run = workspace.begin_indexing_run();
     workspace

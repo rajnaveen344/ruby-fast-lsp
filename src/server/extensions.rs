@@ -1,4 +1,4 @@
-use super::RubyLanguageServer;
+use super::Server;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::ExtensionRegistryHandle;
 use crate::environment::extensions::ExtensionStatusReport;
@@ -31,7 +31,7 @@ impl ExtensionServices {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Configure an embedded server before indexing starts. Client-backed
     /// servers receive configuration through their LSP initialization lifecycle.
     /// Returns extension load time, excluding configuration publication.

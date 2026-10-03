@@ -1,6 +1,6 @@
 //! Current-source diagnostic projection and latest-per-document publication.
 use super::projects::ProjectRegistry;
-use super::{RubyLanguageServer, Workspace};
+use super::{Server, Workspace};
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{IndexingRunState, LoadSink, LoadTarget, SourceReader};
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
@@ -59,7 +59,7 @@ pub(super) struct DiagnosticPublisher {
     submitted: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
 }
 
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn diagnostic_source_snapshot(
         &self,
         uri: &Url,
@@ -396,7 +396,7 @@ fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSe
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Publish a current, complete diagnostic projection for every open
     /// document that `target`, the engine of the project at `root`, owns.
     ///
@@ -547,7 +547,7 @@ impl DiagnosticPublisher {
         }
     }
 }
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
         self.diagnostics
             .enqueue(self.client.clone(), uri, diagnostics);

@@ -38,7 +38,7 @@ fn mri_runtime_does_not_materialize_a_jruby_import_provider() {
 #[tokio::test(flavor = "current_thread")]
 async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource_claims() {
     let root = PathBuf::from("/workspace/server");
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(admission::IndexingResourceGovernor::new(
@@ -118,7 +118,7 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
 async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
     let active_root = PathBuf::from("/workspace/server");
     let sibling_root = PathBuf::from("/workspace/admin");
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(admission::IndexingResourceGovernor::new(

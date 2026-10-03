@@ -24,12 +24,12 @@ use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::analysis_location::{location_for_range, lsp_ranges_for_ranges};
 use crate::features::cursor::{method, Cursor, EngineQuery};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::source_position;
 
 /// Handle `textDocument/prepareCallHierarchy`.
 pub async fn handle_prepare(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: CallHierarchyPrepareParams,
 ) -> LspResult<Option<Vec<CallHierarchyItem>>> {
     let uri = params.text_document_position_params.text_document.uri;
@@ -57,7 +57,7 @@ pub async fn handle_prepare(
 
 /// Handle `callHierarchy/incomingCalls`.
 pub async fn handle_incoming(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: CallHierarchyIncomingCallsParams,
 ) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
     info!("Incoming calls request received for: {}", params.item.name);
@@ -73,7 +73,7 @@ pub async fn handle_incoming(
 
 /// Handle `callHierarchy/outgoingCalls`.
 pub async fn handle_outgoing(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: CallHierarchyOutgoingCallsParams,
 ) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
     info!("Outgoing calls request received for: {}", params.item.name);
@@ -90,7 +90,7 @@ pub async fn handle_outgoing(
 /// Read a follow-up request's stored item identity under one view of its
 /// owning engine.
 fn read_item<R>(
-    server: &RubyLanguageServer,
+    server: &Server,
     item: &CallHierarchyItem,
     read: impl FnOnce(&View<'_>, &CallHierarchyData) -> Option<R>,
 ) -> Option<R> {

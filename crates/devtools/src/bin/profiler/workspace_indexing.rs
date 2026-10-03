@@ -6,7 +6,7 @@ use ruby_analysis::core::TypeSubject;
 use ruby_fast_lsp::environment::config::RubyFastLspConfig;
 use ruby_fast_lsp::loader::scheduling::{scheduler, status};
 use ruby_fast_lsp::lsp::lifecycle::indexing;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ use crate::indexing_summary::{indexing_summary_json, indexing_timing_json};
 use crate::navigation_probes::{observe_first_live_definition, PreparedDefinitionProbe};
 
 pub(crate) fn configure_server(
-    server: &mut RubyLanguageServer,
+    server: &mut Server,
     config_path: Option<&PathBuf>,
     extension_path: Option<&PathBuf>,
 ) -> Duration {
@@ -111,7 +111,7 @@ pub(crate) fn load_profiler_config(path: &PathBuf) -> RubyFastLspConfig {
 }
 
 pub(crate) async fn run_full_indexing(
-    server: &RubyLanguageServer,
+    server: &Server,
     definition_probes: &[PreparedDefinitionProbe],
 ) -> Duration {
     let start = Instant::now();
@@ -121,7 +121,7 @@ pub(crate) async fn run_full_indexing(
 }
 
 pub(crate) async fn run_indexing_only(
-    server: &RubyLanguageServer,
+    server: &Server,
     definition_probes: &[PreparedDefinitionProbe],
 ) -> Duration {
     let start = Instant::now();
@@ -131,7 +131,7 @@ pub(crate) async fn run_indexing_only(
 }
 
 async fn run_registered_workspace_indexing(
-    server: &RubyLanguageServer,
+    server: &Server,
     definition_probes: &[PreparedDefinitionProbe],
 ) {
     let workspaces = server.list_workspaces();
@@ -263,7 +263,7 @@ async fn run_registered_workspace_indexing(
     );
 }
 
-pub(crate) async fn run_type_inference_only(server: &RubyLanguageServer) {
+pub(crate) async fn run_type_inference_only(server: &Server) {
     let start = Instant::now();
     let inferred_count = server
         .list_workspaces()

@@ -315,6 +315,6 @@ end
 }
 
 /// Create a test server instance
-fn create_test_server() -> RubyLanguageServer {
-    RubyLanguageServer::default()
+fn create_test_server() -> Server {
+    Server::default()
 }

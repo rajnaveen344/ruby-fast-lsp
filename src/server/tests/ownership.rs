@@ -1,13 +1,13 @@
 use crate::loader::context::{CORE_ENGINE_CACHE_MAX_ENTRIES, CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES};
 use crate::utils::single_flight::SingleFlightStat;
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use ruby_analysis::engine::Project;
 use std::sync::Arc;
 
 #[test]
 fn server_ownership_clones_share_document_locks_and_isolate_project_engines() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let clone = server.clone();
     let uri = crate::test::harness::fixture_uri("/ownership/entry.rb");
     let other_uri = crate::test::harness::fixture_uri("/ownership/other.rb");
@@ -36,9 +36,8 @@ fn server_ownership_clones_share_document_locks_and_isolate_project_engines() {
 
 #[tokio::test]
 async fn server_ownership_client_construction_defers_extension_discovery() {
-    let (service, _socket) = tower_lsp::LspService::new(|client| {
-        RubyLanguageServer::new(client).expect("construct client server")
-    });
+    let (service, _socket) =
+        tower_lsp::LspService::new(|client| Server::new(client).expect("construct client server"));
     assert!(service.inner().client.is_some());
     assert!(service.inner().extension_status_reports().is_empty());
     assert!(service.inner().list_workspaces().is_empty());
@@ -46,7 +45,7 @@ async fn server_ownership_client_construction_defers_extension_discovery() {
 
 #[tokio::test]
 async fn core_engine_template_retention_is_bounded_by_entries_and_estimated_heap() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     for index in 0..(CORE_ENGINE_CACHE_MAX_ENTRIES + 2) {
         server
             .products
@@ -77,7 +76,7 @@ async fn core_engine_template_retention_is_bounded_by_entries_and_estimated_heap
 async fn server_ownership_clones_reuse_products_with_one_ordinary_cache_root() {
     let fixture = tempfile::tempdir().unwrap();
     let root = fixture.path().join("cache");
-    let server = RubyLanguageServer::with_user_cache_root(root.clone()).unwrap();
+    let server = Server::with_user_cache_root(root.clone()).unwrap();
     let clone = server.clone();
     assert_eq!(clone.products.cache_root(), root);
     let first = server

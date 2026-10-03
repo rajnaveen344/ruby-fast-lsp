@@ -22,13 +22,13 @@ use crate::loader::require_paths::{
     find_require_string_at_offset, location_for_require_target, resolve_require_path,
     RequireStringTarget,
 };
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::{lsp_position, source_position};
 use ruby_analysis::indexer::RubyDocument;
 
 /// Handle `textDocument/definition`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: GotoDefinitionParams,
 ) -> LspResult<Option<GotoDefinitionResponse>> {
     let uri = params.text_document_position_params.text_document.uri;
@@ -64,7 +64,7 @@ pub async fn handle(
 /// Find the definition at `position`: a require string's target file, then
 /// the identifier's definitions under one engine view.
 pub async fn find_definition_at_position(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: Url,
     position: Position,
 ) -> Option<GotoDefinitionResponse> {
@@ -102,7 +102,7 @@ pub(crate) fn require_string_lsp_range(
 }
 
 fn require_path_definitions(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     origin: Range,
     target: &RequireStringTarget,

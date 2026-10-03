@@ -12,7 +12,7 @@ pub mod linter;
 pub use crate::server::engine_diagnostics;
 
 use crate::environment::config::LinterKind;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use linter::lint_document;
 use ruby_analysis::core::SourceKind;
 use std::path::Path;
@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::Url;
 /// source, where every later composition of its diagnostics reads it.
 /// Lifecycle entry point for didOpen and didSave; publication then goes
 /// through the server's one composition.
-pub async fn run_linter(server: &RubyLanguageServer, uri: &Url, content: &str) {
+pub async fn run_linter(server: &Server, uri: &Url, content: &str) {
     server.clear_external_linter_diagnostics(uri);
     if !document_kind(server, uri).is_some_and(SourceKind::is_editable) {
         return;
@@ -73,7 +73,7 @@ pub async fn run_linter(server: &RubyLanguageServer, uri: &Url, content: &str) {
     }
 }
 
-fn document_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKind> {
+fn document_kind(server: &Server, uri: &Url) -> Option<SourceKind> {
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));

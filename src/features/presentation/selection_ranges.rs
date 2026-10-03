@@ -5,12 +5,12 @@ use ruby_analysis::indexer::selection_range_chains;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{SelectionRange, SelectionRangeParams};
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::{lsp_text_range, source_position};
 
 /// Handle `textDocument/selectionRange`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: SelectionRangeParams,
 ) -> LspResult<Option<Vec<SelectionRange>>> {
     let Some(document) = server

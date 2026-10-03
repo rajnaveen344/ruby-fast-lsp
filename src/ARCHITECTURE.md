@@ -509,7 +509,7 @@ responsibilities, shared lifetimes, and test boundaries.
 - Server clones share owner handles and preserve existing lock identities.
   Each project still owns a separate `Project`; unowned documents use
   the registry's orphan engine. Open buffers are distinct from indexed facts.
-- No `RubyLanguageServer` field is publicly accessible outside the library.
+- No `Server` field is publicly accessible outside the library.
   Six use `pub(crate)` for sibling-module callers; routing, diagnostics, watched
   changes, and namespace-tree state stay private to `server`. Executables use
   explicit setup/admission methods and detached telemetry/configuration views.

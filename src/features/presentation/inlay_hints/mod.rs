@@ -40,7 +40,7 @@ use generators::{
 
 use crate::features::cursor::{Cursor, EngineQuery};
 use crate::invariant::ExpectInvariant;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::text_range;
 use ruby_analysis::indexer::inlay_hints::InlayNodeCollector;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -49,10 +49,7 @@ use tower_lsp::lsp_types::{
 };
 
 /// Handle `textDocument/inlayHint` once the document's semantic commit is current.
-pub async fn handle(
-    server: &RubyLanguageServer,
-    params: InlayHintParams,
-) -> LspResult<Option<Vec<InlayHint>>> {
+pub async fn handle(server: &Server, params: InlayHintParams) -> LspResult<Option<Vec<InlayHint>>> {
     let uri = params.text_document.uri;
     let range = params.range;
     let semantic_lock = server.document_semantic_lock(&uri);

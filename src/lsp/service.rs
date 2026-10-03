@@ -1,5 +1,5 @@
 //! The `tower-lsp` service facade: protocol methods and custom requests on
-//! `RubyLanguageServer`, routed to feature `handle` functions and lifecycle handlers. The
+//! `Server`, routed to feature `handle` functions and lifecycle handlers. The
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
@@ -15,7 +15,7 @@ use crate::features::presentation::{
     semantic_tokens,
 };
 use crate::lsp::lifecycle::notification;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 use log::info;
 use std::time::Instant;
@@ -39,7 +39,7 @@ use tower_lsp::lsp_types::{
 use tower_lsp::LanguageServer;
 
 /// Custom requests registered on the service in `main.rs`.
-impl RubyLanguageServer {
+impl Server {
     pub async fn handle_namespace_tree_request(
         &self,
         params: NamespaceTreeParams,
@@ -74,7 +74,7 @@ impl RubyLanguageServer {
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for RubyLanguageServer {
+impl LanguageServer for Server {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
         notification::handle_initialize(self, params).await
     }

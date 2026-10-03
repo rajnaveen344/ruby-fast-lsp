@@ -16,7 +16,7 @@ use crate::environment::config::runtime::{
 };
 use crate::environment::runtime::catalog::RuntimeDiscoverySource;
 use crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::persistent_cache::PersistentDerivedProductCache;
 use ruby_analysis::core::{FullyQualifiedName, RubyType, TypeSubject};
 use ruby_analysis::engine::SourceFileInput;
@@ -42,7 +42,7 @@ mod workflow;
 /// indexing sequence: exact runtime resolution, then version selection.
 async fn select_ruby_version(
     coordinator: &mut IndexingCoordinator,
-    server: &RubyLanguageServer,
+    server: &Server,
 ) -> Option<RubyVersion> {
     coordinator
         .resolve_effective_runtime(&server.load_context_for_project(coordinator.workspace_root()))

@@ -9,15 +9,11 @@ use tower_lsp::lsp_types::{
 
 use super::position_params;
 use crate::features::navigation::type_hierarchy;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 
 /// `<th supertypes="A,B" subtypes="C">`: each listed direction returns exactly those names.
-pub(super) async fn check_type_hierarchy(
-    server: &RubyLanguageServer,
-    cursor: &Location,
-    tag: &Tag,
-) {
+pub(super) async fn check_type_hierarchy(server: &Server, cursor: &Location, tag: &Tag) {
     assert!(
         tag.attr("supertypes").is_some() || tag.attr("subtypes").is_some(),
         "<th> needs `supertypes` or `subtypes`"

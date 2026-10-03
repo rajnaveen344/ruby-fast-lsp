@@ -7,11 +7,11 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::features::navigation::references;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// Handle `textDocument/documentHighlight`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DocumentHighlightParams,
 ) -> LspResult<Option<Vec<DocumentHighlight>>> {
     let uri = &params.text_document_position_params.text_document.uri;
@@ -20,7 +20,7 @@ pub async fn handle(
 }
 
 fn find_document_highlights(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     position: Position,
 ) -> Option<Vec<DocumentHighlight>> {

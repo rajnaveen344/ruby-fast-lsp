@@ -10,7 +10,7 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::analysis_source;
 use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::file_ops::should_index_file;
 use anyhow::{anyhow, Context, Result};
 use ruby_analysis::core::{
@@ -277,7 +277,7 @@ impl CheckSession {
                 config.indexing.included_patterns.push(pattern);
             }
         }
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         *server.config.lock() = config.clone();
 
         let workspaces = if input.is_dir() {

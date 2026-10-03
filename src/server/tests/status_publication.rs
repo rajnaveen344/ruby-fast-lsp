@@ -7,7 +7,7 @@ use crate::utils::admission;
 use crate::loader::scheduling::status::{
     IndexingPhase, IndexingStatusParams, IndexingStatusSnapshot,
 };
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::Url;
 
 #[test]
 fn indexing_status_send_queue_keeps_only_the_latest_pending_snapshot() {
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
     let mut publication = IndexingStatusPublicationState::default();
     let first = language_server
         .sequence_indexing_status_snapshot(language_server.indexing_status_snapshot());
@@ -49,7 +49,7 @@ async fn multi_project_phase_storm_publishes_latest_wins_without_blocking_caller
     use tower_lsp::LspService;
 
     let (mut service, mut socket) = LspService::new(|client| {
-        RubyLanguageServer::new(client).expect("test language server must initialize")
+        Server::new(client).expect("test language server must initialize")
     });
     let initialize = Request::build("initialize")
         .params(json!({"capabilities": {}}))
@@ -149,7 +149,7 @@ fn counter_only_status_publication_is_bounded_while_phase_changes_are_immediate(
     let fixture = tempfile::tempdir().unwrap();
     let project = fixture.path().join("server");
     std::fs::create_dir_all(&project).unwrap();
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
     let workspace = language_server.add_workspace(Url::from_directory_path(&project).unwrap());
     let run = workspace.indexing_status.begin_run();
     workspace
@@ -246,7 +246,7 @@ async fn counter_storm_emits_one_bounded_client_flush_and_immediate_phase_transi
     use tower_lsp::LspService;
 
     let (mut service, mut socket) = LspService::new(|client| {
-        RubyLanguageServer::new(client).expect("test language server must initialize")
+        Server::new(client).expect("test language server must initialize")
     });
     let initialize = Request::build("initialize")
         .params(json!({"capabilities": {}}))
@@ -350,7 +350,7 @@ async fn saturated_indexing_keeps_status_switch_and_queued_cancellation_responsi
     let server_project = fixture.path().join("server");
     std::fs::create_dir_all(&admin).unwrap();
     std::fs::create_dir_all(&server_project).unwrap();
-    let mut language_server = RubyLanguageServer::default();
+    let mut language_server = Server::default();
     language_server
         .indexing
         .set_resources(admission::IndexingResourceGovernor::new(

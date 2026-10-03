@@ -52,7 +52,7 @@ async fn no_registered_workspace_means_everything_is_orphan() {
 }
 
 fn method_fact_in_path(
-    server: &crate::server::RubyLanguageServer,
+    server: &crate::server::Server,
     method_name: &str,
     path_suffix: &str,
 ) -> bool {

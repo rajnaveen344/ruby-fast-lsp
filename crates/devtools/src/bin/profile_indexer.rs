@@ -1,7 +1,7 @@
 use dhat::Profiler;
 use log::{info, LevelFilter};
 use ruby_fast_lsp::lsp::lifecycle::indexing;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::env;
 use tokio::runtime::Runtime;
 use tower_lsp::lsp_types::Url;
@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
 
     rt.block_on(async {
         // Initialize the server
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
 
         // Register the workspace so init_workspace routes the index correctly.
         server.add_workspace(workspace_uri.clone());

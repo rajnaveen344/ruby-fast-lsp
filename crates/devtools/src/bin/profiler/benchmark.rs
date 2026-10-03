@@ -7,7 +7,7 @@ use ruby_fast_lsp::features::editing::completion;
 use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::features::presentation::hover;
 use ruby_fast_lsp::lsp::lifecycle::indexing;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::fs;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::{
 use crate::reports::bytes_to_mb;
 
 pub(crate) async fn run_production_benchmark(
-    server: &RubyLanguageServer,
+    server: &Server,
     workspace_path: &std::path::Path,
     cold_indexing: Duration,
     iterations: usize,
@@ -251,7 +251,7 @@ const WRITER_WAIT_READERS: usize = 3;
 /// across unrelated work, or reacquires it while a writer is queued, shows up
 /// here as writer wait (or as a deadlock).
 fn measure_writer_wait(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     position: Position,
     iterations: usize,
@@ -285,7 +285,7 @@ fn measure_writer_wait(
     LatencySummary::from_samples(&samples)
 }
 
-async fn read_request(server: &RubyLanguageServer, uri: &Url, position: Position, reader: usize) {
+async fn read_request(server: &Server, uri: &Url, position: Position, reader: usize) {
     match reader % WRITER_WAIT_READERS {
         0 => {
             let _ = hover::handle(

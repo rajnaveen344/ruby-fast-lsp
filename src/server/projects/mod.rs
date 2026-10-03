@@ -1,5 +1,5 @@
 //! Ruby project ownership, longest-root routing, and external provenance.
-use super::RubyLanguageServer;
+use super::Server;
 mod handle;
 mod load_sink;
 mod runtime;
@@ -130,7 +130,7 @@ impl ProjectRegistry {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Loader inputs for a whole-project load of the project rooted exactly
     /// at `project_root`. An unregistered root reads empty require roots.
     pub fn load_context_for_project(&self, project_root: &Path) -> LoadContext {
@@ -173,7 +173,7 @@ impl RubyLanguageServer {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// The project that owns documents outside every registered project.
     pub fn orphan_project(&self) -> &ProjectHandle {
         self.projects.orphan_project()

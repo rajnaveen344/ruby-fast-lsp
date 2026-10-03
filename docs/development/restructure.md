@@ -560,13 +560,14 @@ Delete this file when the last task is done. Git history keeps the record.
         are server-wide by design (one governor, shared immutable products,
         one registry, one outbound queue, one watcher debounce, one index
         view), so none moves to a project.
-  - [ ] C5c. Owner decision: rename `RubyLanguageServer` to `Server`, and
+  - [x] C5c. Owner decision: rename `RubyLanguageServer` to `Server`, and
         whether the six server-wide services should sit under one
         `services` field so the struct literally reads
-        `Server { client, config, documents, projects, services }`. The
-        rename touches more than a hundred files across `src/`, devtools,
-        the test harness, and docs, so it is deferred until no parallel
-        restructure branches are open. Not done: the type keeps its name.
+        `Server { client, config, documents, projects, services }`.
+        Done: one mechanical rename across `src/`, devtools, the test
+        harness, and docs (`main.rs` names `tower_lsp::Server` in full). The
+        six services stay direct fields; each has its own lock and
+        lifetime, so a grouping field would only add a hop.
 - [x] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
   - [x] C6a. Bug: the persisted gem product identity hashed the JRuby import
@@ -624,7 +625,7 @@ Delete this file when the last task is done. Git history keeps the record.
   add-on. The loader keeps its JRuby orchestration
   (`coordinator/jruby.rs`, catalog-sensitive replay, Java navigation
   demand) because those are load steps, not server state.
-- [ ] C7. Use one Ruby version detector and one RSpec implementation.
+- [x] C7. Use one Ruby version detector and one RSpec implementation.
   - [x] C7a. Take gem discovery's active engine from the selected runtime
         descriptor and delete its `RUBY_ENGINE` probe. Survivor: the runtime
         catalog, which already classified the executable from its `-v`

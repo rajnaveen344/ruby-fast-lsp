@@ -5,10 +5,10 @@
 //!
 //! ```no_run
 //! use ruby_fast_lsp::features::cursor::EngineQuery;
-//! use ruby_fast_lsp::server::RubyLanguageServer;
+//! use ruby_fast_lsp::server::Server;
 //! use tower_lsp::lsp_types::Url;
 //!
-//! fn file_count(server: &RubyLanguageServer, uri: &Url) -> usize {
+//! fn file_count(server: &Server, uri: &Url) -> usize {
 //!     let query = EngineQuery::with_project(server.project_for_uri(uri));
 //!     query.with_view(|cursor| cursor.view.files().count())
 //! }

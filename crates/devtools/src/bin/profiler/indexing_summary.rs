@@ -4,7 +4,7 @@ use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{InferenceTelemetry, SourceKind};
 use ruby_analysis::engine::{AnalysisStat, ResolveStat};
 use ruby_analysis::stats::{Stat, StatsSnapshot};
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tower_lsp::lsp_types::Url;
@@ -36,7 +36,7 @@ pub(crate) fn indexing_timing_json(
 }
 
 pub(crate) fn indexing_summary_json(
-    server: &RubyLanguageServer,
+    server: &Server,
     completed: &[(Url, ruby_fast_lsp::loader::coordinator::IndexingTimings)],
     wall: Duration,
     resources_started: Option<ProcessResourceUsage>,

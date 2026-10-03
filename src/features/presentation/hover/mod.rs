@@ -21,16 +21,16 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::require_paths::{
     find_require_string_at_offset, resolve_require_path, RequireKind, RequireStringTarget,
 };
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::source_position;
 use crate::utils::parser::position_to_offset;
 
 /// Handle `textDocument/hover`.
-pub async fn handle(server: &RubyLanguageServer, params: HoverParams) -> LspResult<Option<Hover>> {
+pub async fn handle(server: &Server, params: HoverParams) -> LspResult<Option<Hover>> {
     Ok(hover(server, params))
 }
 
-fn hover(server: &RubyLanguageServer, params: HoverParams) -> Option<Hover> {
+fn hover(server: &Server, params: HoverParams) -> Option<Hover> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
 
@@ -63,7 +63,7 @@ fn hover(server: &RubyLanguageServer, params: HoverParams) -> Option<Hover> {
 }
 
 fn require_path_hover(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     range: Range,
     target: &RequireStringTarget,

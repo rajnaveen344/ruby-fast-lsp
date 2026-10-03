@@ -4,13 +4,13 @@ use super::watched_files::rebuild_runtime_owned_project_state;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::version::parse_ruby_family;
 use crate::invariant::ExpectInvariant;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::{info, warn};
 use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 pub async fn handle_did_change_configuration(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DidChangeConfigurationParams,
 ) {
     info!("Configuration change received");
@@ -84,7 +84,7 @@ pub async fn handle_did_change_configuration(
     }
 }
 
-pub(super) async fn refresh_extension_watch_registration(server: &RubyLanguageServer) {
+pub(super) async fn refresh_extension_watch_registration(server: &Server) {
     if !server
         .extensions
         .dynamic_registration()

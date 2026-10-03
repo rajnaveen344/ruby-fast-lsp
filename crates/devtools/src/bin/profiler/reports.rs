@@ -6,12 +6,12 @@ use ruby_analysis::core::{
     MethodFact, ReferenceCandidate, ReferenceFact, SourceKind, SymbolFact, TypeFact,
 };
 use ruby_analysis::engine::{AnalysisStat, ResolveStat};
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use sha2::{Digest, Sha256};
 
 use crate::evidence::stable_fingerprint_hex;
 
-pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> anyhow::Result<()> {
+pub(crate) fn print_semantic_export_manifest(server: &Server) -> anyhow::Result<()> {
     let mut workspaces = server.list_workspaces();
     workspaces.sort_by(|left, right| left.root_path.cmp(&right.root_path));
     for workspace in workspaces {
@@ -90,7 +90,7 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
     Ok(())
 }
 
-pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::Result<()> {
+pub(crate) fn print_diagnostic_manifest(server: &Server) -> anyhow::Result<()> {
     let mut workspaces = server.list_workspaces();
     workspaces.sort_by(|left, right| left.root_path.cmp(&right.root_path));
     for workspace in workspaces {
@@ -202,7 +202,7 @@ pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::
     Ok(())
 }
 
-pub(crate) fn print_stats(server: &RubyLanguageServer) {
+pub(crate) fn print_stats(server: &Server) {
     info!("=== SHALLOW TYPE SIZES ===");
     info!(
         "FullyQualifiedName: {} bytes",

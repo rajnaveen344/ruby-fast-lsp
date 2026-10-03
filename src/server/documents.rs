@@ -1,5 +1,5 @@
 //! Open editor buffers and per-document lifecycle serialization.
-use super::RubyLanguageServer;
+use super::Server;
 use crate::loader::context::{OpenDocumentVersion, SourceReader};
 use crate::loader::file_processor::FileProcessor;
 use parking_lot::{Mutex, MutexGuard, RwLock};
@@ -103,7 +103,7 @@ impl SourceReader for OpenDocuments {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Store an embedded server's open buffer and run its current-file
     /// analysis pass without editor notifications or diagnostics publication.
     /// Measurement tools use this to observe the open-document lifecycle alone.

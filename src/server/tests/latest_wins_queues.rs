@@ -1,6 +1,6 @@
 use crate::server::diagnostics::DiagnosticPublicationState;
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use parking_lot::RwLock;
 use ruby_analysis::indexer::RubyDocument;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ async fn semantic_convergence_refreshes_only_projects_with_open_documents() {
     use tower_lsp::LspService;
 
     let (mut service, mut socket) = LspService::new(|client| {
-        RubyLanguageServer::new(client).expect("test language server must initialize")
+        Server::new(client).expect("test language server must initialize")
     });
     let initialize = Request::build("initialize")
         .params(json!({"capabilities": {}}))
@@ -112,7 +112,7 @@ fn watched_file_batches_keep_only_the_latest_event_per_uri_and_generation() {
     let fixture = tempfile::tempdir().unwrap();
     let admin = Url::from_file_path(fixture.path().join("admin.rb")).unwrap();
     let server_file = Url::from_file_path(fixture.path().join("server.rb")).unwrap();
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
 
     let first = language_server.queue_watched_file_changes(vec![
         FileEvent {

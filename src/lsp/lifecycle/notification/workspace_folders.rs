@@ -2,7 +2,7 @@
 
 use super::configuration::refresh_extension_watch_registration;
 use crate::lsp::lifecycle::indexing;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::{info, warn};
 use tower_lsp::lsp_types::*;
 
@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::*;
 /// `workspace/didChangeWorkspaceFolders`. Each added folder gets a freshly
 /// spawned indexing coordinator.
 pub async fn handle_did_change_workspace_folders(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DidChangeWorkspaceFoldersParams,
 ) {
     let changed_paths = params

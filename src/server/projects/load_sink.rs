@@ -10,7 +10,7 @@ use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::indexer::RubyDocument;
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
-impl RubyLanguageServer {
+impl Server {
     /// The registered project rooted exactly at `root`.
     fn project_at_root(&self, root: &Path) -> Option<Workspace> {
         self.list_workspaces()
@@ -28,7 +28,7 @@ impl RubyLanguageServer {
 }
 
 #[tower_lsp::async_trait]
-impl LoadSink for RubyLanguageServer {
+impl LoadSink for Server {
     fn target_for_uri(&self, uri: &Url) -> Arc<dyn LoadTarget> {
         self.project_for_uri(uri).load_target()
     }
@@ -158,7 +158,7 @@ impl LoadSink for RubyLanguageServer {
     }
 
     fn set_jruby_add_on(&self, root: &Path, add_on: Option<JrubyAddOn>) {
-        RubyLanguageServer::set_jruby_add_on(self, root, add_on);
+        Server::set_jruby_add_on(self, root, add_on);
     }
 
     #[cfg(test)]

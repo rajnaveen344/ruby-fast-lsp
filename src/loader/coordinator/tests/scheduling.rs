@@ -50,7 +50,7 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
         discovery_source: RuntimeDiscoverySource::Path,
         java_home: None,
     };
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let ctx = server.load_context_for_project(fixture.path());
 
     let (first, second) = tokio::join!(
@@ -266,7 +266,7 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
     let fixture = TempDir::new().unwrap();
     let project = fixture.path().join("admin");
     fs::create_dir_all(&project).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
     let old_run = workspace.indexing_status.begin_run();
     let mut old_coordinator =
@@ -297,7 +297,7 @@ fn removed_coordinator_keeps_detached_engine_instead_of_orphan_project() {
     let fixture = TempDir::new().unwrap();
     let project = fixture.path().join("admin");
     fs::create_dir_all(&project).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
     let mut coordinator = IndexingCoordinator::new(project, RubyFastLspConfig::default());
     coordinator.set_load_target(workspace.handle().load_target());

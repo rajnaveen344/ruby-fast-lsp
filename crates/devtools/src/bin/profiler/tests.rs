@@ -1,6 +1,6 @@
 //! Unit tests for profiler argument parsing, configuration, and evidence helpers.
 
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::path::PathBuf;
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
@@ -287,7 +287,7 @@ async fn live_definition_probe_requires_a_real_semantic_answer() {
         "class Live\n  def target; end\n  def call; target; end\nend\n",
     )
     .expect("live Ruby source must be written");
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let canonical_root =
         std::fs::canonicalize(fixture.path()).expect("fixture root must canonicalize");
     server.add_workspace(Url::from_directory_path(&canonical_root).unwrap());

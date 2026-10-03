@@ -4,18 +4,13 @@ use crate::invariant::ExpectInvariant;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 
 use super::ranges_overlap;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 
 /// `<err>`/`<warn>` match one diagnostic each with exactly the tagged range,
 /// the `code` if given, and a message containing `message` if given.
 /// `<err none>`/`<warn none>` forbid that severity (optionally of `code`) in the range.
-pub(super) fn check_diagnostics(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    err_tags: &[&Tag],
-    warn_tags: &[&Tag],
-) {
+pub(super) fn check_diagnostics(server: &Server, uri: &Url, err_tags: &[&Tag], warn_tags: &[&Tag]) {
     let published = server.last_diagnostic_publication(uri).expect_invariant(
         "tagged diagnostic assertion has no published result",
         "observing an open document must not fabricate an empty clear",

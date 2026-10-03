@@ -3,7 +3,7 @@
 
 use crate::environment::config::FormatterKind;
 use crate::features::diagnostics::linter::format_document;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::warn;
 use ruby_analysis::indexer::is_erb_path;
 use ruby_prism::{parse, Visit};
@@ -17,7 +17,7 @@ use tower_lsp::lsp_types::{
 
 /// Handle `textDocument/formatting` with the configured external formatter.
 pub async fn handle_document(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DocumentFormattingParams,
 ) -> LspResult<Option<Vec<TextEdit>>> {
     Ok(document_formatting(server, params).await)
@@ -25,14 +25,14 @@ pub async fn handle_document(
 
 /// Handle `textDocument/onTypeFormatting`: insert `end` after a block opener.
 pub async fn handle_on_type(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DocumentOnTypeFormattingParams,
 ) -> LspResult<Option<Vec<TextEdit>>> {
     Ok(on_type_formatting(server, params))
 }
 
 async fn document_formatting(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: DocumentFormattingParams,
 ) -> Option<Vec<TextEdit>> {
     let config = server.config.lock().clone();
@@ -177,7 +177,7 @@ pub fn should_add_end_ast(content: &str) -> bool {
 }
 
 fn on_type_formatting(
-    lang_server: &RubyLanguageServer,
+    lang_server: &Server,
     params: DocumentOnTypeFormattingParams,
 ) -> Option<Vec<TextEdit>> {
     let uri = &params.text_document_position.text_document.uri;

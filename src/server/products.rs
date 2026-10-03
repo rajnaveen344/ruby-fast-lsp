@@ -1,5 +1,5 @@
 //! Process-wide immutable products. Projects bind results into isolated engines.
-use super::RubyLanguageServer;
+use super::Server;
 use crate::environment::runtime::catalog::{
     DiscoveredRuntime, RuntimeCatalog, RuntimeDiscoverParams, RuntimeImplementation,
 };
@@ -110,7 +110,7 @@ impl RuntimeProducts {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Read process-wide counters and retained weights without exposing cache handles.
     /// Each component is observed independently, matching its own synchronization.
     pub fn runtime_product_snapshot(&self) -> RuntimeProductSnapshot {
@@ -150,7 +150,7 @@ impl RubyLanguageServer {
             .expect_invariant(
                 "test runtime catalog was initialized more than once",
                 "each test server must own one immutable discovery snapshot",
-                "create a fresh RubyLanguageServer per runtime test",
+                "create a fresh Server per runtime test",
             );
     }
 

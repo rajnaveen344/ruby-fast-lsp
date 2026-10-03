@@ -5,7 +5,7 @@ use log::{info, LevelFilter};
 use ruby_analysis::engine::AnalysisStat;
 use ruby_analysis::stats;
 use ruby_fast_lsp::lsp::lifecycle::indexing;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::env;
 use tokio::runtime::Runtime;
 use tower_lsp::lsp_types::Url;
@@ -63,7 +63,7 @@ pub fn run() {
 
     let rt = Runtime::new().expect("Failed to create runtime");
     rt.block_on(async {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         server.add_workspace(workspace_uri.clone());
 
         // Phase 1: index workspace
@@ -213,7 +213,7 @@ pub fn run() {
     });
 }
 
-fn analysis_fact_count(server: &RubyLanguageServer) -> u64 {
+fn analysis_fact_count(server: &Server) -> u64 {
     server
         .projects()
         .into_iter()

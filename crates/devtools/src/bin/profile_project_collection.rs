@@ -26,7 +26,7 @@ use ruby_analysis::core::SourceKind;
 use ruby_fast_lsp::environment::config::IndexingConfig;
 use ruby_fast_lsp::loader::file_processor::{FileProcessor, ProjectFileCollectionTiming};
 use ruby_fast_lsp::loader::sources::project::files::collect_project_files;
-use ruby_fast_lsp::server::{ProjectHandle, RubyLanguageServer};
+use ruby_fast_lsp::server::{ProjectHandle, Server};
 use tower_lsp::lsp_types::Url;
 
 fn main() -> Result<()> {
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
             project_root.display()
         )
     })?;
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(project_uri.clone());
     let project = server.project_for_uri(&project_uri);
     let analysis_engine = project.load_target();

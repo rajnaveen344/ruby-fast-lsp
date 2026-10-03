@@ -25,15 +25,12 @@ use tower_lsp::lsp_types::{Location, Position, Range, ReferenceParams, Url};
 
 use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
 use crate::features::cursor::{method, Cursor, EngineQuery};
-use crate::server::{ProjectHandle, RubyLanguageServer};
+use crate::server::{ProjectHandle, Server};
 use crate::utils::lsp::{deduplicate_locations, lsp_text_location, source_position};
 use crate::utils::parser::position_to_offset;
 
 /// Handle `textDocument/references`.
-pub async fn handle(
-    server: &RubyLanguageServer,
-    params: ReferenceParams,
-) -> LspResult<Option<Vec<Location>>> {
+pub async fn handle(server: &Server, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
     Ok(find_references_at_position(server, &uri, position).await)
@@ -41,7 +38,7 @@ pub async fn handle(
 
 /// Find all references to the symbol at `position` in an open document.
 pub async fn find_references_at_position(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     position: Position,
 ) -> Option<Vec<Location>> {
@@ -51,7 +48,7 @@ pub async fn find_references_at_position(
 /// Read one cursor over the open document at `uri`, then rebuild stale local
 /// variable scopes after both guards are released when the read asks for it.
 pub(crate) fn read_open_document(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: &Url,
     read: impl FnOnce(Cursor<'_>) -> Answer,
 ) -> Option<Vec<Location>> {

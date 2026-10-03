@@ -28,7 +28,7 @@ fn decode_hex(source: &str) -> Vec<u8> {
 #[tokio::test]
 async fn shutdown_cancels_every_project_indexing_generation() {
     let fixture = tempfile::tempdir().unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let first =
         server.add_workspace(Url::from_directory_path(fixture.path().join("admin")).unwrap());
     let second =
@@ -70,7 +70,7 @@ async fn watcher_storm_processes_only_the_newest_complete_batch() {
     std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
     std::fs::write(&source_path, "class StaleService\nend\n").unwrap();
     let source_uri = Url::from_file_path(&source_path).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
 
     let first_server = server.clone();
@@ -272,7 +272,7 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
     std::fs::write(&external_path, "package com.example; class Runtime {}\n").unwrap();
     let external_uri = Url::from_file_path(&external_path).unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace = server.add_workspace(project_uri);
     *server.config.lock() = RubyFastLspConfig {
         runtime: RuntimeSelectionConfig {
@@ -436,7 +436,7 @@ async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts(
         additional_sources: Vec::new(),
     }];
 
-    let server = RubyLanguageServer::with_user_cache_root(fixture.path().join("cache"))
+    let server = Server::with_user_cache_root(fixture.path().join("cache"))
         .expect("construct isolated cache server");
     *server.config.lock() = config;
     let project_uri = Url::from_directory_path(&project).unwrap();

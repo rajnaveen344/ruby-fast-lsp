@@ -1,5 +1,5 @@
 //! Indexing admission and process-wide status publication; no semantic store.
-use super::RubyLanguageServer;
+use super::Server;
 use crate::invariant::ExpectInvariant;
 use crate::loader::scheduling::scheduler::IndexingScheduler;
 use crate::loader::scheduling::status::{
@@ -171,7 +171,7 @@ impl IndexingServices {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Select scheduling concurrency before starting work or sharing the server.
     pub fn set_indexing_concurrency(&mut self, concurrency: usize) {
         self.indexing
@@ -351,7 +351,7 @@ impl RubyLanguageServer {
 impl IndexingStatusPublisher {
     pub(super) async fn next_indexing_status_snapshot(
         &self,
-        server: &RubyLanguageServer,
+        server: &Server,
     ) -> IndexingStatusSnapshot {
         let _publication = self.publication.lock().await;
         self.sequence_indexing_status_snapshot(server.indexing_status_snapshot())
@@ -374,7 +374,7 @@ impl IndexingStatusPublisher {
         snapshot
     }
 
-    pub(super) fn schedule_publish_indexing_status(&self, server: &RubyLanguageServer) {
+    pub(super) fn schedule_publish_indexing_status(&self, server: &Server) {
         if self.wakeup.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -406,7 +406,7 @@ impl IndexingStatusPublisher {
         }
     }
 
-    pub async fn publish_indexing_status(&self, server: &RubyLanguageServer) {
+    pub async fn publish_indexing_status(&self, server: &Server) {
         let schedule_sender;
         let schedule_counter_flush;
         {
@@ -439,7 +439,7 @@ impl IndexingStatusPublisher {
         }
     }
 
-    pub(super) async fn flush_indexing_counter_status(&self, server: &RubyLanguageServer) {
+    pub(super) async fn flush_indexing_counter_status(&self, server: &Server) {
         let schedule_sender;
         {
             let mut publication = self.publication.lock().await;
@@ -489,7 +489,7 @@ impl IndexingStatusPublisher {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     async fn next_indexing_status_snapshot(&self) -> IndexingStatusSnapshot {
         self.indexing
             .status

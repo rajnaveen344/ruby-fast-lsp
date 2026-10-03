@@ -6,14 +6,14 @@ use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::version::parse_ruby_family;
 use crate::features::presentation::semantic_tokens;
 use crate::lsp::lifecycle::indexing;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::{debug, info, warn};
 use std::sync::atomic::Ordering;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 
 pub async fn handle_initialize(
-    lang_server: &RubyLanguageServer,
+    lang_server: &Server,
     params: InitializeParams,
 ) -> LspResult<InitializeResult> {
     let extension_watch_dynamic_registration = params
@@ -200,7 +200,7 @@ pub async fn handle_initialize(
     })
 }
 
-pub async fn handle_initialized(server: &RubyLanguageServer, _params: InitializedParams) {
+pub async fn handle_initialized(server: &Server, _params: InitializedParams) {
     info!("Language server initialized");
 
     // Dynamically register type hierarchy capability (LSP 3.17.0)

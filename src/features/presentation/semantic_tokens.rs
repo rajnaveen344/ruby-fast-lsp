@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
     SemanticTokensResult, Url, WorkDoneProgressOptions,
 };
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use ruby_analysis::indexer::{
     SemanticTokenData, SemanticTokenKind, SemanticTokenModifierKind, TokenVisitor, TOKEN_MODIFIERS,
     TOKEN_TYPES,
@@ -36,13 +36,13 @@ pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
 
 /// Handle `textDocument/semanticTokens/full`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: SemanticTokensParams,
 ) -> LspResult<Option<SemanticTokensResult>> {
     Ok(Some(full_tokens(server, params.text_document.uri)))
 }
 
-fn full_tokens(server: &RubyLanguageServer, uri: Url) -> SemanticTokensResult {
+fn full_tokens(server: &Server, uri: Url) -> SemanticTokensResult {
     let total_start = Instant::now();
 
     // Get the document from server cache

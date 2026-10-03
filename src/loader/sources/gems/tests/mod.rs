@@ -8,7 +8,7 @@ use super::vendor_cache::{
     CACHED_GEM_PROJECT_DIGEST_MARKER, CACHED_GEM_PROJECT_DIGEST_PREFIX_CHARS,
 };
 use super::*;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::admission::IndexingResourcePriority;
 use crate::utils::admission::IndexingWorkSpec;
 use flate2::write::GzEncoder;

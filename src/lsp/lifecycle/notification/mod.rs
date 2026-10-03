@@ -13,28 +13,28 @@ pub use watched_files::handle_did_change_watched_files;
 pub use workspace_folders::handle_did_change_workspace_folders;
 
 use crate::lsp::lifecycle::indexing;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::info;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 
-pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
+pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams) {
     indexing::handle_did_open(server, params).await;
 }
 
-pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTextDocumentParams) {
+pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentParams) {
     indexing::handle_did_change(server, params).await;
 }
 
-pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextDocumentParams) {
+pub async fn handle_did_close(server: &Server, params: DidCloseTextDocumentParams) {
     indexing::handle_did_close(server, params).await;
 }
 
-pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
+pub async fn handle_did_save(server: &Server, params: DidSaveTextDocumentParams) {
     indexing::handle_did_save(server, params).await;
 }
 
-pub async fn handle_shutdown(server: &RubyLanguageServer) -> LspResult<()> {
+pub async fn handle_shutdown(server: &Server) -> LspResult<()> {
     info!("Shutting down Ruby LSP server");
     server.cancel_watched_file_changes();
     server.cancel_all_indexing();

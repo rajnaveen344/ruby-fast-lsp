@@ -13,12 +13,12 @@ use tower_lsp::lsp_types::{GotoDefinitionParams, GotoDefinitionResponse, Locatio
 use crate::features::cursor::analysis_location::{locations_for_ranges, non_empty_locations};
 use crate::features::cursor::{method, Cursor, EngineQuery};
 use crate::features::navigation::definition::constant_fqn;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::source_position;
 
 /// Handle `textDocument/implementation`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: GotoDefinitionParams,
 ) -> LspResult<Option<GotoDefinitionResponse>> {
     let uri = params.text_document_position_params.text_document.uri;

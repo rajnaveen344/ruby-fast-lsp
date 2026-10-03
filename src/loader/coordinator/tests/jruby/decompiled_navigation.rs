@@ -71,7 +71,7 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
         additional_sources: Vec::new(),
     }];
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(&root).unwrap());
     let mut coordinator = IndexingCoordinator::new(root.clone(), config);
     let cache = fixture.path().join("user-cache");

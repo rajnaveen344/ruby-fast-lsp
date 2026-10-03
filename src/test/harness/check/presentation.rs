@@ -9,14 +9,14 @@ use tower_lsp::lsp_types::{
 
 use super::{position_in_range, position_params, ranges_overlap};
 use crate::features::presentation::{code_lens, hover, inlay_hints};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 use crate::test::harness::{get_hint_label, get_hint_tooltip};
 
 /// `<hint label="..." tooltip="...">`: the hints at exactly the tagged position
 /// are exactly the tagged ones. A label may omit the `: `/` -> ` prefix.
 /// `<hint none>` forbids hints inside its range.
-pub(super) async fn check_hints(server: &RubyLanguageServer, uri: &Url, tags: &[&Tag]) {
+pub(super) async fn check_hints(server: &Server, uri: &Url, tags: &[&Tag]) {
     let hints = inlay_hints::handle(
         server,
         InlayHintParams {
@@ -112,7 +112,7 @@ fn describe_hint(hint: &InlayHint) -> String {
 
 /// `<lens title="...">`: a lens on the tagged line has exactly this title.
 /// `<lens none>` forbids lenses inside its range.
-pub(super) async fn check_lenses(server: &RubyLanguageServer, uri: &Url, tags: &[&Tag]) {
+pub(super) async fn check_lenses(server: &Server, uri: &Url, tags: &[&Tag]) {
     let lenses = code_lens::handle(
         server,
         CodeLensParams {
@@ -163,7 +163,7 @@ pub(super) async fn check_lenses(server: &RubyLanguageServer, uri: &Url, tags: &
 
 /// `<hover label="T" contains="text">`: the hover at the point shows `label` as
 /// a complete type, line, or line prefix, and contains the free text `contains`.
-pub(super) async fn check_hover(server: &RubyLanguageServer, uri: &Url, tag: &Tag) {
+pub(super) async fn check_hover(server: &Server, uri: &Url, tag: &Tag) {
     assert!(
         tag.attr("label").is_some() || tag.attr("contains").is_some(),
         "<hover> needs `label` or `contains`"

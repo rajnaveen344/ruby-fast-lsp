@@ -53,7 +53,7 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Diagnostic, InitializeParams, Url};
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// A stateful editor simulation for testing LSP lifecycle scenarios.
 ///
@@ -61,7 +61,7 @@ use crate::server::RubyLanguageServer;
 /// exercise the exact same code paths as a real editor. Tracks open files
 /// with their content and version numbers for assertion verification.
 pub struct FakeEditor {
-    server: RubyLanguageServer,
+    server: Server,
     client_messages: super::client_messages::ClientMessages,
     /// Tracks open files: filename -> (clean_content, version)
     buffers: HashMap<String, (String, i32)>,
@@ -80,8 +80,7 @@ impl FakeEditor {
     pub async fn with_cache_root(root: std::path::PathBuf) -> Self {
         use tower::{Service, ServiceExt};
         let (mut service, socket) = tower_lsp::LspService::new(|client| {
-            RubyLanguageServer::with_cache_root(Some(client), root)
-                .expect("construct editor server")
+            Server::with_cache_root(Some(client), root).expect("construct editor server")
         });
         let client_messages = super::client_messages::ClientMessages::listen(socket);
         let initialized = service
@@ -156,7 +155,7 @@ impl FakeEditor {
     }
 
     /// Get a reference to the underlying server.
-    pub fn server(&self) -> &RubyLanguageServer {
+    pub fn server(&self) -> &Server {
         &self.server
     }
 

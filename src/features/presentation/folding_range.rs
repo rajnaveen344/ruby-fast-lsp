@@ -7,11 +7,11 @@ use ruby_prism::Visit;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind, FoldingRangeParams};
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// Handle `textDocument/foldingRange`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: FoldingRangeParams,
 ) -> LspResult<Option<Vec<FoldingRange>>> {
     let uri = &params.text_document.uri;

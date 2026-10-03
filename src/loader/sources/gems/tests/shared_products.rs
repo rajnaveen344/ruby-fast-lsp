@@ -143,7 +143,7 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
 
     let first_indexer = shared_dependency_indexer(&first_project, &first_gem);
     let second_indexer = shared_dependency_indexer(&second_project, &second_gem);
-    let server = RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
+    let server = Server::with_user_cache_root(fixture.path().join("user-cache"))
         .expect("construct isolated cache server");
     let first_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     let second_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
@@ -245,7 +245,7 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     .unwrap();
 
     let indexer = shared_dependency_indexer(&project_root, &gem_root);
-    let mut server = RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
+    let mut server = Server::with_user_cache_root(fixture.path().join("user-cache"))
         .expect("construct isolated cache server");
     server
         .indexing

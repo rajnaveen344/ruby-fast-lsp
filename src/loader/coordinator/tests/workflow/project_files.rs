@@ -272,7 +272,7 @@ async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
     fs::write(&file_path, source).unwrap();
     let uri = Url::from_file_path(&file_path).unwrap();
     let workspace_uri = Url::from_directory_path(workspace.path()).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(workspace_uri);
     let mut coordinator =
         IndexingCoordinator::new(workspace.path().to_path_buf(), RubyFastLspConfig::default());

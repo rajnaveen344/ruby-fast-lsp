@@ -2,7 +2,7 @@
 //! weighted admission without blocking the Tokio reactor.
 
 use crate::features::presentation::{code_lens, document_symbols};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use std::sync::Arc;
 use std::time::Duration;
 use tower_lsp::lsp_types::{
@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
 #[tokio::test(flavor = "current_thread")]
 async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_reactor() {
     let uri = crate::test::harness::fixture_uri("/tmp/governed_code_lenses.rb");
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
@@ -123,7 +123,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
 #[tokio::test(flavor = "current_thread")]
 async fn request_time_extension_symbols_wait_for_admission_without_blocking_reactor() {
     let uri = crate::test::harness::fixture_uri("/tmp/governed_document_symbols.rb");
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(crate::utils::admission::IndexingResourceGovernor::new(

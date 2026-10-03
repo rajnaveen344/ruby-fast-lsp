@@ -11,12 +11,12 @@ use tower_lsp::lsp_types::{
 use super::{assert_same_locations, position_params};
 use crate::features::editing::rename;
 use crate::features::navigation::{call_hierarchy, definition, implementation, references};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::fixture::{Tag, TagKind};
 
 /// `<def>`, `<ref>`, `<impl>`: the request at the cursor returns exactly the tagged ranges.
 pub(super) async fn check_locations(
-    server: &RubyLanguageServer,
+    server: &Server,
     cursor: &Location,
     kind: TagKind,
     expected: &[Location],
@@ -71,7 +71,7 @@ fn goto_locations(response: Option<GotoDefinitionResponse>) -> Vec<Location> {
 /// `<incoming>`, `<outgoing>`: the hierarchy of the item at the cursor contains
 /// exactly the tagged caller/callee definitions.
 pub(super) async fn check_calls(
-    server: &RubyLanguageServer,
+    server: &Server,
     cursor: &Location,
     kind: TagKind,
     expected: &[Location],
@@ -129,7 +129,7 @@ pub(super) async fn check_calls(
 
 /// `<rename to="new">` marks where rename is requested; it and every bare
 /// `<rename>` tag are exactly the edited ranges, each replaced by `new`.
-pub(super) async fn check_rename(server: &RubyLanguageServer, tags: &[(&Url, &Tag)]) {
+pub(super) async fn check_rename(server: &Server, tags: &[(&Url, &Tag)]) {
     let mut requests = tags
         .iter()
         .filter_map(|(uri, tag)| Some((*uri, tag, tag.attr("to")?)));

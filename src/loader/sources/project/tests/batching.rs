@@ -55,7 +55,7 @@ fn exhaustive_project_tail_is_yielded_in_bounded_deterministic_batches() {
 #[test]
 fn delayed_project_discovery_cannot_borrow_a_replacement_generation() {
     let fixture = TempDir::new().unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace = server.add_workspace(Url::from_directory_path(fixture.path()).unwrap());
     let old_run = workspace.begin_indexing_run();
     let mut indexer = IndexerProject::new(
@@ -92,7 +92,7 @@ fn project_indexing_status_reports_completed_files_against_a_stable_total() {
         std::fs::write(root.join(name), "class Sample\nend\n").unwrap();
     }
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let run = workspace_state.begin_indexing_run();
     workspace_state
@@ -161,7 +161,7 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
     std::fs::write(&parent_path, "class Parent\nend\n").unwrap();
     std::fs::write(&child_path, "class Child < Parent\nend\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -238,7 +238,7 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
 
     let mut expected = None;
     for batch_size in [1, 2] {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         let mut indexer = IndexerProject::new(
             root.to_path_buf(),
@@ -306,7 +306,7 @@ fn parallel_batch_collection_has_a_stable_semantic_result() {
 
     let mut expected = None;
     for _ in 0..4 {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         let mut indexer = IndexerProject::new(
             root.to_path_buf(),

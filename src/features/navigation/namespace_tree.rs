@@ -9,7 +9,7 @@ use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::Url;
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NamespaceTreeParams {
@@ -21,7 +21,7 @@ pub struct NamespaceTreeParams {
 
 /// Handle the custom `ruby/namespaceTree` request.
 pub async fn handle(
-    lang_server: &RubyLanguageServer,
+    lang_server: &Server,
     params: NamespaceTreeParams,
 ) -> LspResult<NamespaceTreeResponse> {
     info!("Namespace tree request received");
@@ -34,10 +34,7 @@ pub async fn handle(
     Ok(response)
 }
 
-fn namespace_tree(
-    lang_server: &RubyLanguageServer,
-    params: NamespaceTreeParams,
-) -> NamespaceTreeResponse {
+fn namespace_tree(lang_server: &Server, params: NamespaceTreeParams) -> NamespaceTreeResponse {
     debug!(
         "[NAMESPACE_TREE] Request received (show_external_types={})",
         params.show_external_types

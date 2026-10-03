@@ -56,7 +56,7 @@ mod workspace_indexing;
 use crate::invariant::ExpectInvariant;
 use devtools::metrics::ProductionBudget;
 use log::info;
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use ruby_fast_lsp::utils::admission;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
@@ -133,7 +133,7 @@ fn main() -> anyhow::Result<()> {
     let rt = Runtime::new()?;
 
     let benchmark_result = rt.block_on(async {
-        let mut server = RubyLanguageServer::default();
+        let mut server = Server::default();
         server.set_indexing_concurrency(config.scheduler_concurrency);
         if config.resource_cpu_lanes.is_some()
             || config.resource_task_limit.is_some()

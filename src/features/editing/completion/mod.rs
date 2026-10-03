@@ -17,7 +17,7 @@ use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::{Cursor, EngineQuery};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::ast::is_in_statement_position;
 use crate::utils::lsp::{lsp_position, source_position};
 use crate::utils::parser::position_to_offset;
@@ -26,7 +26,7 @@ pub use snippets::RubySnippets;
 
 /// Handle `textDocument/completion`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: CompletionParams,
 ) -> LspResult<Option<CompletionResponse>> {
     let uri = params.text_document_position.text_document.uri.clone();
@@ -38,15 +38,12 @@ pub async fn handle(
 }
 
 /// Handle `completionItem/resolve`: items are complete when listed.
-pub async fn handle_resolve(
-    _server: &RubyLanguageServer,
-    item: CompletionItem,
-) -> LspResult<CompletionItem> {
+pub async fn handle_resolve(_server: &Server, item: CompletionItem) -> LspResult<CompletionItem> {
     Ok(item)
 }
 
 pub async fn find_completion_at_position(
-    server: &RubyLanguageServer,
+    server: &Server,
     uri: Url,
     position: Position,
     context: Option<CompletionContext>,

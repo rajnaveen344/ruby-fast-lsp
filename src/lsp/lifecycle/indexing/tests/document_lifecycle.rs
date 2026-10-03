@@ -6,7 +6,7 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn did_open_registers_source_in_project() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_open(
@@ -44,7 +44,7 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
     .unwrap();
     let path = workspace.path().join("opened.rb");
     let uri = Url::from_file_path(&path).unwrap();
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
@@ -142,7 +142,7 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
     .unwrap();
     let path = workspace.path().join("changing.rb");
     let uri = Url::from_file_path(&path).unwrap();
-    let mut server = RubyLanguageServer::default();
+    let mut server = Server::default();
     server
         .indexing
         .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
@@ -267,7 +267,7 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
 
 #[tokio::test]
 async fn did_open_preserves_known_external_file_without_reprocessing() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/rubystubs33/kernel.rb");
     let file_id = server.open_or_update_analysis_file_with_kind(
         &uri,
@@ -328,7 +328,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
 
 #[tokio::test]
 async fn did_change_updates_project_source() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_change(
@@ -360,7 +360,7 @@ async fn did_change_updates_project_source() {
 
 #[tokio::test]
 async fn did_change_replaces_project_symbol_facts() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_open(
@@ -405,7 +405,7 @@ async fn did_change_replaces_project_symbol_facts() {
 
 #[tokio::test]
 async fn exported_api_change_refreshes_open_consumer_diagnostics() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let definition_uri = crate::test::harness::fixture_uri("/tmp/user.rb");
     let consumer_uri = crate::test::harness::fixture_uri("/tmp/use_user.rb");
 
@@ -470,7 +470,7 @@ async fn exported_api_change_refreshes_open_consumer_diagnostics() {
 
 #[tokio::test]
 async fn body_only_change_does_not_refresh_other_open_files() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let definition_uri = crate::test::harness::fixture_uri("/tmp/user.rb");
     let consumer_uri = crate::test::harness::fixture_uri("/tmp/use_user.rb");
     for (uri, text) in [
@@ -531,7 +531,7 @@ async fn body_only_change_does_not_refresh_other_open_files() {
 
 #[tokio::test]
 async fn open_diagnostic_refresh_targets_are_sorted_and_capped() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let changed_uri = crate::test::harness::fixture_uri("/tmp/changed.rb");
     for index in (0..12).rev() {
         let uri = Url::parse(&format!("file:///tmp/consumer_{index:02}.rb")).unwrap();
@@ -557,7 +557,7 @@ async fn open_diagnostic_refresh_targets_are_sorted_and_capped() {
 
 #[tokio::test]
 async fn did_open_mirrors_reference_facts_into_project() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_open(
@@ -581,7 +581,7 @@ async fn did_open_mirrors_reference_facts_into_project() {
 
 #[tokio::test]
 async fn did_open_mirrors_graph_facts_into_project() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_open(
@@ -609,7 +609,7 @@ async fn did_open_mirrors_graph_facts_into_project() {
 
 #[tokio::test]
 async fn did_open_refreshes_late_resolved_graph_facts_into_project() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let user_uri = crate::test::harness::fixture_uri("/tmp/user.rb");
     let auth_uri = crate::test::harness::fixture_uri("/tmp/auth.rb");
 
@@ -653,7 +653,7 @@ async fn did_open_refreshes_late_resolved_graph_facts_into_project() {
 
 #[tokio::test]
 async fn did_open_mirrors_normalized_extend_edges_into_project() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_open(
@@ -685,7 +685,7 @@ async fn did_open_mirrors_normalized_extend_edges_into_project() {
 
 #[tokio::test]
 async fn did_open_mirrors_method_facts_into_project() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
     handle_did_open(

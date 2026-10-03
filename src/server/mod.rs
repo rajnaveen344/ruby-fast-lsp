@@ -85,7 +85,7 @@ fn is_process_alive(pid: u32) -> bool {
 /// Server state: each owner preserves its own locks and shared clone identity.
 /// The protocol facade lives in `src/lsp/service.rs`.
 #[derive(Clone)]
-pub struct RubyLanguageServer {
+pub struct Server {
     pub(crate) client: Option<Client>,
     pub(crate) config: Arc<Mutex<RubyFastLspConfig>>,
     pub(crate) documents: OpenDocuments,
@@ -98,7 +98,7 @@ pub struct RubyLanguageServer {
     pub(self) namespace_tree: NamespaceTreeCache,
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Copy the accepted configuration without exposing its shared lock.
     pub fn configuration_snapshot(&self) -> RubyFastLspConfig {
         self.config.lock().clone()
@@ -208,7 +208,7 @@ impl RubyLanguageServer {
     }
 }
 
-impl Default for RubyLanguageServer {
+impl Default for Server {
     fn default() -> Self {
         let root = crate::utils::cache::ruby_fast_lsp_user_cache_root().expect_invariant(
             "the default server could not resolve an absolute user cache root",

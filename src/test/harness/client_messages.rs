@@ -95,7 +95,7 @@ impl Drop for ClientMessages {
 #[tokio::test]
 async fn missing_client_notification_cannot_satisfy_an_empty_diagnostic_assertion() {
     let (_service, socket) = tower_lsp::LspService::new(|client| {
-        crate::server::RubyLanguageServer::new(client).expect("construct client observer control")
+        crate::server::Server::new(client).expect("construct client observer control")
     });
     let messages = ClientMessages::listen(socket);
     let uri = crate::test::harness::fixture_uri("/observer/unpublished.rb");

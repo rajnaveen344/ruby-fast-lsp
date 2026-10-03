@@ -34,12 +34,12 @@ use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::analysis_location::location_for_range;
 use crate::features::cursor::{Cursor, EngineQuery};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::source_position;
 
 /// Handle `textDocument/prepareTypeHierarchy`.
 pub async fn handle_prepare(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: TypeHierarchyPrepareParams,
 ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
     let uri = params.text_document_position_params.text_document.uri;
@@ -67,7 +67,7 @@ pub async fn handle_prepare(
 
 /// Handle `typeHierarchy/supertypes`.
 pub async fn handle_supertypes(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: TypeHierarchySupertypesParams,
 ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
     info!("Supertypes request received for: {}", params.item.name);
@@ -83,7 +83,7 @@ pub async fn handle_supertypes(
 
 /// Handle `typeHierarchy/subtypes`.
 pub async fn handle_subtypes(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: TypeHierarchySubtypesParams,
 ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
     info!("Subtypes request received for: {}", params.item.name);
@@ -100,7 +100,7 @@ pub async fn handle_subtypes(
 /// Read a follow-up request's stored item identity under one view of its
 /// owning engine.
 fn read_item(
-    server: &RubyLanguageServer,
+    server: &Server,
     item: &TypeHierarchyItem,
     read: impl FnOnce(&View<'_>, &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>>,
 ) -> Option<Vec<TypeHierarchyItem>> {

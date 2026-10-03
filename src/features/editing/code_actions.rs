@@ -4,7 +4,7 @@ use crate::environment::config::LinterKind;
 use crate::features::diagnostics::linter::fix_document;
 use crate::features::editing::formatting::full_document_range;
 use crate::invariant::ExpectInvariant;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use log::warn;
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,14 +17,14 @@ use tower_lsp::lsp_types::{
 
 /// Handle `textDocument/codeAction`: the safe linter quick fix for the whole document.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: CodeActionParams,
 ) -> LspResult<Option<Vec<CodeActionOrCommand>>> {
     Ok(code_actions(server, params).await)
 }
 
 async fn code_actions(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: CodeActionParams,
 ) -> Option<Vec<CodeActionOrCommand>> {
     if params

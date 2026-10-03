@@ -77,7 +77,7 @@ end
     let cycle_consumer = "cycle = CycleA\n";
     std::fs::write(&cycle_consumer_path, cycle_consumer).unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     crate::lsp::lifecycle::indexing::handle_did_open(
         &server,
@@ -256,7 +256,7 @@ end
     std::fs::write(&consumer_path, consumer).unwrap();
     std::fs::write(&definition_path, "class Registry\nend\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     crate::lsp::lifecycle::indexing::handle_did_open(
         &server,

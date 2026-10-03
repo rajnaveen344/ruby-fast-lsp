@@ -71,7 +71,7 @@ fn providerless_project_pass_records_exact_compact_jruby_replay_candidates() {
     .unwrap();
     std::fs::write(&proxy_path, "DEMO = com.example.Demo.new\n").unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -103,7 +103,7 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
     )
     .unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -168,7 +168,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
     )
     .unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -262,7 +262,7 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
     )
     .unwrap();
 
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     let mut indexer = IndexerProject::new(
         root.to_path_buf(),
@@ -362,7 +362,7 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
 
     let run = |install_before_tail: bool| {
         let signature_cache = TempDir::new().unwrap();
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         let mut indexer = IndexerProject::new(
             root.to_path_buf(),
@@ -472,7 +472,7 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
 
     let run = |install_before_tail: bool| {
         let signature_cache = TempDir::new().unwrap();
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         let mut indexer = IndexerProject::new(
             root.to_path_buf(),
@@ -574,7 +574,7 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
     let second = FullyQualifiedName::try_from("Second").unwrap();
     let mut expected = None;
     for batch_size in [1, 2] {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         let mut indexer = IndexerProject::new(
             root.to_path_buf(),

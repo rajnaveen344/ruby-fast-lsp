@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, WorkspaceSymbolParams}
 
 use crate::features::cursor::analysis_location::location_for_range;
 use crate::features::cursor::EngineQuery;
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// Handle workspace symbol requests.
 ///
@@ -19,7 +19,7 @@ use crate::server::RubyLanguageServer;
 /// workspaces see symbols from every folder, with the per-workspace indices
 /// remaining isolated for all other queries.
 pub async fn handle(
-    lang_server: &RubyLanguageServer,
+    lang_server: &Server,
     params: WorkspaceSymbolParams,
 ) -> LspResult<Option<Vec<SymbolInformation>>> {
     let query_text = params.query;

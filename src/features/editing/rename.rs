@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::{
 
 use crate::features::cursor::analysis_location::locations_for_ranges;
 use crate::features::cursor::{Cursor, EngineQuery};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::utils::lsp::{lsp_text_range, source_position};
 use ruby_analysis::core::{RubyConstant, RubyMethod, TextRange};
 use ruby_analysis::engine::View;
@@ -24,7 +24,7 @@ use ruby_analysis::indexer::{Identifier, RenameVisitor, RubyDocument, RubyPrismA
 
 /// Handle `textDocument/prepareRename`.
 pub async fn handle_prepare(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: TextDocumentPositionParams,
 ) -> LspResult<Option<PrepareRenameResponse>> {
     info!("Prepare rename request received for: {:?}", params);
@@ -32,10 +32,7 @@ pub async fn handle_prepare(
 }
 
 /// Handle `textDocument/rename`.
-pub async fn handle(
-    server: &RubyLanguageServer,
-    params: RenameParams,
-) -> LspResult<Option<WorkspaceEdit>> {
+pub async fn handle(server: &Server, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
     info!(
         "Rename request received for: {:?}",
         params.text_document_position
@@ -47,7 +44,7 @@ pub async fn handle(
 }
 
 fn prepare_rename(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: TextDocumentPositionParams,
 ) -> Option<PrepareRenameResponse> {
     let uri = params.text_document.uri;
@@ -56,7 +53,7 @@ fn prepare_rename(
         .with_view(|cursor| prepare_rename_at(cursor, &uri, params.position))
 }
 
-fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<WorkspaceEdit> {
+fn rename(server: &Server, params: RenameParams) -> Option<WorkspaceEdit> {
     let uri = params.text_document_position.text_document.uri;
     let document = server.documents.read().get(&uri)?.clone();
     EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri)).with_view(|cursor| {

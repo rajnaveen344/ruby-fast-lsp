@@ -7,7 +7,7 @@ async fn watched_closed_project_files_replace_and_remove_engine_facts() {
     let workspace = tempfile::TempDir::new().unwrap();
     let path = workspace.path().join("watched.rb");
     let uri = Url::from_file_path(&path).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
     std::fs::write(&path, "class WatchedOne\nend\n").unwrap();
@@ -86,7 +86,7 @@ async fn watched_project_rbs_files_replace_and_remove_signature_facts() {
     let path = workspace.path().join("sig/native_widget.rbs");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let uri = Url::from_file_path(&path).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
     std::fs::write(
@@ -162,7 +162,7 @@ async fn watched_rbs_record_refreshes_an_early_open_consumer() {
     let signature_path = workspace.path().join("sig/payload_factory.rbs");
     std::fs::create_dir_all(signature_path.parent().unwrap()).unwrap();
     let signature_uri = Url::from_file_path(&signature_path).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
     handle_did_open(
@@ -278,7 +278,7 @@ async fn watched_rbs_record_refreshes_an_early_open_consumer() {
 
 #[tokio::test]
 async fn watched_callable_signature_replaces_and_deletes_dependent_results() {
-    async fn hover_label(server: &RubyLanguageServer, uri: &Url) -> String {
+    async fn hover_label(server: &Server, uri: &Url) -> String {
         let hover = server
             .hover(HoverParams {
                 text_document_position_params: TextDocumentPositionParams {
@@ -299,7 +299,7 @@ async fn watched_callable_signature_replaces_and_deletes_dependent_results() {
     let signature_path = workspace.path().join("sig/converter.rbs");
     std::fs::create_dir_all(signature_path.parent().unwrap()).unwrap();
     let signature_uri = Url::from_file_path(&signature_path).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
     let source = "result = Converter.new.apply(1) { |value| value.to_s }\nresult\n".to_string();
 
@@ -382,7 +382,7 @@ async fn opening_default_external_workspace_file_does_not_make_it_project_owned(
     let path = workspace.path().join("vendor/opened.rb");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let uri = Url::from_file_path(&path).unwrap();
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
     handle_did_open(

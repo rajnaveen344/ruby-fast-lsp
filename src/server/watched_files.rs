@@ -1,4 +1,4 @@
-use super::RubyLanguageServer;
+use super::Server;
 use crate::invariant::ExpectInvariant;
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
@@ -46,7 +46,7 @@ pub(super) struct WatchedFileChanges {
     batch: Arc<Mutex<WatchedFileChangeBatch>>,
 }
 
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn queue_watched_file_changes(&self, changes: Vec<FileEvent>) -> u64 {
         self.file_changes.queue(changes)
     }

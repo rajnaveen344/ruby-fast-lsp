@@ -15,20 +15,17 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::features::cursor::{method, Cursor, EngineQuery};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// Handle `textDocument/signatureHelp`.
 pub async fn handle(
-    server: &RubyLanguageServer,
+    server: &Server,
     params: SignatureHelpParams,
 ) -> LspResult<Option<SignatureHelp>> {
     Ok(signature_help(server, params))
 }
 
-fn signature_help(
-    server: &RubyLanguageServer,
-    params: SignatureHelpParams,
-) -> Option<SignatureHelp> {
+fn signature_help(server: &Server, params: SignatureHelpParams) -> Option<SignatureHelp> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
     let document = server.documents.read().get(&uri)?.clone();
