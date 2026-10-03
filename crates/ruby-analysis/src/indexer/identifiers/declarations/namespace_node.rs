@@ -11,7 +11,7 @@ use crate::indexer::{mixin_ref_from_node, queries::syntax, Identifier, LVScopeKi
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
-    pub fn process_class_node_entry(&mut self, node: &ClassNode) {
+    pub fn process_class_node_entry(&mut self, node: &ClassNode) -> bool {
         let superclass = node.superclass().and_then(|superclass| {
             match self.file_constant_value(&superclass)? {
                 RubyType::ClassReference(target) => target.to_instance_namespace(),
@@ -31,41 +31,50 @@ impl IdentifierVisitor {
             node.name().as_slice(),
             GraphNodeKind::Class,
             superclass.as_ref(),
+        )
+    }
+
+    pub fn process_class_node_exit(&mut self, node: &ClassNode, opened: bool) {
+        self.exit_namespace_declaration(
+            opened,
+            node.body().map(|body| body.location()),
+            &node.location(),
         );
     }
 
-    pub fn process_class_node_exit(&mut self, node: &ClassNode) {
-        self.exit_namespace_declaration(node.body().map(|body| body.location()), &node.location());
-    }
-
-    pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
+    pub fn process_module_node_entry(&mut self, node: &ModuleNode) -> bool {
         self.enter_namespace_declaration(
             &node.constant_path(),
             node.name().as_slice(),
             GraphNodeKind::Module,
             None,
+        )
+    }
+
+    pub fn process_module_node_exit(&mut self, node: &ModuleNode, opened: bool) {
+        self.exit_namespace_declaration(
+            opened,
+            node.body().map(|body| body.location()),
+            &node.location(),
         );
     }
 
-    pub fn process_module_node_exit(&mut self, node: &ModuleNode) {
-        self.exit_namespace_declaration(node.body().map(|body| body.location()), &node.location());
-    }
-
     /// Every declaration opens its frame, including those away from the
-    /// cursor, so constant writes record their lexical owner.
+    /// cursor, so constant writes record their lexical owner. Returns whether
+    /// a frame was opened: a name still being typed (`class foo`) opens none.
     fn enter_namespace_declaration(
         &mut self,
         constant_path: &Node<'_>,
         name: &[u8],
         kind: GraphNodeKind,
         superclass: Option<&FullyQualifiedName>,
-    ) {
+    ) -> bool {
         if self.is_result_set() {
-            return;
+            return false;
         }
         if self.is_position_in_location(&constant_path.location()) {
             self.set_declaration_name_result(constant_path, kind);
-            return;
+            return false;
         }
         let lexical_context = self.scope_tracker.get_ns_stack();
         let reopened = alias_reopen_target(
@@ -97,13 +106,19 @@ impl IdentifierVisitor {
                 },
             );
         } else {
-            return;
+            return false;
         }
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
+        true
     }
 
-    fn exit_namespace_declaration(&mut self, body: Option<Location<'_>>, location: &Location<'_>) {
-        if self.is_result_set() {
+    fn exit_namespace_declaration(
+        &mut self,
+        opened: bool,
+        body: Option<Location<'_>>,
+        location: &Location<'_>,
+    ) {
+        if !opened || self.is_result_set() {
             return;
         }
         let (body_start, body_end) = syntax::get_body_offsets(body, location);

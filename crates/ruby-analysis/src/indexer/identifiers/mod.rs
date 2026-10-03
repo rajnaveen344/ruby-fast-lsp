@@ -206,9 +206,9 @@ fn static_receiver_namespace(
 
 impl Visit<'_> for IdentifierVisitor {
     fn visit_class_node(&mut self, node: &ClassNode) {
-        self.process_class_node_entry(node);
+        let opened = self.process_class_node_entry(node);
         visit_class_node(self, node);
-        self.process_class_node_exit(node);
+        self.process_class_node_exit(node, opened);
     }
 
     fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
@@ -218,9 +218,9 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
-        self.process_module_node_entry(node);
+        let opened = self.process_module_node_entry(node);
         visit_module_node(self, node);
-        self.process_module_node_exit(node);
+        self.process_module_node_exit(node, opened);
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {

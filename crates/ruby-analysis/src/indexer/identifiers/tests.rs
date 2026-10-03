@@ -521,3 +521,20 @@ fn def_without_a_name_does_not_unbalance_scopes() {
         visitor.visit(&ruby_prism::parse(code.as_bytes()).node());
     }
 }
+
+/// A class whose name is still being typed opens no namespace, so its exit
+/// must not close the enclosing one.
+#[test]
+fn malformed_class_name_keeps_the_enclosing_namespace() {
+    let code = "module Outer\n  class lowercase\n  end\n\n  LIMIT\nend\n";
+    let uri = Url::parse("file:///test.rb").unwrap();
+    let document = RubyDocument::new(uri, code.to_string(), 1);
+    let mut visitor = IdentifierVisitor::new(document, Position::new(4, 3));
+    visitor.visit(&ruby_prism::parse(code.as_bytes()).node());
+    let names: Vec<String> = visitor
+        .ns_stack_at_pos
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(names, vec!["Outer".to_string()]);
+}
