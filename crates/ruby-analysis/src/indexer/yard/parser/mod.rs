@@ -23,6 +23,7 @@
 
 use super::types::{YardMethodDoc, YardOption, YardParam, YardReturn};
 use crate::core::{SourcePosition as Position, SourceRange as Range};
+use crate::invariant::ExpectInvariant;
 use log::debug;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -262,9 +263,11 @@ impl YardParser {
     /// Extract YARD documentation from comments preceding a method definition.
     /// Includes position information for each @param tag for diagnostics.
     pub fn extract_from_source(content: &str, method_start_offset: usize) -> Option<YardMethodDoc> {
-        assert!(
+        invariant!(
             method_start_offset <= content.len() && content.is_char_boundary(method_start_offset),
-            "INVARIANT VIOLATED: YARD method offset is outside the source or not on a UTF-8 boundary. This is a bug because parser locations must be valid source byte offsets. Fix: pass the exact method location from the parse tree."
+            what = "YARD method offset is outside the source or not on a UTF-8 boundary",
+            why = "parser locations must be valid source byte offsets",
+            fix = "pass the exact method location from the parse tree",
         );
         let method_start_line = u32::try_from(
             content[..method_start_offset]
@@ -272,8 +275,10 @@ impl YardParser {
                 .filter(|byte| *byte == b'\n')
                 .count(),
         )
-        .expect(
-            "INVARIANT VIOLATED: YARD method line exceeded u32. This is a bug because editor protocol positions use u32 line numbers. Fix: reject or segment files with more than u32::MAX lines.",
+        .expect_invariant(
+            "YARD method line exceeded u32",
+            "editor protocol positions use u32 line numbers",
+            "reject or segment files with more than u32::MAX lines",
         );
         Self::extract_from_source_at_line(content, method_start_offset, method_start_line)
     }
@@ -286,9 +291,11 @@ impl YardParser {
         method_start_offset: usize,
         method_start_line: u32,
     ) -> Option<YardMethodDoc> {
-        assert!(
+        invariant!(
             method_start_offset <= content.len() && content.is_char_boundary(method_start_offset),
-            "INVARIANT VIOLATED: YARD method offset is outside the source or not on a UTF-8 boundary. This is a bug because parser locations must be valid source byte offsets. Fix: pass the exact method location from the parse tree."
+            what = "YARD method offset is outside the source or not on a UTF-8 boundary",
+            why = "parser locations must be valid source byte offsets",
+            fix = "pass the exact method location from the parse tree",
         );
         let content_before = &content[..method_start_offset];
         if content_before.is_empty() {
@@ -322,8 +329,10 @@ impl YardParser {
     ) -> Vec<CommentLineInfo<'_>> {
         let mut comment_lines = Vec::new();
         let mut line_number = if content_before.ends_with('\n') {
-            method_start_line.checked_sub(1).expect(
-                "INVARIANT VIOLATED: source before a line-zero method ended with a newline. This is a bug because the supplied method line disagrees with its byte offset. Fix: derive both values from the same parsed source document.",
+            method_start_line.checked_sub(1).expect_invariant(
+                "source before a line-zero method ended with a newline",
+                "the supplied method line disagrees with its byte offset",
+                "derive both values from the same parsed source document",
             )
         } else {
             method_start_line

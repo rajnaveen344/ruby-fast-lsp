@@ -125,9 +125,9 @@ impl TypeTracker {
             || self.analysis.method_candidates.contains(dependency)
             || self
                 .analysis
-                .engine
+                .project
                 .as_ref()
-                .is_some_and(|engine| engine.read().has_method_return_equation(dependency))
+                .is_some_and(|project| project.has_method_return_equation(dependency))
     }
 
     pub(in crate::inference::type_tracker) fn return_term_dependency_for_node(

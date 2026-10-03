@@ -4,6 +4,7 @@ use super::support::hover_text;
 use crate::lsp::check::{CheckSession, CheckTypeOutcome, CheckTypeSubjectKind};
 use crate::test::harness::FakeEditor;
 use ruby_analysis::core::UnknownReason;
+use ruby_analysis::engine::ResolveStat;
 
 #[tokio::test]
 async fn unresolved_chained_call_reason_matches_cli_and_lsp_without_an_inlay() {
@@ -262,32 +263,36 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
 
     let unchanged_equation = format!("{even_source}# body-independent edit\n");
     editor.set("cycle_even.rb", &unchanged_equation).await;
-    let analysis_engine = editor
+    let project_handle = editor
         .server()
-        .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
-    let even_file_id = analysis_engine
-        .read()
+        .project_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
+    let even_file_id = project_handle
+        .test_read()
+        .view()
         .file_id(&crate::test::harness::fixture_path("/cycle_even.rb"))
         .expect("cycle fixture must be registered in the analysis engine");
-    let equations_before_unchanged_edit = analysis_engine
-        .read()
+    let equations_before_unchanged_edit = project_handle
+        .test_read()
+        .view()
         .method_return_equations_in_file(even_file_id)
         .expect("cycle fixture must retain its return equations")
         .to_vec();
     editor.set("cycle_even.rb", &unchanged_equation).await;
     assert_eq!(
-        analysis_engine
-            .read()
+        project_handle
+            .test_read()
+            .view()
             .method_return_equations_in_file(even_file_id)
             .expect("unchanged cycle fixture must retain its return equations"),
         equations_before_unchanged_edit,
         "a body-independent edit must not alter the method-return equation IR"
     );
     assert_eq!(
-        analysis_engine
-            .read()
+        project_handle
+            .test_read()
+            .view()
             .last_resolve_stats()
-            .method_return_equation_solve_runs,
+            .get(ResolveStat::MethodReturnEquationSolveRuns),
         0,
         "an unchanged equation edit must reuse the existing project solution"
     );
@@ -305,10 +310,11 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         "class Cycle\n  def even(n)\n    return 1 if n.zero?\n    odd(n - 1)\n  end\nend\n";
     editor.set("cycle_even.rb", integer_even_source).await;
     assert_eq!(
-        analysis_engine
-            .read()
+        project_handle
+            .test_read()
+            .view()
             .last_resolve_stats()
-            .method_return_equation_solve_runs,
+            .get(ResolveStat::MethodReturnEquationSolveRuns),
         1,
         "a changed recursive base must run exactly one project equation solve"
     );

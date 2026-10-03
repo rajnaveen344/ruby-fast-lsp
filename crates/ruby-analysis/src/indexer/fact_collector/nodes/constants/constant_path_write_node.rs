@@ -1,50 +1,31 @@
-use crate::core::{
-    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeSubject,
+use crate::core::{FullyQualifiedName, SymbolFact, SymbolKind, TypeFact, TypeSubject};
+use crate::indexer::documents::scope_rules::{
+    constant_path_write_target, implicit_singleton_namespace,
 };
-use crate::indexer::collect_namespaces;
-use log::error;
 use ruby_prism::{
     ConstantPathAndWriteNode, ConstantPathNode, ConstantPathOperatorWriteNode,
-    ConstantPathOrWriteNode, ConstantPathWriteNode, Location, Node,
+    ConstantPathOrWriteNode, ConstantPathTargetNode, ConstantPathWriteNode, Location, Node,
 };
 
 use crate::indexer::fact_collector::FactCollector;
 
 impl FactCollector {
+    /// The constant a `Parent::NAME` write names: `Parent` resolves lexically
+    /// from the current scope, `::NAME` is top level, and `self::NAME` is the
+    /// current namespace.
     fn constant_path_write_fqn(
         &self,
         constant_path: &ConstantPathNode<'_>,
     ) -> Option<(String, FullyQualifiedName)> {
-        let constant_name = match constant_path.name() {
-            Some(name) => String::from_utf8_lossy(name.as_slice()).to_string(),
-            None => {
-                error!("Could not extract constant name from constant path write target");
-                return None;
-            }
-        };
-
-        let constant = match RubyConstant::new(&constant_name) {
-            Ok(constant) => constant,
-            Err(e) => {
-                error!("Error creating constant: {}", e);
-                return None;
-            }
-        };
-
-        let mut namespace_parts = Vec::new();
-        collect_namespaces(constant_path, &mut namespace_parts);
-
-        let mut fqn_parts = self.scope_tracker.get_ns_stack();
-        fqn_parts.extend(namespace_parts);
-        assert!(
-            fqn_parts.last() == Some(&constant),
-            "INVARIANT VIOLATED: constant path write target `{}` did not end with its name. \
-             This is a bug because Prism target path collection must preserve the written constant. \
-             Fix: inspect collect_namespaces for ConstantPathWriteNode targets.",
-            constant_name
-        );
-
-        Some((constant_name, FullyQualifiedName::constant(fqn_parts)))
+        let name = constant_path.name()?;
+        let fqn = constant_path_write_target(
+            constant_path.parent().as_ref(),
+            name.as_slice(),
+            implicit_singleton_namespace(&self.scope_tracker).as_deref(),
+            &self.scope_tracker.get_ns_stack(),
+            &|fqn| self.namespace_is_known(fqn),
+        )?;
+        Some((String::from_utf8_lossy(name.as_slice()).to_string(), fqn))
     }
 
     fn record_constant_path_symbol(
@@ -54,7 +35,7 @@ impl FactCollector {
         constant_name: &str,
         full_location: &Location<'_>,
     ) {
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
                 .with_name_range(self.direct_terminal_name_range(
                     &constant_path.location(),
@@ -77,7 +58,7 @@ impl FactCollector {
             &constant_path.location(),
             provenance,
         );
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Constant(fqn),
             inferred_type,
             self.document.prism_location_to_text_range(full_location),
@@ -110,15 +91,16 @@ impl FactCollector {
             &constant_path,
             &node.location(),
         );
-        if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
+        if let Ok(summary) = crate::inference::callable_body::lower_callable_literal(&node.value())
+        {
             if summary.is_capture_free() {
-                self.constants
-                    .callable_bodies
-                    .push(crate::core::ConstantCallableBodyFact {
+                self.constants.callable_bodies.push(
+                    crate::core::callables::callable_body::ConstantCallableBodyFact {
                         constant: fqn,
                         summary,
                         range: self.direct_range(&node.location()),
-                    });
+                    },
+                );
             }
         }
     }
@@ -187,5 +169,34 @@ impl FactCollector {
             return;
         };
         self.record_constant_path_value_type(fqn, &node.value(), &constant_path, &node.location());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_path_target_node_entry(
+        &mut self,
+        node: &ConstantPathTargetNode,
+    ) {
+        let Some(name) = node.name() else {
+            return;
+        };
+        let Some(fqn) = constant_path_write_target(
+            node.parent().as_ref(),
+            name.as_slice(),
+            implicit_singleton_namespace(&self.scope_tracker).as_deref(),
+            &self.scope_tracker.get_ns_stack(),
+            &|fqn| self.namespace_is_known(fqn),
+        ) else {
+            return;
+        };
+        let location = node.location();
+        self.facts.analysis.symbols.push(
+            SymbolFact::new(
+                fqn.clone(),
+                SymbolKind::Constant,
+                self.direct_range(&location),
+            )
+            .with_name_range(self.direct_terminal_name_range(&location, name.as_slice())),
+        );
+        let inferred_type = self.current_assignment_target_type();
+        self.record_constant_value_type_explicit(fqn, inferred_type, &location, &location);
     }
 }

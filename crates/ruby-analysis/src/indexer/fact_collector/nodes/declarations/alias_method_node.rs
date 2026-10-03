@@ -29,38 +29,63 @@ impl FactCollector {
             .value_loc()
             .unwrap_or_else(|| old_symbol.location());
         let old_range = self.direct_range(&old_location);
-        self.facts.references.push(ReferenceCandidate::method(
-            old_range,
-            MethodReferenceCandidate {
-                owner: self.scope_tracker.get_ns_stack(),
-                owner_kind: self.scope_tracker.current_macro_definition_context(),
-                method: old_method,
-                is_super: false,
-                access: MethodReferenceAccess::Normal,
-                caller: self.scope_tracker.current_method_fqn().cloned(),
-                call_expression_range: None,
-                preferred_definition_range: None,
-                diagnostics: MethodReferenceDiagnostics {
-                    diagnostic_range: old_range,
-                    receiver_label: None,
-                    receiver_expression_range: None,
-                    receiver_type: None,
-                    diagnose_unresolved: false,
-                    allow_unindexed_owner: false,
-                    signature: None,
+        // `alias` acts where a `def` here would define, which in an eval
+        // block is the receiver rather than the lexical class.
+        let namespace_parts = self.scope_tracker.method_definition_context().0;
+        self.facts
+            .analysis
+            .reference_candidates
+            .push(ReferenceCandidate::method(
+                old_range,
+                MethodReferenceCandidate {
+                    owner: namespace_parts.clone(),
+                    owner_kind: self.scope_tracker.current_macro_definition_context(),
+                    method: old_method,
+                    is_super: false,
+                    access: MethodReferenceAccess::Normal,
+                    caller: self.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
+                    preferred_definition_range: None,
+                    diagnostics: MethodReferenceDiagnostics {
+                        diagnostic_range: old_range,
+                        receiver_label: None,
+                        receiver_expression_range: None,
+                        receiver_type: None,
+                        diagnose_unresolved: false,
+                        allow_unindexed_owner: false,
+                        safe_navigation: false,
+                        signature: None,
+                    },
                 },
-            },
-        ));
+            ));
 
-        let namespace_parts = self.scope_tracker.get_ns_stack();
+        // `alias` defines the new name on the current definition side. The
+        // declaration indexer records it for project files; template-only
+        // collection (bundled core, dependencies) keeps only these direct
+        // facts, so the alias must be declared here too or an ancestor's
+        // aliased method disappears from lookup.
+        self.direct_push_method_fact_with_visibility(
+            namespace_parts.clone(),
+            self.scope_tracker.current_macro_definition_context(),
+            new_method,
+            self.direct_range(&node.location()),
+            self.scope_tracker.current_visibility(),
+        );
+
         let old_fqn = FullyQualifiedName::method(namespace_parts.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(namespace_parts, new_method);
         let old_subject = TypeSubject::MethodReturn(old_fqn);
-        let Some(old_type) = self.facts.types.facts_for(&old_subject).into_iter().next() else {
+        let Some(old_type) = self
+            .facts
+            .flow_types
+            .facts_for(&old_subject)
+            .into_iter()
+            .next()
+        else {
             return;
         };
 
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(new_fqn),
             old_type.ruby_type,
             self.direct_range(&node.location()),

@@ -1,11 +1,7 @@
 use std::fs;
 
 use tempfile::TempDir;
-use tower_lsp::lsp_types::{
-    DidChangeWatchedFilesParams, DidChangeWorkspaceFoldersParams, FileChangeType, FileEvent,
-    InitializeParams, Url, WorkspaceFolder, WorkspaceFoldersChangeEvent,
-};
-use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::{FileChangeType, FileEvent, Url};
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -15,7 +11,8 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod, SourceKind,
+    FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod, SourceFileId,
+    SourceKind,
 };
 use ruby_fast_lsp_extension_api::{
     BlockExecutionContextPatch, CallContext, ExecutionContextTarget, IndexPatch,
@@ -25,7 +22,7 @@ use ruby_fast_lsp_extension_api::{
 
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::loading::config::{
-    ConfiguredExtensionPath, ExtensionLoadConfig, ExtensionPathSource,
+    bundled_extension_directory, ConfiguredExtensionPath, ExtensionLoadConfig, ExtensionPathSource,
 };
 use crate::environment::extensions::loading::manifest::{
     build_watched_file_matcher, parse_manifest_method_targets, parse_manifest_namespace_targets,
@@ -58,14 +55,15 @@ use crate::environment::extensions::registry::status::{
     ExtensionStatus, ExtensionTelemetry, GuestCallKind,
 };
 use crate::environment::extensions::responses::response_patch_to_document_symbol;
-use crate::environment::extensions::{ProjectContextSeed, MAX_EXTENSION_WASM_BYTES};
-use crate::indexer::cache::persistent::{
-    CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
+use crate::environment::extensions::{
+    ExtensionSemanticSeed, ProjectContextSeed, MAX_EXTENSION_WASM_BYTES,
 };
-use crate::indexer::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
-use crate::server::RubyLanguageServer;
+use crate::utils::persistent_cache::{
+    CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
+};
 
 mod execution_contexts;
 mod lifecycle;
@@ -73,7 +71,7 @@ mod manifest;
 mod patches;
 mod processes;
 
-fn copy_rspec_package(destination: &Path, version: &str) {
+pub(crate) fn copy_rspec_package(destination: &Path, version: &str) {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
     let wasm_relative = Path::new("target/wasm32-wasip1/release/rspec-ruby.wasm");
     fs::create_dir_all(destination.join(wasm_relative).parent().unwrap())
@@ -318,7 +316,7 @@ call_names = []
     .expect("test settings manifest must be written");
 }
 
-fn write_watched_file_failure_package(destination: &Path) {
+pub(crate) fn write_watched_file_failure_package(destination: &Path) {
     fs::create_dir_all(destination).expect("test package directory must be created");
     let wasm = wat::parse_str(
         r#"

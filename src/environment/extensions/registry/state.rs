@@ -1,15 +1,12 @@
+#[cfg(test)]
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Weak};
 
-use parking_lot::{Mutex, RwLock};
-use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeFact, MethodFact, NamespaceKind, SourceKind, SymbolFact,
-    SymbolKind as AnalysisSymbolKind, TextRange,
-};
-use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
+use parking_lot::Mutex;
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_fast_lsp_extension_api::Extension;
 use ruby_prism::CallNode;
 
 use crate::environment::extensions::loading::config::ExtensionLoadConfig;
@@ -21,9 +18,10 @@ use crate::environment::extensions::loading::packages::{
 #[cfg(test)]
 use crate::environment::extensions::registry::handle::ExtensionRegistryHandle;
 use crate::environment::extensions::registry::loaded::LoadedWasmExtension;
+use crate::environment::extensions::registry::seed::ExtensionSemanticSeed;
 use crate::environment::extensions::registry::status::ExtensionStatusReport;
 use crate::environment::extensions::ExtensionApplicabilityFingerprint;
-use crate::indexer::cache::persistent::PersistentDerivedProductCache;
+use crate::utils::persistent_cache::PersistentDerivedProductCache;
 
 pub(in crate::environment::extensions) struct ExtensionRegistry {
     pub(super) extensions: Vec<Arc<LoadedWasmExtension>>,
@@ -44,8 +42,10 @@ pub(crate) struct ExtensionApplicabilitySnapshot {
     applies_to_source: Vec<bool>,
 }
 
+/// The engine identity the ledger records a seed against: an allocation
+/// that lives exactly as long as the engine it identifies.
 struct SeededExtensionEngine {
-    engine: Weak<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    engine: Weak<dyn Send + Sync>,
     applicability_fingerprint: ExtensionApplicabilityFingerprint,
 }
 
@@ -224,7 +224,7 @@ impl ExtensionRegistry {
             return true;
         }
 
-        if !visitor.enclosing_extension_calls().is_empty()
+        !visitor.enclosing_extension_calls().is_empty()
             && self
                 .extensions
                 .iter()
@@ -239,14 +239,6 @@ impl ExtensionRegistry {
                         )
                         && extension.can_run_inside_extension_frame(visitor, node)
                 })
-        {
-            return true;
-        }
-
-        !self.has_loaded_wasm_for_call(method_name)
-            && ruby_fast_lsp_extension_rspec::extension()
-                .indexed_call_names()
-                .contains(&method_name)
     }
 
     pub(super) fn frame_extension_ids(
@@ -315,28 +307,26 @@ impl ExtensionRegistry {
             .collect()
     }
 
-    pub(in crate::environment::extensions) fn has_loaded_wasm_for_call(
+    /// Hand `commit` the semantic seed that `engine` lacks for this project
+    /// applicability, then record it as applied. Nothing is produced when
+    /// the engine already holds the seed for `applicability_fingerprint`.
+    ///
+    /// The seed ledger stays locked while `commit` runs, so concurrent seeds
+    /// of one engine commit in the order the ledger records them and the
+    /// last recorded applicability is the one the engine holds.
+    pub(super) fn with_semantic_seed(
         &self,
-        method_name: &str,
-    ) -> bool {
-        self.extensions
-            .iter()
-            .any(|extension| extension.is_loaded() && extension.handles_call(method_name))
-    }
-
-    pub(super) fn ensure_semantic_seed_facts(
-        &self,
-        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<dyn Send + Sync>,
         project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
         applicability_fingerprint: ExtensionApplicabilityFingerprint,
+        commit: impl FnOnce(ExtensionSemanticSeed),
     ) {
         let mut seeded_engines = self.semantic_seeded_engines.lock();
         seeded_engines.retain(|seeded| seeded.engine.strong_count() > 0);
         if let Some(seeded) = seeded_engines.iter_mut().find(|seeded| {
-            seeded
-                .engine
-                .upgrade()
-                .is_some_and(|seeded_engine| Arc::ptr_eq(&seeded_engine, engine))
+            seeded.engine.upgrade().is_some_and(|seeded_engine| {
+                std::ptr::addr_eq(Arc::as_ptr(&seeded_engine), Arc::as_ptr(engine))
+            })
         }) {
             if seeded.applicability_fingerprint == applicability_fingerprint {
                 return;
@@ -344,66 +334,33 @@ impl ExtensionRegistry {
             seeded.applicability_fingerprint = applicability_fingerprint;
         }
 
-        let mut engine_guard = engine.write();
-        let file_id = engine_guard.register_file(SourceFileInput {
-            path: std::path::absolute("/__ruby_fast_lsp_extension__/semantic_targets.rb")
-                .expect(
-                    "INVARIANT VIOLATED: extension semantic source has no absolute native path. \
-                     This is a bug because registered definitions need a valid file URI for navigation. \
-                     Fix: retain the filesystem root when constructing the synthetic source path.",
-                ),
-            content: String::new(),
-            kind: SourceKind::Stub,
-        });
-        let range = TextRange::new(file_id, 0, 0);
-        let mut facts = FileFacts::default();
-        for extension in &self.extensions {
-            if !extension.is_loaded() || !extension.applies_to(project) {
-                continue;
-            }
-            for namespace in &extension.semantic_namespaces {
-                let instance = FullyQualifiedName::namespace_with_kind(
-                    namespace.owner.clone(),
-                    NamespaceKind::Instance,
-                );
-                let singleton = FullyQualifiedName::namespace_with_kind(
-                    namespace.owner.clone(),
-                    NamespaceKind::Singleton,
-                );
-                for owner in [instance, singleton] {
-                    let fact = GraphNodeFact::new(owner, namespace.declaration_kind, range);
-                    if !facts.graph_nodes.contains(&fact) {
-                        facts.graph_nodes.push(fact);
-                    }
-                }
-            }
-            for target in &extension.semantic_targets {
-                let owner = FullyQualifiedName::namespace_with_kind(
-                    target.owner.clone(),
-                    target.owner_kind,
-                );
-                let fqn = FullyQualifiedName::method(target.owner.clone(), target.method);
-                facts.symbols.push(SymbolFact::new(
-                    fqn.clone(),
-                    AnalysisSymbolKind::Method,
-                    range,
-                ));
-                facts.methods.push(MethodFact::new(fqn, owner, range));
-            }
-        }
-        engine_guard.replace_facts(file_id, facts, ResolveMode::Deferred);
-        drop(engine_guard);
+        let seed = ExtensionSemanticSeed::from_extensions(
+            self.extensions
+                .iter()
+                .filter(|extension| extension.is_loaded() && extension.applies_to(project))
+                .map(Arc::as_ref),
+        );
+        commit(seed);
         if !seeded_engines.iter().any(|seeded| {
-            seeded
-                .engine
-                .upgrade()
-                .is_some_and(|seeded_engine| Arc::ptr_eq(&seeded_engine, engine))
+            seeded.engine.upgrade().is_some_and(|seeded_engine| {
+                std::ptr::addr_eq(Arc::as_ptr(&seeded_engine), Arc::as_ptr(engine))
+            })
         }) {
             seeded_engines.push(SeededExtensionEngine {
                 engine: Arc::downgrade(engine),
                 applicability_fingerprint,
             });
         }
+    }
+
+    /// Forget that `engine` holds any semantic seed, so the next file pass
+    /// commits one again.
+    pub(super) fn forget_semantic_seed(&self, engine: &Arc<dyn Send + Sync>) {
+        self.semantic_seeded_engines.lock().retain(|seeded| {
+            seeded.engine.upgrade().is_some_and(|seeded_engine| {
+                !std::ptr::addr_eq(Arc::as_ptr(&seeded_engine), Arc::as_ptr(engine))
+            })
+        });
     }
 }
 
@@ -421,8 +378,10 @@ impl ExtensionApplicabilitySnapshot {
             .iter()
             .enumerate()
             .find(|(_, extension)| extension.metadata.id == extension_id)
-            .expect(
-                "INVARIANT VIOLATED: applicability test requested an unknown extension. This is a broken test because snapshots contain one decision per loaded registry extension. Fix: load the extension before querying its decision.",
+            .expect_invariant(
+                "applicability test requested an unknown extension",
+                "snapshots contain one decision per loaded registry extension",
+                "load the extension before querying its decision",
             );
         registry.extension_applies_to_source(index, extension, project, Some(self))
     }
@@ -435,11 +394,7 @@ pub(in crate::environment::extensions) fn extension_applicability_fingerprint(
 }
 
 fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> Arc<HashSet<String>> {
-    let mut names = ruby_fast_lsp_extension_rspec::extension()
-        .indexed_call_names()
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<HashSet<_>>();
+    let mut names = HashSet::new();
     for extension in extensions {
         names.extend(extension.indexed_call_names.iter().cloned());
         names.extend(extension.frame_call_names.iter().cloned());
@@ -452,6 +407,5 @@ pub(super) fn extension_target_owner_exists(
     target: &ExtensionMethodTarget,
 ) -> bool {
     let required_owner = FullyQualifiedName::namespace(target.owner.clone());
-    let engine = visitor.analysis_engine().read();
-    ruby_analysis::engine::AnalysisQuery::new(&engine).namespace_exists(&required_owner)
+    visitor.project_namespace_exists(&required_owner)
 }

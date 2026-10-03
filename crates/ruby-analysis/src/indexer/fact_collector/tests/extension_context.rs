@@ -1,5 +1,5 @@
 use crate::core::{FullyQualifiedName, GeneratedOwnerId, NamespaceKind, RubyConstant, SourceKind};
-use crate::engine::{AnalysisEngine, SourceFileInput};
+use crate::engine::{Project, SourceFileInput};
 use crate::indexer::fact_collector::{
     BlockExecutionContext, FactCollector, FactCollectorExtensionHost,
     NullFactCollectorExtensionHost,
@@ -50,7 +50,7 @@ fn nested_extension_calls_preserve_parent_context_and_handled_decisions() {
     }
 
     let source = "outer(supplied.child, untracked(inner(leaf)), sibling)\nafter\n";
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/nested.rb"),
         content: source.to_string(),
@@ -93,6 +93,7 @@ fn nested_extension_calls_preserve_parent_context_and_handled_decisions() {
 
     let collected = collector.finish();
     let methods = collected
+        .analysis
         .reference_candidates
         .iter()
         .filter_map(|candidate| match &candidate.kind {
@@ -113,8 +114,8 @@ fn nested_extension_calls_preserve_parent_context_and_handled_decisions() {
         methods.contains(&"after"),
         "extension context must not leak into the next statement"
     );
-    assert_eq!(collected.diagnostics.len(), 1);
-    assert_eq!(collected.diagnostics[0].code, "extension-leaf");
+    assert_eq!(collected.analysis.diagnostics.len(), 1);
+    assert_eq!(collected.analysis.diagnostics[0].code, "extension-leaf");
 }
 
 impl FactCollectorExtensionHost for SyntheticExecutionContextHost {
@@ -139,7 +140,7 @@ fn attr_macros_use_the_method_definition_context_in_direct_facts() {
     let source =
         "class User\n  attr_accessor :name\n  class << self\n    attr_reader :count\n  end\nend\n";
     let uri = Url::parse("file:///workspace/lib/user.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/user.rb"),
         content: source.to_string(),
@@ -159,7 +160,7 @@ fn attr_macros_use_the_method_definition_context_in_direct_facts() {
     let owner_for = |name: &str| {
         collector
             .facts
-            .direct
+            .analysis
             .methods
             .iter()
             .find(|fact| fact.fqn.name() == name)
@@ -188,7 +189,7 @@ fn attr_macros_use_the_method_definition_context_in_direct_facts() {
 fn extension_context_rehomes_block_method_without_changing_lexical_namespace() {
     let source = "module Lexical\n  describe do\n    def helper\n    end\n    helper\n    VALUE\n  end\nend\n";
     let uri = Url::parse("file:///workspace/spec/context_spec.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/spec/context_spec.rb"),
         content: source.to_string(),
@@ -210,14 +211,14 @@ fn extension_context_rehomes_block_method_without_changing_lexical_namespace() {
 
     let helper = collector
         .facts
-        .direct
+        .analysis
         .methods
         .iter()
         .find(|fact| fact.fqn.name() == "helper")
         .expect("helper definition must be collected");
     assert_eq!(helper.owner.namespace_parts(), vec![owner]);
     assert!(
-        collector.facts.direct.methods.iter().all(|fact| {
+        collector.facts.analysis.methods.iter().all(|fact| {
             fact.fqn.name() != "helper"
                 || fact.owner.namespace_parts() != vec![RubyConstant::new("Lexical").unwrap()]
         }),

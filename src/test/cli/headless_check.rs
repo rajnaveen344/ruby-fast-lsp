@@ -25,15 +25,14 @@ greet
         .expect("headless check must analyze the project");
 
     assert_eq!(report.files_checked, 1);
-    assert!(
+    invariant!(
         report
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code.as_deref() == Some("wrong-arity")),
-        "INVARIANT VIOLATED: the headless check session did not report the engine's \
-         wrong-arity diagnostic. This is a bug because CLI and LSP must consume the same \
-         semantic facts without starting an LSP client. Fix: route check inputs through the \
-         shared FileProcessor and AnalysisEngine lifecycle."
+        what = "the headless check session did not report the engine's wrong-arity diagnostic",
+        why = "CLI and LSP must consume the same semantic facts without starting an LSP client",
+        fix = "route check inputs through the shared FileProcessor and Project lifecycle",
     );
 }
 
@@ -59,17 +58,16 @@ end
         .await
         .expect("headless check must analyze the project");
 
-    assert!(
+    invariant!(
         report.diagnostics.iter().any(|diagnostic| {
             matches!(
                 diagnostic.code.as_deref(),
                 Some("unresolved-method" | "unresolved-constant" | "unresolved-require")
             )
         }),
-        "INVARIANT VIOLATED: the complete check session withheld every dependency diagnostic. \
-         This is a bug because a standalone project without a Gemfile has a deliberately closed \
-         dependency universe after core/project indexing. Fix: suppress absence claims only when \
-         the shared project loader itself reports incomplete state."
+        what = "the complete check session withheld every dependency diagnostic",
+        why = "a project without a Gemfile has a closed dependency universe",
+        fix = "suppress absence claims only when the loader reports incomplete state",
     );
     assert!(report.dependency_loading_complete);
     assert_eq!(report.suppressed_inconclusive_diagnostics, 0);
@@ -89,12 +87,11 @@ async fn headless_check_uses_the_complete_shared_project_loader() {
         .await
         .expect("headless check must analyze the project");
 
-    assert!(
+    invariant!(
         report.dependency_loading_complete,
-        "INVARIANT VIOLATED: a successful project check did not complete the same runtime, core, \
-         stdlib, gem, signature, and project loading lifecycle as LSP cold indexing. This is a bug \
-         because the CLI cannot prove absence against a partial semantic universe. Fix: route the \
-         check session through the shared IndexingCoordinator before emitting diagnostics."
+        what = "a successful check skipped part of the LSP cold-indexing lifecycle",
+        why = "the CLI cannot prove absence against a partial universe",
+        fix = "route the check session through the shared IndexingCoordinator",
     );
     assert_eq!(report.suppressed_inconclusive_diagnostics, 0);
 }

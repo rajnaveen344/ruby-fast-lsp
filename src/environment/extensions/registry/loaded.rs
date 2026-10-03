@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -88,11 +89,12 @@ impl LoadedWasmExtension {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        let watched_file_matcher = build_watched_file_matcher(
-            &metadata.id,
-            &metadata.watched_files,
-        )
-        .expect("INVARIANT VIOLATED: validated extension watcher globs failed to compile while constructing a loaded extension. This is a bug because manifest validation and runtime matching use the same compiler. Fix: keep watcher validation before Wasm instantiation.");
+        let watched_file_matcher =
+            build_watched_file_matcher(&metadata.id, &metadata.watched_files).expect_invariant(
+                "validated watcher globs failed to compile for a loaded extension",
+                "manifest validation and matching use the same compiler",
+                "keep watcher validation before Wasm instantiation",
+            );
         Self {
             metadata,
             extension: Mutex::new(extension),
@@ -170,8 +172,11 @@ impl LoadedWasmExtension {
                 *status = match event_name {
                     "lifecycle.activate" | "settings.changed" => ExtensionStatus::Loaded,
                     "lifecycle.deactivate" => ExtensionStatus::Deactivated,
-                    other => panic!(
-                        "INVARIANT VIOLATED: unsupported extension lifecycle event `{other}`. This is a bug because lifecycle state transitions must be explicit. Fix: add the event and its resulting state to handle_lifecycle_event."
+                    other => unreachable_invariant!(
+                        what = "unsupported extension lifecycle event `{other}`",
+                        why = "lifecycle state transitions must be explicit",
+                        fix = "add the event and its resulting state to handle_lifecycle_event",
+                        other = other,
                     ),
                 };
             }
@@ -202,12 +207,14 @@ impl LoadedWasmExtension {
         project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
         context: &CallContext,
     ) -> anyhow::Result<ruby_fast_lsp_extension_api::ExtensionOutput> {
-        assert!(
+        invariant!(
             context
                 .project
                 .as_ref()
                 .is_none_or(|context_project| Some(context_project) == project),
-            "INVARIANT VIOLATED: an extension call payload disagrees with its explicit owning project. This is a host bug because project instance selection and guest-visible context must describe one source owner. Fix: construct the call context from the same FactCollector project passed to index_call_output_for_project."
+            what = "extension call payload disagrees with its owning project",
+            why = "instance selection and guest context must name one owner",
+            fix = "build the call context from the project passed to index_call_output_for_project",
         );
         let (result, elapsed) = if let Some(project) = project {
             let mut extensions = self.project_extensions.lock();
@@ -242,8 +249,10 @@ impl LoadedWasmExtension {
             let guest_context = guest_call_context(self.project_context_delivery, project, context);
             let result = extensions
                 .get_mut(&project.project_uri)
-                .expect(
-                    "INVARIANT VIOLATED: project Wasm instance disappeared immediately after insertion. This is a host registry bug because the instance map is locked for the entire operation. Fix: keep lookup and insertion under one project-extension lock.",
+                .expect_invariant(
+                    "project Wasm instance disappeared immediately after insertion",
+                    "the instance map is locked for the entire operation",
+                    "keep lookup and insertion under one project-extension lock",
                 )
                 .index_call_output(guest_context.as_ref());
             (result, started.elapsed())
@@ -299,8 +308,10 @@ impl LoadedWasmExtension {
             let started = Instant::now();
             let result = extensions
                 .get_mut(&project.project_uri)
-                .expect(
-                    "INVARIANT VIOLATED: project Wasm instance disappeared immediately after insertion. This is a host registry bug because the instance map is locked for the entire event. Fix: keep lookup and insertion under one project-extension lock.",
+                .expect_invariant(
+                    "project Wasm instance disappeared immediately after insertion",
+                    "the instance map is locked for the entire event",
+                    "keep lookup and insertion under one project-extension lock",
                 )
                 .handle_event(event);
             (result, started.elapsed())

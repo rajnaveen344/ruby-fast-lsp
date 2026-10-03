@@ -3,10 +3,13 @@
 use crate::core::{
     FullyQualifiedName, RubyConstant, RubyType, TypeFact, TypeProvenance, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{DefNode, Node};
 
 use super::syntax::{constant_parts, constant_parts_and_absolute, constant_path_parts};
 use super::AnalysisIndexer;
+use crate::indexer::documents::scope_rules::lexical_candidates;
+use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::{infer_array_literal_type, infer_hash_literal_type};
 
 impl AnalysisIndexer {
@@ -16,67 +19,29 @@ impl AnalysisIndexer {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<RubyType> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let constant = FullyQualifiedName::constant(probe);
-            let subject = TypeSubject::Constant(constant.clone());
-            if let Some(fact) = self
-                .facts
-                .types
-                .iter()
-                .rev()
-                .find(|fact| fact.subject == subject)
-            {
-                return Some(fact.ruby_type.clone());
-            }
-            if let Some(ruby_type) = self.known_constant_types.get(&constant) {
-                return Some(ruby_type.clone());
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        None
+        lexical_candidates(parts, absolute, lexical_context)
+            .find_map(|candidate| self.constant_value_type(candidate))
     }
 
-    pub(super) fn resolve_declaration_constant_value_type_from(
+    pub(super) fn first_constant_value_type(
         &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-        lexical_context: &[RubyConstant],
+        candidates: &[Vec<RubyConstant>],
     ) -> Option<RubyType> {
-        let mut candidates = Vec::new();
-        let mut exact = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-        exact.extend(parts.iter().cloned());
-        candidates.push(exact);
-        if !absolute && parts.len() > 1 && !lexical_context.is_empty() {
-            candidates.push(parts.to_vec());
-        }
+        candidates
+            .iter()
+            .find_map(|candidate| self.constant_value_type(candidate.clone()))
+    }
 
-        candidates.into_iter().find_map(|candidate| {
-            let constant = FullyQualifiedName::constant(candidate);
-            let subject = TypeSubject::Constant(constant.clone());
-            self.facts
-                .types
-                .iter()
-                .rev()
-                .find(|fact| fact.subject == subject)
-                .map(|fact| fact.ruby_type.clone())
-                .or_else(|| self.known_constant_types.get(&constant).cloned())
-        })
+    fn constant_value_type(&self, parts: Vec<RubyConstant>) -> Option<RubyType> {
+        let constant = FullyQualifiedName::constant(parts);
+        let subject = TypeSubject::Constant(constant.clone());
+        self.facts
+            .types
+            .iter()
+            .rev()
+            .find(|fact| fact.subject == subject)
+            .map(|fact| fact.ruby_type.clone())
+            .or_else(|| self.known_constant_types.get(&constant).cloned())
     }
 
     pub(super) fn assignment_type(&self, node: &Node<'_>) -> Option<RubyType> {
@@ -105,10 +70,13 @@ impl AnalysisIndexer {
             if call.name().as_slice() == b"new" {
                 let receiver = call.receiver()?;
                 let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
-                return self
-                    .resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack)
-                    .and_then(|ruby_type| match ruby_type {
-                        RubyType::ClassReference(target) => Some(RubyType::Class(target)),
+                return match self.resolve_constant_value_type_from(
+                    &parts,
+                    absolute,
+                    &self.scope.get_ns_stack(),
+                ) {
+                    Some(RubyType::ClassReference(target)) => seed_constructor_type(&target),
+                    Some(
                         RubyType::Class(_)
                         | RubyType::Module(_)
                         | RubyType::ModuleReference(_)
@@ -117,14 +85,19 @@ impl AnalysisIndexer {
                         | RubyType::Hash(_, _)
                         | RubyType::Shape(_)
                         | RubyType::Union(_)
-                        | RubyType::Unknown => None,
-                    })
-                    .or_else(|| literal_type(node));
+                        | RubyType::Unknown,
+                    )
+                    | None => literal_type(node),
+                };
             }
         }
 
         if let Some((parts, absolute)) = constant_parts_and_absolute(node) {
-            return self.resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack);
+            return self.resolve_constant_value_type_from(
+                &parts,
+                absolute,
+                &self.scope.get_ns_stack(),
+            );
         }
 
         literal_type(node)
@@ -160,7 +133,7 @@ pub(super) fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         if call.name().as_slice() == b"new" {
             let receiver = call.receiver()?;
             let parts = constant_parts(&receiver)?;
-            return Some(RubyType::Class(FullyQualifiedName::constant(parts)));
+            return seed_constructor_type(&FullyQualifiedName::constant(parts));
         }
     }
     if let Some(read) = node.as_constant_read_node() {
@@ -201,8 +174,10 @@ pub(super) fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         || node.as_interpolated_regular_expression_node().is_some()
     {
         return Some(RubyType::Class(
-            FullyQualifiedName::try_from("Regexp").expect(
-                "INVARIANT VIOLATED: Regexp is not a valid Ruby constant. This is a bug because it is a language-defined literal type. Fix: preserve the canonical constant spelling.",
+            FullyQualifiedName::try_from("Regexp").expect_invariant(
+                "Regexp is not a valid Ruby constant",
+                "it is a language-defined literal type",
+                "preserve the canonical constant spelling",
             ),
         ));
     }

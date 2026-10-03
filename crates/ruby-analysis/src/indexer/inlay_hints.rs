@@ -3,6 +3,7 @@
 //! This module extracts reusable, protocol-neutral inlay hint inputs from Prism
 //! AST nodes. Editor adapters convert these byte offsets into protocol positions.
 
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_module_node, CallNode, ClassNode,
     ConstantAndWriteNode, ConstantOperatorWriteNode, ConstantOrWriteNode, ConstantPathAndWriteNode,
@@ -114,11 +115,11 @@ pub struct InlayNodeCollector<'a> {
 impl<'a> InlayNodeCollector<'a> {
     /// Create a new collector for the given byte range.
     pub fn new(range_start: u32, range_end: u32, source: &'a [u8]) -> Self {
-        assert!(
+        invariant!(
             range_start <= range_end,
-            "INVARIANT VIOLATED: inlay hint collection range start must be <= end. \
-             This is a bug because a reversed range cannot be traversed deterministically. \
-             Fix: convert editor ranges to sorted byte offsets before collection."
+            what = "inlay hint collection range start must be <= end",
+            why = "a reversed range cannot be traversed deterministically",
+            fix = "convert editor ranges to sorted byte offsets before collection",
         );
         Self {
             range_start,
@@ -140,10 +141,10 @@ impl<'a> InlayNodeCollector<'a> {
     }
 
     fn to_u32_offset(offset: usize) -> u32 {
-        u32::try_from(offset).expect(
-            "INVARIANT VIOLATED: Ruby source byte offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen analysis offsets before collecting hints for files larger than u32::MAX bytes.",
+        u32::try_from(offset).expect_invariant(
+            "Ruby source byte offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen analysis offsets before collecting hints for files larger than u32::MAX bytes",
         )
     }
 
@@ -330,8 +331,10 @@ impl<'a> InlayNodeCollector<'a> {
     }
 
     fn push_constant_name_write(&mut self, name: &[u8], name_end_offset: usize) {
-        let name_start_offset = name_end_offset.checked_sub(name.len()).expect(
-            "INVARIANT VIOLATED: a constant name is longer than the source prefix ending at its Prism location. This is a bug because Prism name locations must contain the emitted name bytes. Fix: use the target's exact name location when collecting constant inlay nodes.",
+        let name_start_offset = name_end_offset.checked_sub(name.len()).expect_invariant(
+            "a constant name is longer than the source prefix ending at its Prism location",
+            "prism name locations must contain the emitted name bytes",
+            "use the target's exact name location when collecting constant inlay nodes",
         );
         let name_start_offset = Self::to_u32_offset(name_start_offset);
         let name_end_offset = Self::to_u32_offset(name_end_offset);
@@ -597,8 +600,10 @@ mod tests {
             | InlayNode::ChainedCall { .. }
             | InlayNode::ImplicitReturn { .. } => None,
         });
-        let params = params.expect(
-            "INVARIANT VIOLATED: inlay collection omitted the render method definition. This is a bug because every DefNode in range must produce a MethodDef node. Fix: preserve DefNode collection before extracting parameter hints.",
+        let params = params.expect_invariant(
+            "inlay collection omitted the render method definition",
+            "every DefNode in range must produce a MethodDef node",
+            "preserve DefNode collection before extracting parameter hints",
         );
         assert_eq!(
             params

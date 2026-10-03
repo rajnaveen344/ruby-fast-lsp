@@ -5,9 +5,12 @@ use crate::core::{
     RubyMethod, RubyType, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
+use crate::indexer::documents::scope_rules::{
+    edge_admission, lexical_candidates, resolve_lexical_namespace, EdgeAdmission,
+};
 use crate::indexer::fact_collector::context::source::u32_offset;
 use crate::indexer::fact_collector::FactCollector;
-use std::collections::HashSet;
+use crate::invariant::ExpectInvariant;
 use std::sync::Arc;
 
 impl FactCollector {
@@ -25,10 +28,10 @@ impl FactCollector {
         name: &[u8],
     ) -> TextRange {
         let end = path.end_offset();
-        let start = end.checked_sub(name.len()).expect(
-            "INVARIANT VIOLATED: constant name is longer than its Prism path location. \
-             This is a bug because the terminal name must be contained in the constant path. \
-             Fix: inspect Prism constant path locations before deriving declaration ranges.",
+        let start = end.checked_sub(name.len()).expect_invariant(
+            "constant name is longer than its Prism path location",
+            "the terminal name must be contained in the constant path",
+            "inspect Prism constant path locations before deriving declaration ranges",
         );
         TextRange::new(
             self.document.analysis_file_id(),
@@ -45,7 +48,7 @@ impl FactCollector {
         name_range: TextRange,
     ) {
         self.semantics.known_namespaces.insert(fqn.clone());
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(
                 fqn.clone(),
                 match kind {
@@ -57,11 +60,11 @@ impl FactCollector {
             .with_name_range(name_range),
         );
         self.facts
-            .direct
+            .analysis
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));
         let constant_fqn = FullyQualifiedName::constant(fqn.namespace_parts());
-        self.facts.direct.types.push(TypeFact::new(
+        self.facts.analysis.types.push(TypeFact::new(
             TypeSubject::Constant(constant_fqn.clone()),
             match kind {
                 GraphNodeKind::Class => RubyType::ClassReference(constant_fqn.clone()),
@@ -71,16 +74,16 @@ impl FactCollector {
             TypeProvenance::Inferred,
         ));
 
-        let singleton_fqn = fqn.to_singleton_namespace().expect(
-            "INVARIANT VIOLATED: namespace fact could not convert to singleton namespace. \
-             This is a bug because class/module graph nodes must be namespace FQNs. \
-             Fix: only call direct_push_namespace_facts with Namespace facts.",
+        let singleton_fqn = fqn.to_singleton_namespace().expect_invariant(
+            "namespace fact could not convert to singleton namespace",
+            "class/module graph nodes must be namespace FQNs",
+            "only call direct_push_namespace_facts with Namespace facts",
         );
         self.semantics
             .known_namespaces
             .insert(singleton_fqn.clone());
         self.facts
-            .direct
+            .analysis
             .graph_nodes
             .push(GraphNodeFact::new(singleton_fqn, kind, range));
     }
@@ -99,35 +102,29 @@ impl FactCollector {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
+        resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
+            self.direct_namespace_is_known(fqn)
+        })
+    }
 
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(probe);
-            if self.direct_namespace_is_known(&fqn) {
-                return Some(fqn);
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.direct_namespace_is_known(&fqn).then_some(fqn)
+    /// The namespace a declaration-time reference (superclass, mixin) binds
+    /// when the class body runs: only namespaces declared so far.
+    pub fn declared_resolve_namespace_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
+            self.direct_namespace_is_declared(fqn)
+        })
     }
 
     pub fn namespace_is_known(&self, fqn: &FullyQualifiedName) -> bool {
         if self.direct_namespace_is_known(fqn) {
             return true;
         }
-        let engine = self.semantics.engine.read();
-        crate::engine::AnalysisQuery::new(&engine).has_graph_node(fqn)
+        self.semantics.project.has_graph_node(fqn)
     }
 
     pub fn resolve_constant_value_type_from(
@@ -136,59 +133,48 @@ impl FactCollector {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<(FullyQualifiedName, RubyType)> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let constant = FullyQualifiedName::constant(probe);
-            if let Some(ruby_type) = self
-                .direct_constant_value_type(&constant)
-                .or_else(|| query.constant_value_type(&constant))
-            {
-                return Some((constant, ruby_type));
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        None
+        self.first_constant_value_type(lexical_candidates(parts, absolute, lexical_context))
     }
 
-    pub fn resolve_declaration_constant_value_type_from(
+    pub fn first_constant_value_type(
         &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-        lexical_context: &[RubyConstant],
+        candidates: impl IntoIterator<Item = Vec<RubyConstant>>,
     ) -> Option<(FullyQualifiedName, RubyType)> {
-        let mut candidates = Vec::new();
-        let mut exact = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-        exact.extend(parts.iter().cloned());
-        candidates.push(exact);
-        if !absolute && parts.len() > 1 && !lexical_context.is_empty() {
-            candidates.push(parts.to_vec());
-        }
+        let candidates = candidates
+            .into_iter()
+            .map(FullyQualifiedName::constant)
+            .collect::<Vec<_>>();
+        self.semantics
+            .project
+            .first_constant_value_type(&candidates, &|constant| {
+                self.direct_constant_value_type(constant)
+            })
+    }
 
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
-        candidates.into_iter().find_map(|candidate| {
-            let constant = FullyQualifiedName::constant(candidate);
-            self.direct_constant_value_type(&constant)
-                .or_else(|| query.constant_value_type(&constant))
-                .map(|ruby_type| (constant, ruby_type))
-        })
+    /// The value a class or module declaration name may alias. A reference
+    /// to a namespace no walk knows is a guess from the lexical scope, not
+    /// evidence of an alias, so the declaration names its own class.
+    pub(in crate::indexer::fact_collector) fn alias_value_type(
+        &self,
+        candidates: &[Vec<RubyConstant>],
+    ) -> Option<RubyType> {
+        let (_, ruby_type) = self.first_constant_value_type(candidates.iter().cloned())?;
+        match &ruby_type {
+            RubyType::ClassReference(target) | RubyType::ModuleReference(target) => {
+                let known = target
+                    .to_instance_namespace()
+                    .is_some_and(|namespace| self.namespace_is_known(&namespace));
+                known.then_some(ruby_type)
+            }
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::Literal(_)
+            | RubyType::Array(_)
+            | RubyType::Hash(_, _)
+            | RubyType::Shape(_)
+            | RubyType::Union(_)
+            | RubyType::Unknown => Some(ruby_type),
+        }
     }
 
     pub fn direct_push_edge(
@@ -218,13 +204,15 @@ impl FactCollector {
         provenance: GraphEdgeProvenance,
         range: TextRange,
     ) {
-        let Some(target) = self.direct_resolve_namespace(parts, absolute) else {
-            self.facts.direct.unresolved_graph_edges.push(
+        let lexical_context = self.scope_tracker.get_ns_stack();
+        let Some(target) = self.declared_resolve_namespace_from(parts, absolute, &lexical_context)
+        else {
+            self.facts.analysis.unresolved_graph_edges.push(
                 UnresolvedGraphEdgeFact::new(
                     source,
                     parts.to_vec(),
                     absolute,
-                    FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack()),
+                    FullyQualifiedName::namespace(lexical_context),
                     kind,
                     range,
                 )
@@ -259,78 +247,31 @@ impl FactCollector {
         provenance: GraphEdgeProvenance,
         range: TextRange,
     ) -> bool {
-        if self
-            .facts
-            .direct
-            .graph_edges
-            .iter()
-            .any(|edge| edge.source == source && edge.target == target && edge.kind == kind)
-        {
-            return true;
-        }
-
-        if kind == GraphEdgeKind::Superclass {
-            if let Some(existing) = self
-                .facts
-                .direct
-                .graph_edges
-                .iter()
-                .find(|edge| edge.source == source && edge.kind == GraphEdgeKind::Superclass)
-            {
+        match edge_admission(&self.facts.analysis.graph_edges, &source, &target, kind) {
+            EdgeAdmission::Admit => {}
+            EdgeAdmission::Duplicate => return true,
+            EdgeAdmission::ConflictingSuperclass(existing) => {
+                let message = format!(
+                    "Class `{source}` already inherits `{existing}` and cannot also inherit `{target}`"
+                );
+                self.push_error_diagnostic(range, "conflicting-superclass", message);
+                return false;
+            }
+            EdgeAdmission::Cycle => {
                 self.push_error_diagnostic(
                     range,
-                    "conflicting-superclass",
-                    format!(
-                        "Class `{source}` already inherits `{}` and cannot also inherit `{target}`",
-                        existing.target
-                    ),
+                    "cyclic-inheritance",
+                    format!("Inheritance edge `{source}` -> `{target}` creates a cycle"),
                 );
                 return false;
             }
         }
 
-        if ancestry_edge_kind(kind)
-            && (source == target || self.direct_ancestry_path_exists(&target, &source))
-        {
-            self.push_error_diagnostic(
-                range,
-                "cyclic-inheritance",
-                format!("Inheritance edge `{source}` -> `{target}` creates a cycle"),
-            );
-            return false;
-        }
-
         self.facts
-            .direct
+            .analysis
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));
         true
-    }
-
-    pub(in crate::indexer::fact_collector) fn direct_ancestry_path_exists(
-        &self,
-        start: &FullyQualifiedName,
-        destination: &FullyQualifiedName,
-    ) -> bool {
-        let mut pending = vec![start.clone()];
-        let mut visited = HashSet::new();
-        while let Some(current) = pending.pop() {
-            if &current == destination {
-                return true;
-            }
-            if !visited.insert(current.clone()) {
-                continue;
-            }
-            pending.extend(
-                self.facts
-                    .direct
-                    .graph_edges
-                    .iter()
-                    .filter(|edge| edge.source == current && ancestry_edge_kind(edge.kind))
-                    .map(|edge| edge.target.clone()),
-            );
-        }
-        false
     }
 
     pub fn direct_push_method_fact(
@@ -389,6 +330,7 @@ impl FactCollector {
             documentation,
             return_type_label,
             crate::core::MethodAvailability::Available,
+            self.scope_tracker.current_visibility(),
         );
     }
 
@@ -403,10 +345,11 @@ impl FactCollector {
         documentation: Option<String>,
         return_type_label: Option<String>,
         availability: crate::core::MethodAvailability,
+        visibility: MethodVisibility,
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
         );
         self.push_direct_method_fact(
@@ -414,7 +357,7 @@ impl FactCollector {
                 .with_name_range(name_range)
                 .with_signature_metadata(documentation, return_type_label)
                 .with_availability(availability)
-                .with_visibility(self.scope_tracker.current_visibility()),
+                .with_visibility(visibility),
         );
     }
 
@@ -429,7 +372,7 @@ impl FactCollector {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
         self.facts
-            .direct
+            .analysis
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.push_direct_method_fact(
@@ -448,11 +391,11 @@ impl FactCollector {
         range: TextRange,
     ) {
         let owner = FullyQualifiedName::namespace_with_kind(
-            self.scope_tracker.get_ns_stack(),
+            self.scope_tracker.method_definition_context().0,
             self.scope_tracker.current_macro_definition_context(),
         );
         self.facts
-            .direct
+            .analysis
             .method_visibility_overrides
             .push(MethodVisibilityOverrideFact::new(
                 owner.clone(),
@@ -461,7 +404,7 @@ impl FactCollector {
                 range,
             ));
         let mut changed_direct_fact = false;
-        for fact in &mut self.facts.direct.methods {
+        for fact in &mut self.facts.analysis.methods {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 continue;
             };
@@ -478,7 +421,7 @@ impl FactCollector {
 
     pub(in crate::indexer::fact_collector) fn push_direct_method_fact(&mut self, fact: MethodFact) {
         let fqn = fact.fqn.clone();
-        self.facts.direct.methods.push(fact);
+        self.facts.analysis.methods.push(fact);
         self.refresh_local_public_method_candidate(&fqn);
     }
 
@@ -488,14 +431,16 @@ impl FactCollector {
     ) {
         let mut matching = self
             .facts
-            .direct
+            .analysis
             .methods
             .iter()
             .filter(|fact| &fact.fqn == fqn)
             .peekable();
-        assert!(
+        invariant!(
             matching.peek().is_some(),
-            "INVARIANT VIOLATED: public-method candidate refresh has no matching direct method fact. This is a bug because refresh must run only after insertion or visibility mutation. Fix: pass the exact inserted method FQN to refresh_local_public_method_candidate."
+            what = "public-method candidate refresh has no matching direct method fact",
+            why = "refresh must run only after insertion or visibility mutation",
+            fix = "pass the exact inserted method FQN to refresh_local_public_method_candidate",
         );
         let proven_public = matching.all(|fact| {
             fact.visibility == MethodVisibility::Public
@@ -516,7 +461,7 @@ impl FactCollector {
         location: &ruby_prism::Location<'_>,
     ) {
         self.facts
-            .direct
+            .analysis
             .symbols
             .push(SymbolFact::new(fqn, kind, self.direct_range(location)));
     }
@@ -542,7 +487,7 @@ impl FactCollector {
         if ruby_type == RubyType::Unknown && !matches!(subject, TypeSubject::Constant(_)) {
             return;
         }
-        self.facts.direct.types.push(TypeFact::new(
+        self.facts.analysis.types.push(TypeFact::new(
             subject,
             ruby_type,
             self.direct_range(location),
@@ -555,18 +500,22 @@ impl FactCollector {
         fact: TypeFact,
     ) {
         let TypeSubject::Expression(subject_range) = &fact.subject else {
-            panic!(
-                "INVARIANT VIOLATED: the direct expression index received a named type subject. This is a bug because the range index may only point to TypeSubject::Expression facts. Fix: route named facts through direct_push_type and expression facts through push_direct_expression_fact."
+            unreachable_invariant!(
+                what = "the direct expression index received a named type subject",
+                why = "the range index points only at TypeSubject::Expression facts",
+                fix = "route named facts via direct_push_type, expressions via push_direct_expression_fact",
             );
         };
-        assert_eq!(
+        invariant_eq!(
             *subject_range,
             fact.range,
-            "INVARIANT VIOLATED: a direct expression subject differs from its fact range. This is a bug because the compact range index uses that identity for exact lookup. Fix: construct both ranges from the same Prism node location."
+            what = "a direct expression subject differs from its fact range",
+            why = "the compact range index uses that identity for exact lookup",
+            fix = "construct both ranges from the same Prism node location",
         );
         let range = *subject_range;
-        let index = self.facts.direct.types.len();
-        self.facts.direct.types.push(fact);
+        let index = self.facts.analysis.types.len();
+        self.facts.analysis.types.push(fact);
         self.facts
             .expression_indexes
             .entry(range)
@@ -584,27 +533,21 @@ impl FactCollector {
             .iter()
             .rev()
             .find_map(|index| {
-                let fact = self.facts.direct.types.get(*index).expect(
-                    "INVARIANT VIOLATED: the direct expression index points outside the append-only fact vector. This is a bug because direct facts are never removed during collection. Fix: record each index only after appending its owning fact and never reorder direct_facts.types.",
+                let fact = self.facts.analysis.types.get(*index).expect_invariant(
+                    "the direct expression index points outside the fact vector",
+                    "direct facts are never removed during collection",
+                    "record each index after appending its fact; never reorder analysis.types",
                 );
-                assert!(
+                invariant!(
                     matches!(&fact.subject, TypeSubject::Expression(subject_range) if *subject_range == range)
                         && fact.range == range,
-                    "INVARIANT VIOLATED: the direct expression range index points to a different semantic fact. This is a bug because an indexed lookup would return evidence for the wrong AST node. Fix: update the range index atomically with every expression-fact append."
+                    what = "the direct expression range index points to a different semantic fact",
+                    why = "an indexed lookup would return evidence for the wrong AST node",
+                    fix = "update the range index atomically with every expression-fact append",
                 );
                 provenance
                     .is_none_or(|expected| fact.provenance == expected)
                     .then_some(fact)
             })
-    }
-}
-
-pub(in crate::indexer::fact_collector) fn ancestry_edge_kind(kind: GraphEdgeKind) -> bool {
-    match kind {
-        GraphEdgeKind::Superclass
-        | GraphEdgeKind::Include
-        | GraphEdgeKind::Prepend
-        | GraphEdgeKind::Extend => true,
-        GraphEdgeKind::ExecutionContextApplication => false,
     }
 }

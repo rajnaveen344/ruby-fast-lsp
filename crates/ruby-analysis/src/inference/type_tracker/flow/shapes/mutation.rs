@@ -6,6 +6,7 @@ use crate::inference::type_tracker::flow::shapes::values::{
     shape_with_required_field, shape_without_field,
 };
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::BTreeSet;
 
@@ -288,8 +289,10 @@ impl TypeTracker {
                     self.environment.invalidate_identities(&affected, reason);
                     return Some(RubyType::Unknown);
                 }
-                Some(self.shape_identity_type(&receiver_identities).expect(
-                    "INVARIANT VIOLATED: mutating merge child linking succeeded but its receiver shape is not proven. This is a bug because the helper validates the receiver after installing every containment edge. Fix: return an error from link_mutating_merge_children whenever alias-bound enforcement invalidates the receiver.",
+                Some(self.shape_identity_type(&receiver_identities).expect_invariant(
+                    "mutating merge linking succeeded but the receiver shape is not proven",
+                    "the helper validates the receiver after linking",
+                    "return an error from link_mutating_merge_children when enforcement invalidates it",
                 ))
             }
             "merge" if argument_types.len() == 1 => {

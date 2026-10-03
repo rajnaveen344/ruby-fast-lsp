@@ -294,22 +294,26 @@ fn strict_known_proc_arity_mismatch_fails_closed() {
     .expect("the map signature must prepare");
     let callable = KnownProcType {
         identity: 1,
-        summary: Ok(crate::core::CallableBodySummary {
+        summary: Ok(crate::core::callables::callable_body::CallableBodySummary {
             strict_arity: true,
             parameters: vec![
-                crate::core::CallableBodyParameter {
+                crate::core::callables::callable_body::CallableBodyParameter {
                     name: "left".to_string(),
-                    kind: crate::core::CallableBodyParameterKind::Required,
+                    kind:
+                        crate::core::callables::callable_body::CallableBodyParameterKind::Required,
                     default: None,
                 },
-                crate::core::CallableBodyParameter {
+                crate::core::callables::callable_body::CallableBodyParameter {
                     name: "right".to_string(),
-                    kind: crate::core::CallableBodyParameterKind::Required,
+                    kind:
+                        crate::core::callables::callable_body::CallableBodyParameterKind::Required,
                     default: None,
                 },
             ],
             captures: Vec::new(),
-            result: crate::core::CallableBodyExpression::Literal(RubyType::string()),
+            result: crate::core::callables::callable_body::CallableBodyExpression::Literal(
+                RubyType::string(),
+            ),
             node_count: 1,
         }),
     };

@@ -13,15 +13,21 @@ pub(crate) mod storage;
 pub(crate) mod types;
 
 // Public domain contracts.
+pub use callables::callable_body::CallableBodySummary;
 pub use equations::constant_type_equation::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
 };
 pub use equations::method_return_equation::MethodReturnEquation;
-pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
+pub use method_resolution::{
+    receiver_type_to_method_namespaces, MethodCalleeResolution, ResolvedMethodCallee,
+};
 pub use names::fully_qualified_name::{FqnParts, FullyQualifiedName, NamespaceKind};
+pub use names::method_receiver::MethodReceiver;
 pub use names::ruby_method::RubyMethod;
 pub use names::ruby_namespace::{GeneratedOwnerId, RubyConstant};
+pub use names::variable_kind::VariableTypeKind;
 pub use source::execution_context::{ExecutionContextFact, ExecutionScopeMode};
+pub use source::file_analysis::FileAnalysis;
 pub use source::source_file::{LibraryPackageId, SourceKind};
 pub use source::source_position::{SourcePosition, SourceRange};
 pub use storage::diagnostic_candidate_store::{
@@ -54,27 +60,3 @@ pub use types::shape_type::{
 pub use types::type_inference_outcome::{
     InferenceEvidence, InferenceTelemetry, TypeInferenceOutcome, UnknownReason,
 };
-
-// Shared implementation primitives; never part of the consumer API.
-pub(crate) use callables::callable_body::{
-    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
-    ConstantCallableBodyFact,
-};
-pub(crate) use callables::callable_signature::{
-    CallableBlockTemplate, CallableParameterTemplate, CallableSignature, CallableTypeTemplate,
-    DirectYieldCall, ForwardedBlockCall,
-};
-pub(crate) use names::fqn_id::{ConstLookupId, FqnId};
-pub(crate) use storage::diagnostic_candidate_store::DiagnosticCandidateStore;
-pub(crate) use storage::diagnostic_store::DiagnosticStore;
-pub(crate) use storage::graph_store::{
-    SemanticGraph, StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
-    StoredUnresolvedGraphEdgeFact,
-};
-pub(crate) use storage::method_store::{MethodStore, StoredMethodFact};
-pub(crate) use storage::reference_store::{
-    ConstLookup, ReferenceCandidateStore, ReferenceStore, StoredMethodReferenceCandidate,
-    StoredReferenceCandidate, StoredReferenceCandidateKind, StoredReferenceCandidateRef,
-};
-pub(crate) use storage::symbol_store::{StoredSymbolFact, SymbolStore};
-pub(crate) use storage::type_store::TypeStore;

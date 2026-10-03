@@ -17,6 +17,7 @@ use crate::environment::extensions::processes::{
     validate_extension_process_request, validate_extension_reindex_files,
 };
 use crate::environment::extensions::registry::loaded::LoadedWasmExtension;
+use crate::environment::extensions::registry::seed::ExtensionSemanticSeed;
 use crate::environment::extensions::registry::state::{
     extension_applicability_fingerprint, ExtensionApplicabilitySnapshot, ExtensionRegistry,
 };
@@ -28,10 +29,10 @@ use crate::environment::extensions::{
     ProjectContextSnapshot, EXTENSION_LOAD_TRANSIENT_MEMORY_BYTES,
     EXTENSION_RESPONSE_TRANSIENT_MEMORY_BYTES,
 };
-use crate::indexer::cache::persistent::PersistentDerivedProductCache;
-use crate::indexer::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
+use crate::utils::persistent_cache::PersistentDerivedProductCache;
 
 #[derive(Clone)]
 pub struct ExtensionRegistryHandle {
@@ -178,26 +179,43 @@ impl ExtensionRegistryHandle {
         self.inner.read().status_reports()
     }
 
-    pub fn ensure_semantic_seed_facts(
+    /// Hand `commit` the extension semantic seed that `engine` lacks for
+    /// `project`. `engine` is the identity of the engine the seed commits
+    /// into: two engines are the same exactly when their identities share
+    /// one allocation. The registry never writes the engine: the caller commits
+    /// the seed, and the registry records it as applied once `commit`
+    /// returns. Nothing is produced when the engine already holds the seed
+    /// for this project applicability.
+    pub(crate) fn with_semantic_seed(
         &self,
-        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<dyn Send + Sync>,
         project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+        commit: impl FnOnce(ExtensionSemanticSeed),
     ) {
         let applicability_fingerprint = extension_applicability_fingerprint(project);
         self.inner
             .read()
-            .ensure_semantic_seed_facts(engine, project, applicability_fingerprint);
+            .with_semantic_seed(engine, project, applicability_fingerprint, commit);
     }
 
-    pub(crate) fn ensure_semantic_seed_facts_for_snapshot(
+    /// Forget the seed recorded for `engine` after its owner emptied it, so
+    /// the next file pass seeds the emptied engine again.
+    pub(crate) fn forget_semantic_seed(&self, engine: &Arc<dyn Send + Sync>) {
+        self.inner.read().forget_semantic_seed(engine);
+    }
+
+    /// [`Self::with_semantic_seed`] for a cached project context snapshot.
+    pub(crate) fn with_semantic_seed_for_snapshot(
         &self,
-        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<dyn Send + Sync>,
         snapshot: &ProjectContextSnapshot,
+        commit: impl FnOnce(ExtensionSemanticSeed),
     ) {
-        self.inner.read().ensure_semantic_seed_facts(
+        self.inner.read().with_semantic_seed(
             engine,
             Some(&snapshot.context),
             snapshot.applicability_fingerprint,
+            commit,
         );
     }
 

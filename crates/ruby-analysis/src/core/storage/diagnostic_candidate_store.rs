@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
+use crate::core::storage::file_owned::{FileOwned, FileRow};
 use crate::core::storage::memory_estimate::{
-    map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
+    ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
 };
 use crate::core::{RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange};
 
@@ -52,82 +51,62 @@ pub enum RaiseArgCandidate {
     Unknown,
 }
 
+impl FileRow for DiagnosticCandidate {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DiagnosticCandidateStore {
-    candidates_by_file: HashMap<SourceFileId, Vec<DiagnosticCandidate>>,
+    candidates: FileOwned<DiagnosticCandidate>,
 }
 
 impl DiagnosticCandidateStore {
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.candidates.remove(file_id);
+    }
+
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,
         candidates: impl IntoIterator<Item = DiagnosticCandidate>,
     ) {
-        self.candidates_by_file.remove(&file_id);
-        for candidate in candidates {
-            assert!(
-                candidate.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement diagnostic candidate belongs to a different file id. \
-                 This is a bug because DiagnosticCandidateStore::replace_file must only receive candidates for the target file. \
-                 Fix: partition candidates by SourceFileId before replacing."
-            );
-            self.candidates_by_file
-                .entry(file_id)
-                .or_default()
-                .push(candidate);
-        }
-        if let Some(candidates) = self.candidates_by_file.get_mut(&file_id) {
-            candidates.sort_by_key(|candidate| {
+        self.candidates.replace(file_id, candidates, |left, right| {
+            let key = |candidate: &DiagnosticCandidate| {
                 (
                     candidate.range.start_byte,
                     candidate.range.end_byte,
                     diagnostic_candidate_rank(&candidate.kind),
                 )
-            });
-        }
+            };
+            key(left).cmp(&key(right))
+        });
     }
 
     pub fn candidates_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticCandidate> {
-        self.candidates_by_file
-            .get(&file_id)
-            .cloned()
-            .unwrap_or_default()
+        self.candidates.rows(file_id).to_vec()
     }
 
     pub fn iter_candidates(&self) -> impl Iterator<Item = &DiagnosticCandidate> {
-        self.candidates_by_file
-            .values()
-            .flat_map(|candidates| candidates.iter())
+        self.candidates.iter()
     }
 
     pub fn candidate_count(&self) -> usize {
-        self.candidates_by_file.values().map(Vec::len).sum()
+        self.candidates.len()
     }
 
     pub fn file_ids(&self) -> Vec<SourceFileId> {
-        self.candidates_by_file.keys().copied().collect()
+        self.candidates.files().collect()
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        map_table_bytes(&self.candidates_by_file)
-            + self
-                .candidates_by_file
-                .values()
-                .map(|candidates| {
-                    vec_payload_bytes(candidates)
-                        + candidates
-                            .iter()
-                            .map(diagnostic_candidate_heap_bytes)
-                            .sum::<usize>()
-                })
-                .sum::<usize>()
+        self.candidates
+            .estimated_heap_bytes(diagnostic_candidate_heap_bytes)
     }
 
     pub fn shrink_to_fit(&mut self) {
-        self.candidates_by_file.shrink_to_fit();
-        for candidates in self.candidates_by_file.values_mut() {
-            candidates.shrink_to_fit();
-        }
+        self.candidates.shrink_to_fit();
     }
 }
 

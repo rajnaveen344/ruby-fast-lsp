@@ -1,15 +1,20 @@
-use crate::core::{FullyQualifiedName, NamespaceKind, RubyMethod};
+use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
 use log::warn;
-use ruby_prism::DefNode;
+use ruby_prism::{DefNode, Node};
 
-use crate::indexer::{queries::syntax, Identifier, LVScopeKind, MethodReceiver};
+use crate::core::MethodReceiver;
+use crate::indexer::documents::scope_rules;
+use crate::indexer::{queries::syntax, Identifier, LVScopeKind};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
-    pub fn process_def_node_entry(&mut self, node: &DefNode) {
+    /// Pushes the method's scopes and returns whether it did. A def that is
+    /// skipped here, such as one whose name is still being typed, must not be
+    /// exited.
+    pub fn process_def_node_entry(&mut self, node: &DefNode) -> bool {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
-            return;
+            return false;
         }
 
         let (definition_namespace, namespace_kind) = match node.receiver() {
@@ -17,19 +22,26 @@ impl IdentifierVisitor {
             Some(receiver) if receiver.as_self_node().is_some() => {
                 let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
                 if receiver_kind != NamespaceKind::Singleton {
-                    return;
+                    return false;
                 }
                 (namespace, NamespaceKind::Singleton)
             }
-            Some(_) => {
-                let mut kind = syntax::get_method_namespace_kind_simple(node.receiver().as_ref());
-                // Account for `class << self` context — get_method_namespace_kind_simple
-                // only checks for explicit `self.` receiver, not the singleton class scope.
-                if self.scope_tracker.in_singleton() && kind == NamespaceKind::Instance {
-                    kind = NamespaceKind::Singleton;
+            // A receiver this file does not declare keeps the enclosing
+            // namespace so the body still has a method scope.
+            Some(receiver) => match self.def_receiver_namespace(&receiver) {
+                Some(namespace) => (namespace, NamespaceKind::Singleton),
+                None => {
+                    let kind = match syntax::get_method_namespace_kind_simple(Some(&receiver)) {
+                        NamespaceKind::Instance if !self.scope_tracker.in_singleton() => {
+                            NamespaceKind::Instance
+                        }
+                        NamespaceKind::Instance | NamespaceKind::Singleton => {
+                            NamespaceKind::Singleton
+                        }
+                    };
+                    (self.scope_tracker.get_ns_stack(), kind)
                 }
-                (self.scope_tracker.get_ns_stack(), kind)
-            }
+            },
         };
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
@@ -37,7 +49,7 @@ impl IdentifierVisitor {
 
         if method.is_err() {
             warn!("Invalid method name: {}", name);
-            return;
+            return false;
         }
 
         let method = method.unwrap();
@@ -46,11 +58,10 @@ impl IdentifierVisitor {
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker.push_scope_kind(scope_kind);
-        self.scope_tracker
-            .push_method_fqn(Some(FullyQualifiedName::method(
-                definition_namespace.clone(),
-                method,
-            )));
+        self.scope_tracker.push_method_fqn(
+            FullyQualifiedName::method(definition_namespace.clone(), method),
+            namespace_kind,
+        );
         self.scope_tracker.push_method_execution_context(
             definition_namespace.clone(),
             namespace_kind,
@@ -79,6 +90,21 @@ impl IdentifierVisitor {
                 Some(0),
             );
         }
+        true
+    }
+
+    /// The class or module a constant `def` receiver names, resolved
+    /// against declarations earlier in this file.
+    fn def_receiver_namespace(&self, receiver: &Node<'_>) -> Option<Vec<RubyConstant>> {
+        scope_rules::resolve_receiver_namespace(
+            receiver,
+            scope_rules::implicit_singleton_namespace(&self.scope_tracker).as_deref(),
+            &self.scope_tracker.get_ns_stack(),
+            &|fqn| {
+                self.file_constant_types
+                    .contains_key(fqn.namespace_parts_slice())
+            },
+        )
     }
 
     pub fn process_def_node_exit(&mut self, node: &DefNode) {

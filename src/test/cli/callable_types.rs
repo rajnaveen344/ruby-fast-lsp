@@ -1,6 +1,7 @@
 //! Method return, higher-order, and callable-body types shared by `check` and LSP projections.
 
 use super::support::hover_text;
+use crate::invariant::ExpectInvariant;
 use crate::lsp::check::{CheckSession, CheckTypeOutcome, CheckTypeSubjectKind};
 use crate::test::harness::{get_hint_label, FakeEditor};
 use ruby_analysis::core::UnknownReason;
@@ -55,8 +56,10 @@ end
             let label = get_hint_label(&hint);
             label.starts_with(" -> ").then(|| {
                 (
-                    hint.position.line.checked_add(1).expect(
-                        "INVARIANT VIOLATED: LSP line exhausted u32 during parity normalization. This is a bug because source positions must fit u32. Fix: reject sources whose normalized line cannot be one-based.",
+                    hint.position.line.checked_add(1).expect_invariant(
+                        "LSP line exhausted u32 during parity normalization",
+                        "source positions must fit u32",
+                        "reject sources whose normalized line cannot be one-based",
                     ),
                     label,
                 )

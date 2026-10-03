@@ -318,9 +318,13 @@ impl TypeTracker {
             self.environment.insert(var_name.clone(), var_type.clone());
         }
         if let Some(array_shape_aliases) = array_shape_aliases {
-            assert!(
+            invariant!(
                 matches!(var_type, RubyType::Array(_)),
-                "INVARIANT VIOLATED: positional Array shape aliases were attached to non-Array type `{var_type}`. This is a bug because only exact Array literals or aliases produce this evidence. Fix: keep array_shape_aliases_for_assignment aligned with collection inference."
+                what =
+                    "positional Array shape aliases were attached to non-Array type `{var_type}`",
+                why = "only exact Array literals or aliases produce this evidence",
+                fix = "keep array_shape_aliases_for_assignment aligned with collection inference",
+                var_type = var_type,
             );
             self.environment
                 .bind_array_shape_aliases(var_name.clone(), array_shape_aliases);

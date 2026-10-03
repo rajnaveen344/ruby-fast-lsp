@@ -7,7 +7,6 @@
 //!
 //! - **ScopeNode**: Represents a single scope (method, block, class body, etc.)
 //! - **VariableNode**: Represents a local variable with its full def-use chain
-//! - **Capture**: References to variables from outer scopes (in blocks)
 //!
 //! # Scope Hierarchy
 //!
@@ -15,6 +14,8 @@
 //! - **Soft boundaries** (Block): Inner scopes CAN capture outer variables
 
 use crate::core::{RubyType, TextRange};
+#[cfg(test)]
+use crate::invariant::ExpectInvariant;
 #[cfg(test)]
 use std::cell::Cell;
 
@@ -57,8 +58,6 @@ impl VariableScopes {
             kind: LVScopeKind::Constant,
             range: TextRange::default(),
             local_variables: Vec::new(),
-            captured_variables: Vec::new(),
-            name: None,
         };
         scopes.push(root);
 
@@ -84,12 +83,7 @@ impl VariableScopes {
     }
 
     /// Enter a new scope (called when entering method, block, etc.)
-    pub fn enter_scope(
-        &mut self,
-        kind: LVScopeKind,
-        range: TextRange,
-        name: Option<String>,
-    ) -> LVScopeId {
+    pub fn enter_scope(&mut self, kind: LVScopeKind, range: TextRange) -> LVScopeId {
         let parent = self.current;
         let id = self.scopes.len();
 
@@ -100,8 +94,6 @@ impl VariableScopes {
             kind,
             range,
             local_variables: Vec::new(),
-            captured_variables: Vec::new(),
-            name,
         };
 
         self.scopes.push(node);
@@ -281,12 +273,16 @@ impl VariableScopes {
         byte_offset: u32,
     ) -> Option<LVScopeId> {
         #[cfg(test)]
-        self.scope_owner_scan_count
-            .set(self.scope_owner_scan_count.get().checked_add(1).expect(
-                "INVARIANT VIOLATED: variable-scope ownership scan counter overflowed. \
-                     This is a bug because one test process cannot perform usize::MAX scope scans. \
-                     Fix: investigate an unbounded scope-query loop before widening the counter.",
-            ));
+        self.scope_owner_scan_count.set(
+            self.scope_owner_scan_count
+                .get()
+                .checked_add(1)
+                .expect_invariant(
+                    "variable-scope ownership scan counter overflowed",
+                    "one test process cannot perform usize::MAX scope scans",
+                    "investigate an unbounded scope-query loop before widening the counter",
+                ),
+        );
         let name_key = ustr::ustr(name);
         for scope in &self.scopes {
             for var in &scope.local_variables {
@@ -437,16 +433,21 @@ impl VariableScopes {
         reads: Vec<(String, TextRange, RubyType)>,
     ) {
         self.scopes.get(scope_id).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: flow-local read type targets missing scope {scope_id}. This is a bug because TypeTracker results are installed immediately after entering their method scope. Fix: retain the method scope until its flow evidence is attached."
+            unreachable_invariant!(
+                what = "flow-local read type targets missing scope {scope_id}",
+                why = "TypeTracker results are installed immediately after entering their method scope",
+                fix = "retain the method scope until its flow evidence is attached",
+                scope_id = scope_id,
             )
         });
         for pair in reads.windows(2) {
-            assert!(
+            invariant!(
                 pair[0].1 < pair[1].1,
-                "INVARIANT VIOLATED: one method emitted duplicated or out-of-order flow-local reads ({:?} then {:?}). This is a bug because one AST read has one final flow result and TypeTracker sorts each method batch. Fix: deduplicate repeated solver visits before installing read evidence.",
+                what = "one method emitted duplicated or out-of-order flow-local reads ({:?} then {:?})",
+                why = "one AST read has one final flow result and TypeTracker sorts each method batch",
+                fix = "deduplicate repeated solver visits before installing read evidence",
                 pair[0].1,
-                pair[1].1
+                pair[1].1,
             );
         }
         self.flow_read_types
@@ -467,10 +468,12 @@ impl VariableScopes {
             if (left.range, left.scope_id, left.name) != (right.range, right.scope_id, right.name) {
                 return false;
             }
-            assert_eq!(
+            invariant_eq!(
                 left.ruby_type,
                 right.ruby_type,
-                "INVARIANT VIOLATED: one lexical read has conflicting exact flow results. This is a bug because repeated semantic traversals must converge to the same proof. Fix: replace the complete document generation before installing changed flow evidence."
+                what = "one lexical read has conflicting exact flow results",
+                why = "repeated semantic traversals must converge to the same proof",
+                fix = "replace the complete document generation before installing changed flow evidence",
             );
             true
         });
@@ -543,8 +546,11 @@ impl VariableScopes {
         }
 
         self.scopes.get(scope_id).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: local-read type lookup targets missing scope {scope_id}. This is a bug because reference_variable returned this owner immediately before the query. Fix: keep scope ownership stable throughout FactCollector traversal."
+            unreachable_invariant!(
+                what = "local-read type lookup targets missing scope {scope_id}",
+                why = "reference_variable returned this owner immediately before the query",
+                fix = "keep scope ownership stable throughout FactCollector traversal",
+                scope_id = scope_id,
             )
         });
         (
@@ -635,12 +641,8 @@ pub struct ScopeNode {
     pub children: Vec<LVScopeId>,
     pub kind: LVScopeKind,
     pub range: TextRange,
-    /// Optional name (e.g., method name, block info)
-    pub name: Option<String>,
     /// Variables defined in this scope
     pub local_variables: Vec<VariableNode>,
-    /// References to variables from outer scopes (captured in blocks)
-    pub captured_variables: Vec<CaptureRef>,
 }
 
 #[derive(Clone)]
@@ -667,15 +669,6 @@ pub struct VariableNode {
 pub struct TypeAssignment {
     pub range: TextRange,
     pub ruby_type: RubyType,
-}
-
-/// A reference to a variable from an outer scope (captured in a block)
-#[derive(Clone)]
-pub struct CaptureRef {
-    pub variable_scope: LVScopeId,
-    pub variable_index: usize,
-    pub captured_by_scope: LVScopeId,
-    pub capture_location: TextRange,
 }
 
 /// A location that would be renamed

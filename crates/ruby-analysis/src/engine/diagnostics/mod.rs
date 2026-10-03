@@ -5,17 +5,19 @@ mod call_outcomes;
 mod candidates;
 mod file_pass;
 mod grouped_methods;
-pub(in crate::engine) mod helpers;
 mod method_absence;
 mod method_checks;
+pub(in crate::engine) mod policy;
+mod store;
 mod workspace_pass;
+
+pub(in crate::engine) use store::Diagnostics;
 
 use std::collections::HashMap;
 
-use crate::core::{
-    ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType,
-    TextRange,
-};
+use crate::core::names::fqn_id::ConstLookupId;
+use crate::core::names::fqn_id::FqnId;
+use crate::core::{NamespaceKind, RubyConstant, RubyMethod, RubyType, TextRange};
 
 type MethodReferenceCacheKey = (ConstLookupId, NamespaceKind, RubyMethod, bool);
 
@@ -45,13 +47,6 @@ struct MethodCallOutcomeCaches {
     visibility_misses: usize,
     ambiguous_return_hits: usize,
     ambiguous_return_misses: usize,
-}
-
-#[derive(Default)]
-struct MethodChainCompletenessCache {
-    results: HashMap<FullyQualifiedName, bool>,
-    dynamic_mixin_hooks: HashMap<FullyQualifiedName, bool>,
-    ambiguous_superclasses: HashMap<FullyQualifiedName, bool>,
 }
 
 fn constant_name(parts: &[RubyConstant]) -> String {

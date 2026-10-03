@@ -1,20 +1,21 @@
 //! Expression outcomes, local reads, method returns, and resolve-pass outcome caches.
 
 use super::*;
+use crate::engine::ResolveStat;
 
 #[test]
 fn type_at_reads_engine_owned_store() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "A = 1");
     let subject = constant_subject("A");
 
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::integer(),
-                engine.text_range(file_id, 0, 5),
+                engine.view().text_range(file_id, 0, 5),
                 TypeProvenance::Assignment,
             )],
             ..Default::default()
@@ -22,7 +23,7 @@ fn type_at_reads_engine_owned_store() {
         ResolveMode::Immediate,
     );
 
-    match engine.type_at(&subject, file_id, 4) {
+    match engine.view().type_at(&subject, file_id, 4) {
         TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
         other => panic!("expected resolved type fact, got {other:?}"),
     }
@@ -30,13 +31,13 @@ fn type_at_reads_engine_owned_store() {
 
 #[test]
 fn expression_query_preserves_an_exact_unknown_proof_barrier() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "@value");
-    let range = engine.text_range(file_id, 0, 6);
+    let range = engine.view().text_range(file_id, 0, 6);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 TypeSubject::Expression(range),
                 RubyType::Unknown,
@@ -53,32 +54,32 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
     );
 
     assert_eq!(
-        engine.query().expression_type_at(file_id, 2),
+        engine.view().expression_type_at(file_id, 2),
         Some(RubyType::Unknown),
         "an exact Unknown expression must stop adapters from borrowing another concrete type"
     );
     assert_eq!(
-        engine.query().expression_unknown_reason(range),
+        engine.view().expression_unknown_reason(range),
         Some(UnknownReason::NoReachingAssignment)
     );
     assert_eq!(
-        engine.query().expression_unknown_reason_at(file_id, 2),
+        engine.view().expression_unknown_reason_at(file_id, 2),
         Some(UnknownReason::NoReachingAssignment)
     );
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
-    assert_eq!(engine.query().expression_unknown_reason(range), None);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    assert_eq!(engine.view().expression_unknown_reason(range), None);
 }
 
 #[test]
 fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
-    let range = engine.text_range(file_id, 0, 5);
+    let range = engine.view().text_range(file_id, 0, 5);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 expression_unknown_reasons: vec![(range, UnknownReason::UnresolvedAssignmentValue)],
                 ..Default::default()
@@ -88,28 +89,28 @@ fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.query().expression_type_at(file_id, 2), None);
+    assert_eq!(engine.view().expression_type_at(file_id, 2), None);
     assert_eq!(
-        engine.query().expression_unknown_reason_at(file_id, 2),
+        engine.view().expression_unknown_reason_at(file_id, 2),
         Some(UnknownReason::UnresolvedAssignmentValue),
         "compact local-flow evidence must remain queryable without entering the general type store"
     );
     assert_eq!(
-        engine.query().expression_unknown_reasons_in_file(file_id),
+        engine.view().expression_unknown_reasons_in_file(file_id),
         Some(&[(range, UnknownReason::UnresolvedAssignmentValue)][..])
     );
 }
 
 #[test]
 fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
-    let range = engine.text_range(file_id, 0, 5);
-    let empty_fingerprint = engine.semantic_result_fingerprint();
+    let range = engine.view().text_range(file_id, 0, 5);
+    let empty_fingerprint = engine.view().semantic_result_fingerprint();
 
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             local_read_types: vec![(range, RubyType::string())].into_boxed_slice(),
             ..Default::default()
         },
@@ -117,38 +118,41 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
     );
 
     assert_eq!(
-        engine.query().expression_type_at(file_id, 2),
+        engine.view().expression_type_at(file_id, 2),
         Some(RubyType::string())
     );
     assert_eq!(
-        engine.query().local_read_type_at(file_id, 2),
+        engine.view().local_read_type_at(file_id, 2),
         Some(RubyType::string())
     );
     assert_eq!(
-        engine.query().local_read_types_in_file(file_id),
+        engine.view().local_read_types_in_file(file_id),
         Some(vec![(range, RubyType::string())])
     );
-    assert_ne!(engine.semantic_result_fingerprint(), empty_fingerprint);
+    assert_ne!(
+        engine.view().semantic_result_fingerprint(),
+        empty_fingerprint
+    );
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
-    assert_eq!(engine.query().expression_type_at(file_id, 2), None);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    assert_eq!(engine.view().expression_type_at(file_id, 2), None);
     assert_eq!(
-        engine.query().local_read_types_in_file(file_id),
+        engine.view().local_read_types_in_file(file_id),
         Some(Vec::new())
     );
 }
 
 #[test]
 fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let first_ref = register_project_file(&mut engine, "app/first.rb", "User");
     let second_ref = register_project_file(&mut engine, "app/second.rb", "User");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 user.clone(),
                 SymbolKind::Class,
@@ -164,9 +168,9 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
         ResolveMode::Deferred,
     );
     for file_id in [first_ref, second_ref] {
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::constant(
                     TextRange::new(file_id, 0, 4),
                     user.namespace_parts(),
@@ -180,16 +184,16 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.constant_cache_misses, 1);
-    assert_eq!(resolve_pass.constant_cache_hits, 1);
-    assert_eq!(resolve_pass.constant_cache_unique_keys, 1);
-    assert_eq!(engine.reference_facts_for(&user).len(), 2);
+    let resolve_pass = engine.view().last_resolve_stats();
+    assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheMisses), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheHits), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheUniqueKeys), 1);
+    assert_eq!(engine.view().reference_facts_for(&user).len(), 2);
 }
 
 #[test]
 fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -204,9 +208,9 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
     let method_fqn = FullyQualifiedName::method(user.namespace_parts(), method);
     let method_range = TextRange::new(def_file, 12, 28);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -253,15 +257,16 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
                         receiver_type: None,
                         diagnose_unresolved: true,
                         allow_unindexed_owner: false,
+                        safe_navigation: false,
                         signature: Some(crate::core::MethodCallSignatureCandidate::default()),
                     },
                 },
             )
         })
         .collect();
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: candidates,
             ..Default::default()
         },
@@ -270,14 +275,20 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.method_return_cache_misses, 1);
-    assert_eq!(resolve_pass.method_return_cache_hits, 1);
-    assert_eq!(resolve_pass.method_return_cache_entries, 1);
-    assert_eq!(resolve_pass.method_visibility_cache_misses, 1);
-    assert_eq!(resolve_pass.method_visibility_cache_hits, 1);
-    assert_eq!(resolve_pass.method_visibility_cache_entries, 1);
-    let query = engine.query();
+    let resolve_pass = engine.view().last_resolve_stats();
+    assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheMisses), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheHits), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheEntries), 1);
+    assert_eq!(
+        resolve_pass.get(ResolveStat::MethodVisibilityCacheMisses),
+        1
+    );
+    assert_eq!(resolve_pass.get(ResolveStat::MethodVisibilityCacheHits), 1);
+    assert_eq!(
+        resolve_pass.get(ResolveStat::MethodVisibilityCacheEntries),
+        1
+    );
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("resolved calls must retain proof outcomes");
@@ -289,7 +300,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
 
 #[test]
 fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let first_def = register_project_file(
         &mut engine,
         "app/user_first.rb",
@@ -312,9 +323,9 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
         (first_def, TextRange::new(first_def, 12, 28)),
         (second_def, TextRange::new(second_def, 12, 33)),
     ] {
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     user.clone(),
                     GraphNodeKind::Class,
@@ -362,15 +373,16 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
                         receiver_type: None,
                         diagnose_unresolved: true,
                         allow_unindexed_owner: false,
+                        safe_navigation: false,
                         signature: Some(crate::core::MethodCallSignatureCandidate::default()),
                     },
                 },
             )
         })
         .collect();
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: candidates,
             ..Default::default()
         },
@@ -379,11 +391,20 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.ambiguous_method_return_cache_misses, 1);
-    assert_eq!(resolve_pass.ambiguous_method_return_cache_hits, 1);
-    assert_eq!(resolve_pass.ambiguous_method_return_cache_entries, 1);
-    let query = engine.query();
+    let resolve_pass = engine.view().last_resolve_stats();
+    assert_eq!(
+        resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheMisses),
+        1
+    );
+    assert_eq!(
+        resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheHits),
+        1
+    );
+    assert_eq!(
+        resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheEntries),
+        1
+    );
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("ambiguous resolved calls must retain proof outcomes");
@@ -395,7 +416,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
 
 #[test]
 fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -413,9 +434,9 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     let child_def = TextRange::new(def_file, 12, 30);
     let name_def = TextRange::new(def_file, 32, 50);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -447,9 +468,9 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     let inner_call = TextRange::new(ref_file, 0, 10);
     let outer_call = TextRange::new(ref_file, 0, 15);
     let missing_owner = vec![RubyConstant::new("MissingOwner").unwrap()];
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![
                 explicit_method_call_candidate(
                     TextRange::new(ref_file, 5, 10),
@@ -475,11 +496,11 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.deferred_receiver_candidates, 1);
-    assert_eq!(resolve_pass.deferred_receiver_proven, 1);
-    assert_eq!(resolve_pass.deferred_receiver_unknown, 0);
-    let query = engine.query();
+    let resolve_pass = engine.view().last_resolve_stats();
+    assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverCandidates), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverProven), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverUnknown), 0);
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("nested calls must retain same-pass proof outcomes");
@@ -503,7 +524,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
 
 #[test]
 fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -519,9 +540,9 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
     let kept_range = TextRange::new(ref_file, 0, 6);
     let name_call = TextRange::new(ref_file, 7, 16);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -542,9 +563,9 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 call_expression_outcomes: vec![(
                     kept_range,
@@ -567,7 +588,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
 
     engine.resolve();
 
-    let query = engine.query();
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("disjoint file-owned and resolved call outcomes must both remain");
@@ -587,7 +608,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
 #[test]
 #[should_panic(expected = "one call expression resolved through multiple method candidates")]
 fn duplicate_call_expression_range_is_an_invariant_violation() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -602,9 +623,9 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
     let method_range = TextRange::new(def_file, 12, 28);
     let call_range = TextRange::new(ref_file, 0, 9);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -625,9 +646,9 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![
                 explicit_method_call_candidate(
                     TextRange::new(ref_file, 5, 9),
@@ -656,16 +677,16 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
 
 #[test]
 fn resolve_files_materializes_only_selected_open_document_candidates() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let first_ref = register_project_file(&mut engine, "app/first.rb", "User.new");
     let second_ref = register_project_file(&mut engine, "app/second.rb", "User.new");
     let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
     for file_id in [first_ref, second_ref] {
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::constant(
                     TextRange::new(file_id, 0, 4),
                     user.namespace_parts(),
@@ -676,9 +697,9 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
             ResolveMode::Deferred,
         );
     }
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -691,31 +712,19 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
 
     engine.resolve_files(&[first_ref]);
 
-    assert_eq!(
-        AnalysisQuery::new(&engine)
-            .references_in_file(first_ref)
-            .len(),
-        1
-    );
+    assert_eq!(View::new(&engine).references_in_file(first_ref).len(), 1);
     assert!(
-        AnalysisQuery::new(&engine)
-            .references_in_file(second_ref)
-            .is_empty(),
+        View::new(&engine).references_in_file(second_ref).is_empty(),
         "closed-file candidates must remain deferred until the complete project resolution"
     );
 
     engine.resolve();
-    assert_eq!(
-        AnalysisQuery::new(&engine)
-            .references_in_file(second_ref)
-            .len(),
-        1
-    );
+    assert_eq!(View::new(&engine).references_in_file(second_ref).len(), 1);
 }
 
 #[test]
 fn reopened_method_return_requires_every_definition_to_resolve() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let known_file = register_project_file(
         &mut engine,
         "lib/known.rb",
@@ -732,9 +741,9 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
     let known_range = TextRange::new(known_file, 16, 35);
     let unresolved_range = TextRange::new(unresolved_file, 16, 42);
 
-    engine.replace_facts(
+    engine.update(
         known_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -751,9 +760,9 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         unresolved_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -765,32 +774,30 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
         ResolveMode::Immediate,
     );
 
-    let callees = engine
-        .query()
-        .resolve_method_callees(&owner, &method_name)
+    let callees = ask_any(&engine.view(), &owner, &method_name, MethodWant::Callees)
+        .into_callees()
         .expect("reopened Service#value must resolve");
     assert_eq!(callees.len(), 1);
-    assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver(&owner, &method_name),
+    invariant_eq!(
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Return).into_return_type(),
         None,
-        "INVARIANT VIOLATED: receiver return inference discarded an unresolved reopened method \
-         definition. This is a bug because every definition is a reachable static outcome. Fix: \
-         return Unknown/None unless every matching definition proves a return type."
+        what = "receiver return inference discarded an unresolved reopened method definition",
+        why = "every definition is a reachable static outcome",
+        fix = "return Unknown/None unless every matching definition proves a return type",
     );
-    assert_eq!(
-        engine.query().method_return_type_for_callee(&callees[0]),
+    invariant_eq!(
+        engine.view().method_return_type_for_callee(&callees[0]),
         None,
-        "INVARIANT VIOLATED: resolved-callee return inference discarded an unresolved reopened \
-         method definition. This is a bug because chained calls would consume a partial concrete \
-         type. Fix: require a return type for every resolved definition range."
+        what =
+            "resolved-callee return inference discarded an unresolved reopened method definition",
+        why = "chained calls would consume a partial concrete type",
+        fix = "require a return type for every resolved definition range",
     );
 }
 
 #[test]
 fn default_basic_object_method_missing_is_not_a_return_type() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let stub_file = engine.register_file(SourceFileInput {
         path: "core/basic_object.rb".into(),
         content: "class BasicObject; def method_missing(name, *args); end; end".into(),
@@ -812,9 +819,9 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
     let stub_method = FullyQualifiedName::method(basic_object.namespace_parts(), method_missing);
     let dynamic_method = FullyQualifiedName::method(dynamic.namespace_parts(), method_missing);
 
-    engine.replace_facts(
+    engine.update(
         stub_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 basic_object.clone(),
                 GraphNodeKind::Class,
@@ -835,9 +842,9 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         project_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     widget.clone(),
@@ -886,19 +893,15 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
             .any(|fqn| fqn == &basic_object),
         "Widget must inherit BasicObject so the stub method_missing is on the lookup chain"
     );
-    assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver(&widget, &ghost),
+    invariant_eq!(
+        ask_any(&engine.view(), &widget, &ghost, MethodWant::Return).into_return_type(),
         None,
-        "INVARIANT VIOLATED: Widget#ghost inherited BasicObject#method_missing's stub return. \
-         This is a bug because default language fallback is not a proven return. \
-         Fix: skip stub/signature BasicObject#method_missing in receiver return lookup."
+        what = "Widget#ghost inherited BasicObject#method_missing's stub return",
+        why = "default language fallback is not a proven return",
+        fix = "skip stub/signature BasicObject#method_missing in receiver return lookup",
     );
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver(&dynamic, &ghost),
+        ask_any(&engine.view(), &dynamic, &ghost, MethodWant::Return).into_return_type(),
         Some(RubyType::integer()),
         "a project method_missing must still prove the fallback return"
     );
@@ -906,12 +909,12 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
 
 #[test]
 fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "consumer.rb", "payload[:name]\n");
     let range = TextRange::new(file_id, 0, 14);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 TypeSubject::Expression(range),
                 RubyType::string(),
@@ -931,12 +934,12 @@ fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
     );
 
     assert_eq!(
-        engine.query().expression_type_ending_at(file_id, 14),
+        engine.view().expression_type_ending_at(file_id, 14),
         Some(RubyType::Unknown),
         "a call-level Unknown must prevent completion from using a stale expression fact"
     );
     assert_eq!(
-        engine.query().proven_expression_type_ending_at(file_id, 14),
+        engine.view().proven_expression_type_ending_at(file_id, 14),
         None,
         "proven-only consumers must omit the same exact Unknown"
     );

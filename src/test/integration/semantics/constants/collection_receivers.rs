@@ -1,6 +1,6 @@
 //! Value-constant collection receivers must preserve their element types.
 
-use crate::lsp::capabilities::indexing::init_workspace_for_run;
+use crate::lsp::lifecycle::indexing::init_workspace_for_run;
 use crate::test::harness::{check_multi_file, strip_markers, FakeEditor};
 use std::time::Duration;
 use tower_lsp::lsp_types::Url;

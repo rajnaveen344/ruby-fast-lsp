@@ -1,6 +1,5 @@
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
-use ruby_analysis::engine::AnalysisQuery;
 
 #[tokio::test]
 async fn symbol_shape_key_completion_uses_proven_literal_fields() {
@@ -128,7 +127,7 @@ end
         .server()
         .get_doc(&uri)
         .expect("the open consumer must retain its RubyDocument");
-    let engine = editor.server().analysis_engine_for_uri(&uri);
+    let engine = editor.server().project_for_uri(&uri);
     let payload_factory = ruby_analysis::core::FullyQualifiedName::namespace_with_kind(
         vec![ruby_analysis::core::RubyConstant::new("PayloadFactory")
             .expect("the synthetic class name must be valid")],
@@ -136,8 +135,13 @@ end
     );
     let build = ruby_analysis::core::RubyMethod::new("build")
         .expect("the synthetic method name must be valid");
-    let method_return = AnalysisQuery::new(&engine.read())
-        .method_return_type_for_receiver(&payload_factory, &build)
+    let request = ruby_analysis::engine::lookup::MethodRequest::new(
+        ruby_analysis::engine::lookup::LookupReceiver::Namespace(&payload_factory),
+        build,
+        ruby_analysis::engine::lookup::MethodWant::Return,
+    );
+    let method_return = ruby_analysis::engine::lookup::method(&engine.test_read().view(), request)
+        .into_return_type()
         .map(|ruby_type| ruby_type.to_string());
     assert_eq!(
         method_return,
@@ -145,7 +149,9 @@ end
         "the cross-file method equation must retain its structural return"
     );
     assert_eq!(
-        AnalysisQuery::new(&engine.read())
+        engine
+            .test_read()
+            .view()
             .expression_type_ending_at(document.analysis_file_id(), 20)
             .map(|ruby_type| ruby_type.to_string()),
         Some("{ id: Integer, name: String }".to_string()),
@@ -213,8 +219,10 @@ async fn shape_key_completion_maps_the_exact_utf16_replacement_range() {
         .text_edit
         .expect("shape-key completion must replace the existing partial literal")
     else {
-        panic!(
-            "INVARIANT VIOLATED: shape-key completion emitted an insert/replace edit. This is a bug because the adapter owns one exact literal-content range. Fix: map the domain replacement range to CompletionTextEdit::Edit."
+        unreachable_invariant!(
+            what = "shape-key completion emitted an insert/replace edit",
+            why = "the adapter owns one exact literal-content range",
+            fix = "map the domain replacement range to CompletionTextEdit::Edit",
         );
     };
     let expected_start = u32::try_from(source[..replacement_start_byte].encode_utf16().count())

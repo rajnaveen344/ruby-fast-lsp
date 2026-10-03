@@ -1,4 +1,5 @@
-use crate::core::{FqnId, FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
+use crate::core::names::fqn_id::FqnId;
+use crate::core::{FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
 
 use super::*;
 
@@ -44,7 +45,7 @@ fn ordinary_method_has_no_higher_order_payload_and_empty_replacement_clears_it()
         receiver_type_parameters: Vec::new(),
         type_parameters: Vec::new(),
         parameters: Vec::new(),
-        block: crate::core::CallableBlockTemplate {
+        block: crate::core::callables::callable_signature::CallableBlockTemplate {
             parameters: Vec::new(),
             return_type: CallableTypeTemplate::Unconstrained,
             required: true,
@@ -120,13 +121,8 @@ fn exact_owner_name_match_borrows_one_effective_fact_and_deduplicates() {
     let StoredMethodFactMatch::Unique(selected) = match_result else {
         panic!("identical stored method facts must collapse to one borrowed match")
     };
-    let first_id = store.facts_by_owner_name[&(owner, method)][0];
-    assert!(std::ptr::eq(
-        selected,
-        store
-            .fact(first_id)
-            .expect("the indexed method fact must remain in the arena")
-    ));
+    let first_id = store.facts_by_owner_name.get(&(owner, method))[0];
+    assert!(std::ptr::eq(selected, store.facts.get(first_id)));
 }
 
 #[test]

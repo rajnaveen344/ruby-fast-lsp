@@ -19,11 +19,14 @@ impl FactCollector {
         };
 
         let range = self.text_range_from_prism_location(&node.location(), "constant reference");
-        self.facts.references.push(ReferenceCandidate::constant(
-            range,
-            vec![constant],
-            self.scope_tracker.get_ns_stack(),
-        ));
+        self.facts
+            .analysis
+            .reference_candidates
+            .push(ReferenceCandidate::constant(
+                range,
+                vec![constant],
+                self.scope_tracker.get_ns_stack(),
+            ));
     }
 
     pub(in crate::indexer::fact_collector) fn process_constant_read_node_exit(
@@ -79,10 +82,12 @@ fn u32_text_range_offset(offset: usize, kind: &str, boundary: TextRangeBoundary)
                 TextRangeBoundary::Start => "start",
                 TextRangeBoundary::End => "end",
             };
-            panic!(
-                "INVARIANT VIOLATED: {kind} {boundary} offset exceeded u32. \
-                 This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
+            unreachable_invariant!(
+                what = "{kind} {boundary} offset exceeded u32",
+                why = "ruby-analysis::core TextRange currently stores u32 offsets",
+                fix = "widen TextRange offsets before indexing files larger than u32::MAX bytes",
+                kind = kind,
+                boundary = boundary,
             )
         }
     }

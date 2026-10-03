@@ -84,5 +84,17 @@ code.
 Validate the result with:
 
 ```bash
-cargo run --bin extension -- validate extensions/example-dsl
+cargo run -p devtools --bin extension -- validate extensions/example-dsl
+```
+
+A package that checks in its built Wasm (it has `checksum_sha256`) also
+records the fingerprint of every build input under `[build] source_sha256`:
+its `extension.rb` and `runtime.rb`, this SDK's Ruby prelude, native shim,
+build config, patches, vendored gems, and the Docker builder that pins the
+mruby and wasi-sdk versions. A workspace test fails when those inputs change
+without a rebuild. After rebuilding, update `checksum_sha256` and set
+`source_sha256` to the output of:
+
+```bash
+cargo run -p devtools --bin extension -- sources extensions/rspec-ruby
 ```

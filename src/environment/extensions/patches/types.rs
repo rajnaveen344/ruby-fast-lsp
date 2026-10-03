@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, RubyType as AnalysisRubyType};
 use ruby_fast_lsp_extension_api::IndexPatch;
 
@@ -84,10 +85,14 @@ pub(in crate::environment::extensions) fn extension_ruby_types_semantically_equa
     left: Option<&ruby_fast_lsp_extension_api::RubyType>,
     right: Option<&ruby_fast_lsp_extension_api::RubyType>,
 ) -> bool {
-    analysis_ruby_type_from_extension(left).expect(
-        "INVARIANT VIOLATED: invalid left extension Ruby type reached conflict resolution. This is a bug because patch payloads must be validated before deterministic merging. Fix: keep validation before resolve_index_patch_conflicts.",
-    ) == analysis_ruby_type_from_extension(right).expect(
-        "INVARIANT VIOLATED: invalid right extension Ruby type reached conflict resolution. This is a bug because patch payloads must be validated before deterministic merging. Fix: keep validation before resolve_index_patch_conflicts.",
+    analysis_ruby_type_from_extension(left).expect_invariant(
+        "invalid left extension Ruby type reached conflict resolution",
+        "patch payloads must be validated before deterministic merging",
+        "keep validation before resolve_index_patch_conflicts",
+    ) == analysis_ruby_type_from_extension(right).expect_invariant(
+        "invalid right extension Ruby type reached conflict resolution",
+        "patch payloads must be validated before deterministic merging",
+        "keep validation before resolve_index_patch_conflicts",
     )
 }
 

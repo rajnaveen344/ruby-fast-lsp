@@ -7,6 +7,7 @@
 use crate::core::{
     FullyQualifiedName, LiteralKey, RubyType, ShapeFieldPresence, ShapeType, UnknownReason,
 };
+use crate::invariant::ExpectInvariant;
 
 pub(crate) fn indexed_read(
     receiver: &RubyType,
@@ -125,8 +126,10 @@ pub(crate) fn each_return(receiver: &RubyType, has_block: bool) -> Result<RubyTy
         return Ok(receiver.clone());
     }
     Ok(RubyType::Class(
-        FullyQualifiedName::try_from("Enumerator").expect(
-            "INVARIANT VIOLATED: built-in Enumerator is not a valid constant name. This is a bug because the hard-coded Ruby core name must always parse. Fix: keep built-in type names valid Ruby constants.",
+        FullyQualifiedName::try_from("Enumerator").expect_invariant(
+            "built-in Enumerator is not a valid constant name",
+            "the hard-coded Ruby core name must always parse",
+            "keep built-in type names valid Ruby constants",
         ),
     ))
 }

@@ -3,13 +3,14 @@ use crate::core::{
     MethodReturnEquation, RubyConstant, RubyMethod, RubyType, TextRange, TypeInferenceOutcome,
     TypeProvenance, TypeResolution, TypeSubject, UnknownReason,
 };
-use crate::engine::AnalysisQuery;
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::rbs::{
     get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
 };
+use crate::inference::semantics::ReceiverAccess;
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Default)]
@@ -90,7 +91,11 @@ impl FactCollector {
 
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
-                return TypeInferenceOutcome::proven(RubyType::Class(fqn.clone()));
+                return self
+                    .semantics
+                    .project
+                    .constructor_result(fqn)
+                    .into_type_outcome(RubyType::Class(fqn.clone()));
             }
         }
 
@@ -143,26 +148,20 @@ impl FactCollector {
         // Same-file facts are not in the engine yet. Engine lookup is the
         // TypeTracker path: one cached receiver return, not a fresh callee
         // vector plus per-callee type_at on every expression.
-        let engine = self.semantics.engine.read();
-        let query = AnalysisQuery::new(&engine);
-        if allow_private {
-            query.method_return_type_for_receiver_cached(
-                &namespace,
-                &method,
-                &self.semantics.query_cache,
-            )
+        let access = if allow_private {
+            ReceiverAccess::Any
         } else {
-            query.method_return_type_for_protected_receiver_cached(
-                &namespace,
-                &method,
-                &caller_namespace,
-                &self.semantics.query_cache,
-            )
-        }
+            ReceiverAccess::Protected {
+                caller: &caller_namespace,
+            }
+        };
+        self.semantics
+            .project
+            .receiver_method_return_type(&namespace, &method, access)
     }
 
     fn local_method_return_type(&self, method_fqn: &FullyQualifiedName) -> Option<RubyType> {
-        match self.facts.types.type_at(
+        match self.facts.flow_types.type_at(
             &TypeSubject::MethodReturn(method_fqn.clone()),
             self.document.analysis_file_id(),
             u32::MAX,
@@ -188,7 +187,7 @@ impl FactCollector {
         while visited.insert(current.clone()) {
             let mut parents = self
                 .facts
-                .direct
+                .analysis
                 .graph_edges
                 .iter()
                 .filter(|edge| edge.source == current && edge.kind == GraphEdgeKind::Superclass)
@@ -198,12 +197,16 @@ impl FactCollector {
             parents.dedup();
             match parents.len() {
                 0 => return None,
-                1 => current = parents.pop().expect(
-                    "INVARIANT VIOLATED: one local superclass disappeared after length validation. This is a bug because local same-pass inheritance lookup must be deterministic. Fix: keep parent extraction and selection atomic.",
+                1 => current = parents.pop().expect_invariant(
+                    "one local superclass disappeared after length validation",
+                    "local same-pass inheritance lookup must be deterministic",
+                    "keep parent extraction and selection atomic",
                 ),
-                2.. => panic!(
-                    "INVARIANT VIOLATED: namespace `{}` has multiple local superclass edges. This is a bug because Ruby classes have exactly one superclass. Fix: reject conflicting generated or parser superclass facts before same-pass inference.",
-                    current
+                2.. => unreachable_invariant!(
+                    what = "namespace `{}` has multiple local superclass edges",
+                    why = "ruby classes have exactly one superclass",
+                    fix = "reject conflicting generated or parser superclass facts before same-pass inference",
+                    current,
                 ),
             }
 
@@ -221,9 +224,12 @@ impl FactCollector {
             }
         }
 
-        panic!(
-            "INVARIANT VIOLATED: local superclass cycle encountered while inferring `{}` on `{}`. This is a bug because inheritance cycles cannot define a valid Ruby MRO. Fix: reject cyclic graph facts before same-pass inference.",
-            method, receiver
+        unreachable_invariant!(
+            what = "local superclass cycle encountered while inferring `{}` on `{}`",
+            why = "inheritance cycles cannot define a valid Ruby MRO",
+            fix = "reject cyclic graph facts before same-pass inference",
+            method,
+            receiver,
         );
     }
 
@@ -235,7 +241,7 @@ impl FactCollector {
         allow_private: bool,
         caller_namespace: &FullyQualifiedName,
     ) -> bool {
-        self.facts.direct.methods.iter().any(|fact| {
+        self.facts.analysis.methods.iter().any(|fact| {
             &fact.fqn == method_fqn
                 && fact.owner.namespace_parts() == owner.namespace_parts()
                 && fact.owner.namespace_kind() == owner.namespace_kind()
@@ -267,7 +273,7 @@ impl FactCollector {
         };
         let mut overrides = self
             .facts
-            .direct
+            .analysis
             .method_visibility_overrides
             .iter()
             .filter(|override_fact| {
@@ -413,9 +419,7 @@ impl FactCollector {
                                         )
                                         .map(|(_constant, ruby_type)| ruby_type),
                                     ConstantTypeProjection::ConstructorInstance => {
-                                        let engine = self.semantics.engine.read();
-                                        AnalysisQuery::new(&engine)
-                                            .constant_dependency_type(dependency)
+                                        self.semantics.project.constant_dependency_type(dependency)
                                     }
                                 }
                             }),
@@ -428,7 +432,7 @@ impl FactCollector {
         let solved = solve_result.outcomes;
         let file_id = self.document.analysis_file_id();
         self.facts
-            .types
+            .flow_types
             .update_inferred_method_return_types_in_file(
                 file_id,
                 solved

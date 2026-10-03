@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
 use crate::core::RubyType;
@@ -83,10 +84,10 @@ fn is_definitely_non_array(expr: &Node, document: &RubyDocument) -> bool {
     }
     if let Some(local) = expr.as_local_variable_read_node() {
         let var_name = utf8_str(local.name().as_slice());
-        let byte_offset = u32::try_from(expr.location().start_offset()).expect(
-            "INVARIANT VIOLATED: Prism location offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        let byte_offset = u32::try_from(expr.location().start_offset()).expect_invariant(
+            "Prism location offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen TextRange offsets before indexing files larger than u32::MAX bytes",
         );
         let file_id = document.analysis_file_id();
         let scopes = document.variable_scopes();
@@ -124,10 +125,10 @@ fn is_definitely_non_hash(expr: &Node, document: &RubyDocument) -> bool {
     }
     if let Some(local) = expr.as_local_variable_read_node() {
         let var_name = utf8_str(local.name().as_slice());
-        let byte_offset = u32::try_from(expr.location().start_offset()).expect(
-            "INVARIANT VIOLATED: Prism location offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        let byte_offset = u32::try_from(expr.location().start_offset()).expect_invariant(
+            "Prism location offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen TextRange offsets before indexing files larger than u32::MAX bytes",
         );
         let file_id = document.analysis_file_id();
         let scopes = document.variable_scopes();

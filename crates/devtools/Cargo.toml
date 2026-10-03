@@ -1,0 +1,82 @@
+[package]
+name = "devtools"
+version = "0.1.0"
+edition = "2021"
+description = "Developer tools for Ruby Fast LSP: profilers, benchmarks, AST dump, extension validation"
+license = "MIT"
+publish = false
+
+# Bins without tests skip their empty test harness builds.
+[[bin]]
+name = "profiler"
+path = "src/bin/profiler/main.rs"
+
+[[bin]]
+name = "ast"
+path = "src/bin/ast.rs"
+test = false
+
+[[bin]]
+name = "extension"
+path = "src/bin/extension.rs"
+test = false
+
+[[bin]]
+name = "bench_references"
+path = "src/bin/bench_references.rs"
+test = false
+
+[[bin]]
+name = "profile_indexer"
+path = "src/bin/profile_indexer.rs"
+test = false
+
+[[bin]]
+name = "profile_file_open"
+path = "src/bin/profile_file_open.rs"
+test = false
+
+[[bin]]
+name = "profile_single_file"
+path = "src/bin/profile_single_file.rs"
+test = false
+
+[[bin]]
+name = "profile_project_collection"
+path = "src/bin/profile_project_collection.rs"
+test = false
+
+[dependencies]
+ruby-fast-lsp = { path = "../..", default-features = false }
+ruby-analysis = { path = "../ruby-analysis" }
+ruby-prism = "1.4.0"
+tower-lsp = "0.20.0"
+tokio = { version = "1.32.0", features = ["full"] }
+serde_json = "1.0.107"
+log = "0.4.20"
+env_logger = "0.10.0"
+anyhow = "1.0.75"
+parking_lot = { version = "0.12.4", features = ["arc_lock"] }
+sha2 = "0.10.9"
+toml = "0.9.8"
+walkdir = "2.4.0"
+rayon = "1.10"
+clap = { version = "4.4.0", features = ["derive"] }
+dhat = "0.3.2"
+tar = "0.4"
+zstd = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6.1", optional = true }
+
+[features]
+default = ["jemalloc"]
+# DHAT heap profiling for the profiler; replaces jemalloc as the allocator.
+memory-profiling = []
+jemalloc = ["dep:tikv-jemallocator"]
+
+[dev-dependencies]
+tempfile = "3.8.0"

@@ -47,5 +47,5 @@ does not introduce a custom results picker.
 Validation covers reverse indexing order, inheritance, prepend/include order,
 multiple receivers, contradictory branches, edits, known receivers, `super`,
 reflection, implementation/signature precedence, lexical constants, locals,
-and require selection. Generated simulations check the full target set and
-independent precedence constraints, not unconditional filename order.
+and require selection. Dispatch tests assert the full target set Ruby would
+dispatch to, not unconditional filename order.

@@ -1,15 +1,14 @@
 //! Java navigation: verified source and decompiled implementation selection,
 //! generated signatures, and the static navigation plan for a Ruby source.
 
-use super::static_scan::{StaticJavaDependency, StaticNavigationVisitor};
 use super::{JavaImplementationResolutionError, JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::environment::runtime::jruby::source_navigation::{
     JavaSourceResolutionError, ResolvedJavaSource,
 };
 use ruby_analysis::core::{RubyMethod, SourceFileId, TextRange};
-use ruby_fast_lsp_jruby_support::JavaClassName;
+use ruby_fast_lsp_jruby_support::{static_navigation_scan, JavaClassName, StaticJavaDependency};
 use ruby_fast_lsp_jvm_metadata::{JavaSourceClassLocation, MemberInfo, Visibility};
-use ruby_prism::{Node, Visit};
+use ruby_prism::Node;
 use std::collections::{BTreeMap, BTreeSet};
 
 impl JrubyImportProvider {
@@ -19,11 +18,12 @@ impl JrubyImportProvider {
         location: &JavaSourceClassLocation,
         file_id: SourceFileId,
     ) {
-        assert_eq!(
-            internal_name, location.internal_name,
-            "INVARIANT VIOLATED: JRuby navigation registration received mismatched class identities. \
-             This is a bug because verified Java source locations belong to exactly one catalog class. \
-             Fix: register each location with the internal class name used to resolve it."
+        invariant_eq!(
+            internal_name,
+            location.internal_name,
+            what = "JRuby navigation registration received mismatched class identities",
+            why = "verified Java source locations belong to exactly one catalog class",
+            fix = "register each location with the internal class name used to resolve it",
         );
         self.registered_navigation_classes
             .write()
@@ -41,11 +41,12 @@ impl JrubyImportProvider {
                 method.declaration_range.end,
             );
             if let Some(previous) = ranges.insert(key.clone(), range) {
-                assert_eq!(
-                    previous, range,
-                    "INVARIANT VIOLATED: one JVM method identity mapped to two implementation ranges. \
-                     This is a bug because source/decompiler verification must select one exact member. \
-                     Fix: reject ambiguous Java source before navigation registration."
+                invariant_eq!(
+                    previous,
+                    range,
+                    what = "one JVM method identity mapped to two implementation ranges",
+                    why = "source/decompiler verification must select one exact member",
+                    fix = "reject ambiguous Java source before navigation registration",
                 );
             }
         }
@@ -162,15 +163,8 @@ impl JrubyImportProvider {
     ) -> Result<StaticJavaNavigationPlan, String> {
         let mut signature_class_names = BTreeSet::new();
         let mut implementation_class_names = BTreeSet::new();
-        let mut visitor = StaticNavigationVisitor::default();
-        visitor.visit(node);
-        visitor.dependencies.sort();
-        visitor.dependencies.dedup();
-        visitor.proxy_references.sort();
-        visitor.proxy_references.dedup();
-        visitor.constant_references.sort();
-        visitor.constant_references.dedup();
-        for dependency in visitor.dependencies {
+        let scan = static_navigation_scan(node);
+        for dependency in scan.dependencies {
             match dependency {
                 StaticJavaDependency::Class(name) => {
                     if let Some(class_name) = self.class_name_for_static_proxy_reference(&name)? {
@@ -183,7 +177,7 @@ impl JrubyImportProvider {
                 }
             }
         }
-        for reference in visitor.proxy_references {
+        for reference in scan.proxy_references {
             if let Some(class_name) = self.class_name_for_static_proxy_reference(&reference)? {
                 signature_class_names.insert(class_name.clone());
                 implementation_class_names.insert(class_name);
@@ -199,7 +193,7 @@ impl JrubyImportProvider {
                 .or_default()
                 .push(internal_name.clone());
         }
-        for constant in visitor.constant_references {
+        for constant in scan.constant_references {
             let Some(candidates) = package_classes_by_constant.get(&constant) else {
                 continue;
             };
@@ -241,11 +235,12 @@ pub(super) fn supplemental_implementation_location(
     exact: &JavaSourceClassLocation,
     mut decompiled: JavaSourceClassLocation,
 ) -> Option<JavaSourceClassLocation> {
-    assert_eq!(
-        exact.internal_name, decompiled.internal_name,
-        "INVARIANT VIOLATED: exact and decompiled Java locations identify different classes. \
-         This is a bug because per-member precedence can compare only one winning class identity. \
-         Fix: decompile the same catalog declaration selected by exact-source resolution."
+    invariant_eq!(
+        exact.internal_name,
+        decompiled.internal_name,
+        what = "exact and decompiled Java locations identify different classes",
+        why = "per-member precedence can compare only one winning class identity",
+        fix = "decompile the same catalog declaration selected by exact-source resolution",
     );
     decompiled.methods.retain(|candidate| {
         !exact.methods.iter().any(|preferred| {

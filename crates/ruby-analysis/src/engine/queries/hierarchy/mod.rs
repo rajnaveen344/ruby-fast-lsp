@@ -10,9 +10,9 @@ use crate::engine::queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
     TypeHierarchyRelation,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn parse_method_fqn(&self, fqn: &str) -> Option<FullyQualifiedName> {
         parse_method_fqn_string(fqn)
     }
@@ -21,7 +21,7 @@ impl<'a> AnalysisQuery<'a> {
         &self,
         method_fqn: &FullyQualifiedName,
     ) -> Option<CallHierarchyMethod> {
-        let facts = self.engine.method_facts_for(method_fqn);
+        let facts = self.method_facts_for(method_fqn);
         let fact = facts.first()?;
         Some(CallHierarchyMethod {
             fqn: method_fqn.clone(),
@@ -40,11 +40,11 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn incoming_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<IncomingCall> {
         let mut grouped = Vec::<(FullyQualifiedName, Vec<TextRange>)>::new();
-        for fact in self.engine.reference_facts_for(method_fqn) {
+        for fact in self.reference_facts_for(method_fqn) {
             let Some(caller_id) = fact.caller else {
                 continue;
             };
-            let Some(caller) = self.engine.fqn_for_id(caller_id) else {
+            let Some(caller) = self.engine.names.fqn(caller_id) else {
                 continue;
             };
             push_grouped_text_range(&mut grouped, caller.clone(), fact.range);
@@ -67,11 +67,11 @@ impl<'a> AnalysisQuery<'a> {
         let Some(method_id) = self.engine.names.fqn_id(method_fqn) else {
             return Vec::new();
         };
-        for (target_id, fact) in self.engine.reference_store().iter_facts_with_targets() {
+        for (target_id, fact) in self.engine.uses.resolved().iter_facts_with_targets() {
             if fact.caller != Some(method_id) {
                 continue;
             }
-            let Some(target) = self.engine.fqn_for_id(target_id) else {
+            let Some(target) = self.engine.names.fqn(target_id) else {
                 continue;
             };
             push_grouped_text_range(&mut grouped, target.clone(), fact.range);
@@ -99,7 +99,7 @@ impl<'a> AnalysisQuery<'a> {
         ancestors: &[RubyConstant],
     ) -> Option<TypeHierarchyNode> {
         let fqn = self.resolve_constant_in_context(constant_parts, ancestors)?;
-        let (node_kind, range) = self.engine.first_graph_node_definition(&fqn)?;
+        let (node_kind, range) = self.first_graph_node_definition(&fqn)?;
         Some(TypeHierarchyNode {
             fqn,
             node_kind,
@@ -108,12 +108,12 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn supertypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        let primary_file_id = match self.engine.first_graph_node_definition(fqn) {
+        let primary_file_id = match self.first_graph_node_definition(fqn) {
             Some((_, range)) => range.file_id,
             None => return Vec::new(),
         };
 
-        let edges = self.engine.graph_edges_from(fqn);
+        let edges = self.graph_edges_from(fqn);
         let mut supertypes = Vec::new();
         push_supertype_entries(
             self.engine,
@@ -155,7 +155,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn subtypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        if !self.engine.has_graph_node(fqn) {
+        if !self.has_graph_node(fqn) {
             return Vec::new();
         }
 
@@ -164,7 +164,7 @@ impl<'a> AnalysisQuery<'a> {
         let mut prepended_by_edges = Vec::new();
         let mut extended_by_edges = Vec::new();
 
-        for edge in self.engine.graph_edges_to(fqn) {
+        for edge in self.graph_edges_to(fqn) {
             match edge.kind {
                 GraphEdgeKind::Superclass => subclass_edges.push(edge.clone()),
                 GraphEdgeKind::Include
@@ -223,7 +223,7 @@ impl<'a> AnalysisQuery<'a> {
 
         for ns_fqn in &namespaces_to_check {
             let method_fqn = FullyQualifiedName::method(ns_fqn.namespace_parts(), *method);
-            for fact in self.engine.method_facts_for(&method_fqn) {
+            for fact in self.method_facts_for(&method_fqn) {
                 if fact.owner.namespace_parts() == ns_fqn.namespace_parts()
                     && fact.owner.namespace_kind() == ns_fqn.namespace_kind()
                 {
@@ -239,8 +239,7 @@ impl<'a> AnalysisQuery<'a> {
         collect_all_implementors(self.engine, fqn)
             .iter()
             .filter_map(|impl_fqn| {
-                self.engine
-                    .first_graph_node_definition(impl_fqn)
+                self.first_graph_node_definition(impl_fqn)
                     .map(|(_, range)| range)
             })
             .collect()
@@ -287,7 +286,7 @@ fn push_grouped_text_range(
 }
 
 fn push_subtype_entries(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     edges: &mut [GraphEdgeFact],
     relation: TypeHierarchyRelation,
     entries: &mut Vec<TypeHierarchyEntry>,
@@ -301,7 +300,7 @@ fn push_subtype_entries(
 }
 
 fn push_supertype_entries(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     edges: &[GraphEdgeFact],
     kind: GraphEdgeKind,
     relation: TypeHierarchyRelation,
@@ -324,11 +323,11 @@ fn push_supertype_entries(
 }
 
 fn push_unresolved_supertype_entries(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     entries: &mut Vec<TypeHierarchyEntry>,
 ) {
-    for edge in engine.unresolved_graph_edges() {
+    for edge in engine.view().unresolved_graph_edges() {
         if edge.source != *fqn {
             continue;
         }
@@ -351,13 +350,13 @@ fn push_unresolved_supertype_entries(
 }
 
 fn hierarchy_entry_for_node(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     relation: TypeHierarchyRelation,
     edge_file_id: Option<SourceFileId>,
     unresolved: bool,
 ) -> Option<TypeHierarchyEntry> {
-    let (node_kind, range) = engine.first_graph_node_definition(fqn)?;
+    let (node_kind, range) = engine.view().first_graph_node_definition(fqn)?;
     Some(TypeHierarchyEntry {
         fqn: fqn.clone(),
         node_kind: Some(node_kind),
@@ -369,7 +368,7 @@ fn hierarchy_entry_for_node(
 }
 
 fn collect_all_implementors(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -398,10 +397,11 @@ fn collect_all_implementors(
 }
 
 fn mixers(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut mixers = engine
+        .view()
         .graph_edges_to(origin_fqn)
         .iter()
         .filter(|edge| {
@@ -419,7 +419,7 @@ fn mixers(
 }
 
 fn descendants(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -429,7 +429,7 @@ fn descendants(
     seen.insert(origin_fqn.clone());
 
     while let Some(current) = queue.pop_front() {
-        for edge in engine.graph_edges_to(&current) {
+        for edge in engine.view().graph_edges_to(&current) {
             if edge.kind == GraphEdgeKind::Superclass && seen.insert(edge.source.clone()) {
                 result.push(edge.source.clone());
                 queue.push_back(edge.source.clone());
@@ -443,24 +443,24 @@ fn descendants(
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
-        SymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
+        SymbolFact, SymbolKind, TextRange,
     };
-    use crate::engine::AnalysisQuery;
-    use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::View;
+    use crate::engine::{Project, ResolveMode, SourceFileInput};
 
-    fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
+    fn query_with_symbols() -> (Project, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/user.rb".into(),
             content: source.into(),
             kind: SourceKind::Project,
         });
         let user = RubyConstant::new("User").expect("test constant must be valid");
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![
                     SymbolFact::new(
                         FullyQualifiedName::namespace(vec![user.clone()]),
@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn parse_method_fqn_strings() {
         let (engine, _) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert_eq!(
             query.parse_method_fqn("Foo#bar").unwrap().to_string(),
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn parse_namespace_fqn_strings() {
         let (engine, _) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert_eq!(
             query

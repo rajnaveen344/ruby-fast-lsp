@@ -1,11 +1,10 @@
 //! ActiveSupport `delegate` and Forwardable `def_delegator(s)` method facts.
 
 use crate::core::{FullyQualifiedName, MethodFact, RubyMethod, TypeFact, TypeSubject};
-use crate::engine::AnalysisQuery;
+use crate::inference::semantics::ReceiverAccess;
+use crate::invariant::ExpectInvariant;
 use log::trace;
 use ruby_prism::CallNode;
-
-use crate::inference::method::method_call_return_type;
 
 use super::names::direct_attr_name_and_range;
 use crate::indexer::fact_collector::FactCollector;
@@ -20,13 +19,13 @@ impl FactCollector {
         let range = self.direct_range(&node.location());
 
         let receiver_type = {
-            let engine = self.semantics.engine.read();
-            let query = AnalysisQuery::new(&engine);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
             let Ok(method) = RubyMethod::new(&receiver_method) else {
                 return;
             };
-            query.method_return_type_for_receiver(&owner, &method)
+            self.semantics
+                .project
+                .receiver_method_return_type(&owner, &method, ReceiverAccess::Any)
         };
 
         for method_name in methods {
@@ -35,42 +34,44 @@ impl FactCollector {
             };
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            self.facts.direct.symbols.push(crate::core::SymbolFact::new(
-                fqn.clone(),
-                crate::core::SymbolKind::Method,
-                range,
-            ));
+            self.facts
+                .analysis
+                .symbols
+                .push(crate::core::SymbolFact::new(
+                    fqn.clone(),
+                    crate::core::SymbolKind::Method,
+                    range,
+                ));
             self.push_direct_method_fact(MethodFact::with_delegate_receiver(
                 fqn,
                 owner,
                 range,
-                RubyMethod::new(&receiver_method).expect(
-                        "INVARIANT VIOLATED: delegate receiver method became invalid after validation. \
-                         This is a bug because the same string was already accepted. \
-                         Fix: keep delegate receiver validation single-sourced.",
+                RubyMethod::new(&receiver_method).expect_invariant(
+                    "delegate receiver method became invalid after validation",
+                    "the same string was already accepted",
+                    "keep delegate receiver validation single-sourced",
                 ),
             ));
 
             let Some(receiver_type) = receiver_type.as_ref() else {
                 continue;
             };
-            let return_type = {
-                let engine = self.semantics.engine.read();
-                let query = AnalysisQuery::new(&engine);
-                method_call_return_type(Some(&query), receiver_type, &method_name)
-            };
+            let return_type = self
+                .semantics
+                .project
+                .method_call_return_type(receiver_type, &method_name);
             let Some(return_type) = return_type else {
                 continue;
             };
             let delegated_fqn = FullyQualifiedName::method(
                 namespace.clone(),
-                RubyMethod::new(&method_name).expect(
-                    "INVARIANT VIOLATED: delegate method became invalid after validation. \
-                     This is a bug because the same string was already accepted. \
-                     Fix: keep delegate method validation single-sourced.",
+                RubyMethod::new(&method_name).expect_invariant(
+                    "delegate method became invalid after validation",
+                    "the same string was already accepted",
+                    "keep delegate method validation single-sourced",
                 ),
             );
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::MethodReturn(delegated_fqn),
                 return_type,
                 range,
@@ -92,10 +93,12 @@ impl FactCollector {
         };
 
         let receiver_type = {
-            let engine = self.semantics.engine.read();
-            let query = AnalysisQuery::new(&engine);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            query.method_return_type_for_receiver(&owner, &receiver_method)
+            self.semantics.project.receiver_method_return_type(
+                &owner,
+                &receiver_method,
+                ReceiverAccess::Any,
+            )
         };
 
         for (defined_name, target_name) in methods {
@@ -104,11 +107,14 @@ impl FactCollector {
             };
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            self.facts.direct.symbols.push(crate::core::SymbolFact::new(
-                fqn.clone(),
-                crate::core::SymbolKind::Method,
-                range,
-            ));
+            self.facts
+                .analysis
+                .symbols
+                .push(crate::core::SymbolFact::new(
+                    fqn.clone(),
+                    crate::core::SymbolKind::Method,
+                    range,
+                ));
             self.push_direct_method_fact(MethodFact::with_delegate_receiver(
                 fqn.clone(),
                 owner,
@@ -121,15 +127,14 @@ impl FactCollector {
             else {
                 continue;
             };
-            let return_type = {
-                let engine = self.semantics.engine.read();
-                let query = AnalysisQuery::new(&engine);
-                method_call_return_type(Some(&query), receiver_type, target_method.as_str())
-            };
+            let return_type = self
+                .semantics
+                .project
+                .method_call_return_type(receiver_type, target_method.as_str());
             let Some(return_type) = return_type else {
                 continue;
             };
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::MethodReturn(fqn),
                 return_type,
                 range,

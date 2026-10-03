@@ -1,4 +1,5 @@
 use crate::core::{SourceFileId, TextRange};
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{Node, Visit};
 
 /// Return one inner-to-outer syntax range chain for each requested byte offset.
@@ -108,10 +109,10 @@ impl<'pr> Visit<'pr> for SelectionRangeCollector<'_> {
 }
 
 fn u32_offset(offset: usize) -> u32 {
-    u32::try_from(offset).expect(
-        "INVARIANT VIOLATED: selection range byte offset exceeded u32. \
-         This is a bug because TextRange currently stores u32 offsets. \
-         Fix: widen TextRange before parsing files larger than u32::MAX bytes.",
+    u32::try_from(offset).expect_invariant(
+        "selection range byte offset exceeded u32",
+        "TextRange currently stores u32 offsets",
+        "widen TextRange before parsing files larger than u32::MAX bytes",
     )
 }
 

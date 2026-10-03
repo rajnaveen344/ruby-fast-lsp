@@ -1,4 +1,5 @@
 use super::classpath::{ArtifactOrigin, ClasspathArtifact};
+use crate::invariant::ExpectInvariant;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Cursor, Read};
@@ -69,10 +70,10 @@ pub fn materialize_jruby_runtime_sources(
             .read_to_string(&mut content)
             .map_err(|_| JrubyRuntimeSourceError::InvalidUtf8 { entry: entry_name })?;
         let path = cache_root.join(entry_name);
-        let parent = path.parent().expect(
-            "INVARIANT VIOLATED: allowlisted JRuby runtime source has no cache parent. \
-             This is a bug because every entry is a relative multi-component path. \
-             Fix: keep the runtime source allowlist path-safe and relative.",
+        let parent = path.parent().expect_invariant(
+            "allowlisted JRuby runtime source has no cache parent",
+            "every entry is a relative multi-component path",
+            "keep the runtime source allowlist path-safe and relative",
         );
         fs::create_dir_all(parent).map_err(|error| JrubyRuntimeSourceError::CacheWrite {
             path: parent.to_path_buf(),

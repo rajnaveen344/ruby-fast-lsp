@@ -1,0 +1,74 @@
+use dhat::Profiler;
+use log::{info, LevelFilter};
+use ruby_fast_lsp::lsp::lifecycle::indexing;
+use ruby_fast_lsp::server::Server;
+use std::env;
+use tokio::runtime::Runtime;
+use tower_lsp::lsp_types::Url;
+
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+fn main() -> anyhow::Result<()> {
+    // Enable the profiler
+    let _profiler = Profiler::new_heap();
+
+    // Initialize logger
+    env_logger::Builder::new()
+        .filter_level(LevelFilter::Info)
+        .init();
+
+    // Parse command line arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: {} <folder_path>", args[0]);
+        std::process::exit(1);
+    }
+
+    let folder_path = &args[1];
+    let absolute_path = std::fs::canonicalize(folder_path)?;
+    let workspace_uri =
+        Url::from_file_path(&absolute_path).map_err(|_| anyhow::anyhow!("Invalid folder path"))?;
+
+    info!(
+        "Starting profiling harness for: {}",
+        absolute_path.display()
+    );
+
+    // Create a Tokio runtime
+    let rt = Runtime::new()?;
+
+    rt.block_on(async {
+        // Initialize the server
+        let server = Server::default();
+
+        // Register the workspace so init_workspace routes the index correctly.
+        server.add_workspace(workspace_uri.clone());
+
+        // We don't have a real client, so we can't easily capture progress notifications
+        // but the server logs should show what's happening.
+
+        // Trigger indexing directly
+        info!("Taking snapshot of heap before indexing...");
+
+        info!("Starting workspace initialization...");
+        let start_time = std::time::Instant::now();
+
+        match indexing::init_workspace(&server, workspace_uri.clone()).await {
+            Ok(_) => {
+                info!("Indexing completed successfully!");
+                info!(
+                    "Total method facts: {}",
+                    server
+                        .project_for_uri(&workspace_uri)
+                        .view(|view| view.all_method_facts().len())
+                );
+            }
+            Err(e) => info!("Indexing failed: {}", e),
+        }
+
+        info!("Total time: {:?}", start_time.elapsed());
+    });
+
+    Ok(())
+}

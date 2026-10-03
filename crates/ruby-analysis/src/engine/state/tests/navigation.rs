@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn union_method_completion_requires_every_receiver_member() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/types.rb", "class Alpha; end");
     let alpha = FullyQualifiedName::namespace_with_kind(
         vec![RubyConstant::new("Alpha").unwrap()],
@@ -21,9 +21,9 @@ fn union_method_completion_requires_every_receiver_member() {
     let beta_shared = FullyQualifiedName::method(beta.namespace_parts(), shared);
     let range = crate::core::TextRange::new(file_id, 0, 1);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(alpha.clone(), GraphNodeKind::Class, range),
                 GraphNodeFact::new(beta.clone(), GraphNodeKind::Class, range),
@@ -76,7 +76,7 @@ fn union_method_completion_requires_every_receiver_member() {
         RubyType::Class(FullyQualifiedName::constant(beta.namespace_parts())),
     ]);
     let matches = engine
-        .query()
+        .view()
         .method_matches_for_type(&receiver, "", NamespaceKind::Instance);
 
     assert_eq!(matches.len(), 1);
@@ -87,40 +87,37 @@ fn union_method_completion_requires_every_receiver_member() {
         Some(RubyType::union([RubyType::integer(), RubyType::string()]))
     );
 
-    let query = engine.query();
+    let query = engine.view();
     let shared = RubyMethod::new("shared").unwrap();
-    let exact_callees = query
-        .resolve_protected_method_callees_for_type(&receiver, &shared, &alpha)
+    let protected = ReceiverAccess::Protected { caller: &alpha };
+    let ask = |method, want| {
+        let request = MethodRequest::new(LookupReceiver::Type(&receiver), method, want);
+        lookup::method(&query, request.with_access(protected))
+    };
+    let exact_callees = ask(shared, MethodWant::Callees)
+        .into_callees()
         .expect("shared must resolve exactly for every union receiver member");
     assert_eq!(exact_callees.len(), 2);
     assert!(exact_callees
         .iter()
         .all(|callee| callee.resolution == MethodCalleeResolution::Exact));
 
-    let signature_facts =
-        query.resolve_protected_method_signature_facts_for_type(&receiver, &shared, &alpha);
+    let signature_facts = ask(shared, MethodWant::Signatures).into_signature_vec();
     assert_eq!(signature_facts.len(), 2);
     assert!(signature_facts
         .iter()
         .all(|fact| fact.params == vec!["value"]));
 
+    let alpha_only = RubyMethod::new("alpha_only").unwrap();
     assert!(
-        query
-            .resolve_protected_method_callees_for_type(
-                &receiver,
-                &RubyMethod::new("alpha_only").unwrap(),
-                &alpha,
-            )
+        ask(alpha_only, MethodWant::Callees)
+            .into_callees()
             .is_none(),
         "a partial union method must not return one member's navigation target"
     );
     assert!(
-        query
-            .resolve_protected_method_signature_facts_for_type(
-                &receiver,
-                &RubyMethod::new("alpha_only").unwrap(),
-                &alpha,
-            )
+        ask(alpha_only, MethodWant::Signatures)
+            .into_signatures()
             .is_empty(),
         "a partial union method must not return one member's signature"
     );
@@ -128,7 +125,7 @@ fn union_method_completion_requires_every_receiver_member() {
 
 #[test]
 fn method_rename_rejects_external_definition_even_with_exact_name_range() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: "gems/user.rb".into(),
         content: "class User; def name; end; end".into(),
@@ -139,9 +136,9 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
         crate::core::NamespaceKind::Instance,
     );
     let method = RubyMethod::new("name").unwrap();
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             methods: vec![MethodFact::new(
                 FullyQualifiedName::method(user.namespace_parts(), method),
                 user,
@@ -154,7 +151,7 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
     );
 
     assert!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .method_rename_target_at(file_id, 17)
             .is_none(),
         "dependency sources are navigation inputs, never editable rename truth"
@@ -163,15 +160,15 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
 
 #[test]
 fn reference_candidate_resolves_when_definition_arrives_later() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "User.new");
     let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let user_name = RubyConstant::new("User").unwrap();
     let user = FullyQualifiedName::namespace(vec![user_name]);
 
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 4),
                 user.namespace_parts(),
@@ -182,15 +179,16 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.reference_facts_for(&user).is_empty());
+    assert!(engine.view().reference_facts_for(&user).is_empty());
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .any(|fact| fact.code == "unresolved-constant"));
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 user.clone(),
                 SymbolKind::Class,
@@ -206,8 +204,9 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&user).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&user).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-constant"));
@@ -215,7 +214,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 
 #[test]
 fn resolved_reference_definition_query_requires_one_exact_target() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let source_file = register_project_file(&mut engine, "app/model.rb", "field :user");
     let user_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let account_file = register_project_file(&mut engine, "app/account.rb", "class Account; end");
@@ -224,17 +223,17 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
     let user_range = TextRange::new(user_file, 0, 10);
     let account_range = TextRange::new(account_file, 0, 13);
 
-    engine.replace_facts(
+    engine.update(
         user_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(user.clone(), SymbolKind::Class, user_range)],
             ..Default::default()
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         account_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 account.clone(),
                 SymbolKind::Class,
@@ -245,9 +244,9 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
         ResolveMode::Immediate,
     );
     let reference_range = TextRange::new(source_file, 7, 12);
-    engine.replace_facts(
+    engine.update(
         source_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::resolved(
                 reference_range,
                 user.clone(),
@@ -259,13 +258,13 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 8),
+        View::new(&engine).resolved_reference_definition_ranges_at(source_file, 8),
         vec![user_range]
     );
 
-    engine.replace_facts(
+    engine.update(
         source_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![
                 ReferenceCandidate::resolved(reference_range, user, None),
                 ReferenceCandidate::resolved(reference_range, account, None),
@@ -275,7 +274,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
         ResolveMode::Immediate,
     );
     assert!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .resolved_reference_definition_ranges_at(source_file, 8)
             .is_empty(),
         "ambiguous resolved reference targets must not guess a definition"
@@ -284,7 +283,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
 
 #[test]
 fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let model_file = register_project_file(
         &mut engine,
         "app/models/user.rb",
@@ -301,9 +300,9 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
     let method_range = TextRange::new(model_file, 20, 49);
     let reference_range = TextRange::new(callback_file, 13, 31);
 
-    engine.replace_facts(
+    engine.update(
         model_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -319,9 +318,9 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         callback_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method_target(
                 reference_range,
                 user.namespace_parts(),
@@ -335,21 +334,26 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(callback_file, 15),
+        View::new(&engine).resolved_reference_definition_ranges_at(callback_file, 15),
         vec![method_range],
         "exact callback target must use normal engine method lookup, including private methods"
     );
     assert_eq!(
         engine
+            .view()
             .reference_facts_for(&FullyQualifiedName::method(user.namespace_parts(), method))
             .len(),
         1,
         "exact callback target must participate in ordinary method references"
     );
 
-    engine.replace_facts(callback_file, FileFacts::default(), ResolveMode::Immediate);
+    engine.update(
+        callback_file,
+        FileAnalysis::default(),
+        ResolveMode::Immediate,
+    );
     assert!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .resolved_reference_definition_ranges_at(callback_file, 15)
             .is_empty(),
         "removing callback facts must remove exact method navigation"
@@ -358,7 +362,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
 
 #[test]
 fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_removal() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let signature_file = engine.register_file(SourceFileInput {
         path: PathBuf::from("signatures/java/list.rb"),
         content: "def get(index); end\ndef get(key); end".to_string(),
@@ -386,9 +390,9 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     let signature_range = TextRange::new(signature_file, 0, 19);
     let int_range = TextRange::new(implementation_file, 0, 47);
     let string_range = TextRange::new(implementation_file, 48, 87);
-    engine.replace_facts(
+    engine.update(
         signature_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -406,9 +410,9 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         implementation_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -437,9 +441,9 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
         ResolveMode::Immediate,
     );
     let reference_range = TextRange::new(source_file, 16, 20);
-    engine.replace_facts(
+    engine.update(
         source_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method(
                 reference_range,
                 crate::core::MethodReferenceCandidate {
@@ -458,6 +462,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
                         receiver_type: None,
                         diagnose_unresolved: false,
                         allow_unindexed_owner: false,
+                        safe_navigation: false,
                         signature: Some(crate::core::MethodCallSignatureCandidate::default()),
                     },
                 },
@@ -468,18 +473,18 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
+        View::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
         vec![int_range],
         "a verified JVM overload range must outrank same-named methods and signatures"
     );
 
-    engine.replace_facts(
+    engine.update(
         implementation_file,
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
+        View::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
         vec![signature_range],
         "a removed preferred declaration must not leave a stale location and must fall back normally"
     );
@@ -487,7 +492,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
 
 #[test]
 fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let import_file = register_project_file(
         &mut engine,
         "lib/runtime.rb",
@@ -507,9 +512,9 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
     );
     let import_range = TextRange::new(import_file, 12, 41);
     let implementation_range = TextRange::new(implementation_file, 0, 23);
-    engine.replace_facts(
+    engine.update(
         import_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 alias.clone(),
                 SymbolKind::Constant,
@@ -521,25 +526,25 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
                 import_range,
                 TypeProvenance::Runtime,
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         implementation_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 proxy,
                 SymbolKind::Class,
                 implementation_range,
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ResolveMode::Immediate,
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .constant_definition_ranges(&[RubyConstant::new("TimeUnit").unwrap()], &[]),
         vec![implementation_range],
         "a runtime import alias must navigate to the implementation class instead of its import statement"
@@ -548,7 +553,7 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
 
 #[test]
 fn method_candidate_resolves_when_method_definition_arrives_later() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.name");
     let def_file =
         register_project_file(&mut engine, "app/user.rb", "class User; def name; end; end");
@@ -557,9 +562,9 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
     let method = RubyMethod::new("name").unwrap();
     let method_fqn = FullyQualifiedName::method(user.namespace_parts(), method);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -569,9 +574,9 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method(
                 TextRange::new(ref_file, 5, 9),
                 crate::core::MethodReferenceCandidate {
@@ -590,6 +595,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
                         receiver_type: None,
                         diagnose_unresolved: true,
                         allow_unindexed_owner: false,
+                        safe_navigation: false,
                         signature: Some(crate::core::MethodCallSignatureCandidate::default()),
                     },
                 },
@@ -599,15 +605,16 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&method_fqn).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&method_fqn).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .any(|fact| fact.code == "unresolved-method"));
 
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -626,13 +633,14 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&method_fqn).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&method_fqn).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-method"));
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(ref_file, 6),
+        View::new(&engine).resolved_reference_definition_ranges_at(ref_file, 6),
         vec![TextRange::new(def_file, 12, 20)],
         "ordinary diagnostics-bearing method candidates must navigate through their resolved reference fact"
     );
@@ -640,16 +648,16 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
 
 #[test]
 fn constant_rename_rejects_external_only_definition() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: "gem/user.rb".into(),
         content: "class User\nend\n".to_string(),
         kind: SourceKind::Gem,
     });
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(user, SymbolKind::Class, TextRange::new(file_id, 0, 14))
                     .with_name_range(TextRange::new(file_id, 6, 10)),
@@ -660,14 +668,14 @@ fn constant_rename_rejects_external_only_definition() {
     );
 
     assert!(engine
-        .query()
+        .view()
         .constant_rename_target(&[RubyConstant::new("User").unwrap()], &[])
         .is_none());
 }
 
 #[test]
 fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let signature_file = engine.register_file(SourceFileInput {
         path: "sig/widget.rbs".into(),
         content: "class Widget\n  def encode: () -> String\nend\n".to_string(),
@@ -684,9 +692,9 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
     let signature_range = TextRange::new(signature_file, 15, 39);
     let implementation_range = TextRange::new(implementation_file, 15, 32);
 
-    engine.replace_facts(
+    engine.update(
         signature_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 owner.clone(),
                 SymbolKind::Class,
@@ -711,9 +719,9 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         implementation_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 owner.clone(),
                 SymbolKind::Class,
@@ -730,32 +738,28 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
         ResolveMode::Immediate,
     );
 
-    let callees = engine
-        .query()
-        .resolve_method_callees(&owner, &method_name)
+    let callees = ask_any(&engine.view(), &owner, &method_name, MethodWant::Callees)
+        .into_callees()
         .expect("method owner must resolve");
     assert_eq!(callees.len(), 1);
     assert_eq!(callees[0].definition_ranges, vec![implementation_range]);
-    let signatures = engine
-        .query()
-        .resolve_method_signature_facts(&owner, &method_name);
+    let signatures =
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Signatures).into_signature_vec();
     assert_eq!(signatures.len(), 1);
     assert_eq!(signatures[0].range, signature_range);
     assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver(&owner, &method_name),
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Return).into_return_type(),
         Some(RubyType::string())
     );
     assert_eq!(
-        engine.query().method_return_type_for_callee(&callees[0]),
+        engine.view().method_return_type_for_callee(&callees[0]),
         Some(RubyType::string()),
         "an already-resolved callee must expose its return type without another receiver lookup"
     );
     assert_eq!(
         engine
-            .query()
+            .view()
             .constant_definition_ranges(&[RubyConstant::new("Widget").unwrap()], &[],),
         vec![TextRange::new(implementation_file, 0, 37)]
     );
@@ -763,7 +767,7 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
 
 #[test]
 fn inherited_method_callee_keeps_the_defining_parent_owner() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -773,9 +777,9 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let method = RubyMethod::new("value").unwrap();
     let definition_range = TextRange::new(file_id, 15, 31);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -804,9 +808,8 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
         ResolveMode::Immediate,
     );
 
-    let callees = engine
-        .query()
-        .resolve_method_callees(&child, &method)
+    let callees = ask_any(&engine.view(), &child, &method, MethodWant::Callees)
+        .into_callees()
         .expect("Child must resolve Parent#value through ordinary ancestry");
     assert_eq!(callees.len(), 1);
     assert_eq!(callees[0].owner, parent);
@@ -816,7 +819,7 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
 
 #[test]
 fn public_lookup_of_a_private_method_is_receiver_only() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/user.rb",
@@ -825,9 +828,9 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let method = RubyMethod::new("secret").unwrap();
     let definition_range = TextRange::new(file_id, 13, 24);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -844,18 +847,22 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
         ResolveMode::Immediate,
     );
 
-    let private_callees = engine
-        .query()
-        .resolve_method_callees(&owner, &method)
+    let private_callees = ask_any(&engine.view(), &owner, &method, MethodWant::Callees)
+        .into_callees()
         .expect("private lookup must still see User#secret");
     assert_eq!(private_callees.len(), 1);
     assert_eq!(private_callees[0].resolution, MethodCalleeResolution::Exact);
     assert_eq!(private_callees[0].definition_ranges, vec![definition_range]);
 
-    let public_callees = engine
-        .query()
-        .resolve_public_method_callees(&owner, &method)
-        .expect("public lookup must retain the receiver when the method is private");
+    let public_callees = ask(
+        &engine.view(),
+        &owner,
+        &method,
+        ReceiverAccess::Public,
+        MethodWant::Callees,
+    )
+    .into_callees()
+    .expect("public lookup must retain the receiver when the method is private");
     assert_eq!(public_callees.len(), 1);
     assert_eq!(
         public_callees[0].resolution,

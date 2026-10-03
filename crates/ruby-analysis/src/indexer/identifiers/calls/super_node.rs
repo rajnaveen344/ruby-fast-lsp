@@ -1,7 +1,9 @@
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{ForwardingSuperNode, SuperNode};
 
+use crate::core::MethodReceiver;
 use crate::core::{FullyQualifiedName, RubyMethod};
-use crate::indexer::{Identifier, MethodReceiver};
+use crate::indexer::Identifier;
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
@@ -23,10 +25,10 @@ impl IdentifierVisitor {
         else {
             return;
         };
-        let method = RubyMethod::new(method.as_str()).expect(
-            "INVARIANT VIOLATED: current method FQN contains invalid Ruby method. \
-             This is a bug because RubyMethod validates names at construction. \
-             Fix: keep current_method_fqn populated only from RubyMethod values.",
+        let method = RubyMethod::new(method.as_str()).expect_invariant(
+            "current method FQN contains invalid Ruby method",
+            "RubyMethod validates names at construction",
+            "keep current_method_fqn populated only from RubyMethod values",
         );
 
         self.set_result(

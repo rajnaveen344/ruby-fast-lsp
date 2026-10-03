@@ -28,9 +28,11 @@ impl ConstantTypeDependency {
         absolute: bool,
         lexical_context: Vec<RubyConstant>,
     ) -> Self {
-        assert!(
+        invariant!(
             !parts.is_empty(),
-            "INVARIANT VIOLATED: a constant-value dependency has an empty path. This is a bug because every Ruby constant reference has at least one name. Fix: construct dependencies only from validated Prism constant nodes."
+            what = "a constant-value dependency has an empty path",
+            why = "every Ruby constant reference has at least one name",
+            fix = "construct dependencies only from validated Prism constant nodes",
         );
         Self {
             parts,
@@ -86,9 +88,11 @@ impl ConstantTypeEquation {
         target: ConstantTypeTarget,
         dependencies: BTreeSet<ConstantTypeDependency>,
     ) -> Self {
-        assert!(
+        invariant!(
             !dependencies.is_empty(),
-            "INVARIANT VIOLATED: a constant type equation has no constant dependency. This is a bug because dependency-free types are ordinary TypeFacts. Fix: emit ConstantTypeEquation only for a retained constant lookup."
+            what = "a constant type equation has no constant dependency",
+            why = "dependency-free types are ordinary TypeFacts",
+            fix = "emit ConstantTypeEquation only for a retained constant lookup",
         );
         Self {
             target,

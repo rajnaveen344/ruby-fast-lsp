@@ -63,6 +63,13 @@ manifests define the accepted dependency ranges and extension capabilities:
 [Sinatra](../extensions/sinatra-rust/extension.toml), and
 [Cucumber](../extensions/cucumber-rust/extension.toml).
 Activation ranges are not an exhaustive framework compatibility guarantee.
+The VS Code extension passes all five packages to its server. The npm server
+loads the RSpec package from its platform package's `extensions/` directory;
+a package with the same ID from `extensionPackages`, `extensionDirs`, a
+trusted project, or the environment replaces it.
+Framework support comes only from these packages: without a loaded RSpec
+package, or in a project that does not lock `rspec-core` 3.x, RSpec calls
+index as ordinary Ruby.
 
 RSpec and Minitest declarations offer Run/Debug lenses. RSpec uses
 `bundle exec rspec file:line`; Minitest uses a Rails runner when available or an
@@ -101,7 +108,6 @@ Use the [bug report form](../.github/ISSUE_TEMPLATE/bug_report.yml). Include ser
 and editor-extension versions, OS/architecture, runtime, Bundler, project layout,
 expected/actual behavior, whether indexing finished, and steps to reproduce.
 Share generic reduced examples and sanitized logs; private source is unnecessary.
-For simulation failures, retain the seed and replay artifact.
 
 To roll back npm, install an explicitly selected previous version with
 `npm install -g @ruby-fast/lsp@<previous-version>` and restart the client. In

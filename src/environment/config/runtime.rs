@@ -1,6 +1,8 @@
 use crate::environment::runtime::catalog::{
     DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation,
 };
+use crate::environment::runtime::version::parse_ruby_family;
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_jruby_support::JrubyRuntimeIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -123,7 +125,7 @@ impl RuntimeSelectionConfig {
         if legacy_ruby_version == "auto" {
             return EffectiveRuntimeSelection::Auto;
         }
-        let Some((major, minor)) = parse_family(legacy_ruby_version) else {
+        let Some((major, minor)) = parse_ruby_family(legacy_ruby_version) else {
             return EffectiveRuntimeSelection::Auto;
         };
         EffectiveRuntimeSelection::LegacyMriCompatibility { major, minor }
@@ -143,12 +145,14 @@ impl SelectedRuntimeDescriptor {
             .is_some_and(|path| !path.is_absolute())
         {
             return Err(RuntimeConfigError::InvalidJavaHome(
-                self.java_home
-                    .clone()
-                    .expect("INVARIANT VIOLATED: checked Java home must exist"),
+                self.java_home.clone().expect_invariant(
+                    "checked Java home is missing",
+                    "the branch runs only when java_home is Some",
+                    "keep the is_some check on the same field",
+                ),
             ));
         }
-        let compatibility = parse_family(&self.compatibility_version).ok_or_else(|| {
+        let compatibility = parse_ruby_family(&self.compatibility_version).ok_or_else(|| {
             RuntimeConfigError::InvalidCompatibilityVersion(self.compatibility_version.clone())
         })?;
         match self.implementation {
@@ -171,7 +175,7 @@ impl SelectedRuntimeDescriptor {
                 }
             }
             RuntimeImplementation::Mri => {
-                let engine_family = parse_family(&self.engine_version).ok_or_else(|| {
+                let engine_family = parse_ruby_family(&self.engine_version).ok_or_else(|| {
                     RuntimeConfigError::InvalidEngineVersion(self.engine_version.clone())
                 })?;
                 if self.family != self.compatibility_version || engine_family != compatibility {
@@ -182,7 +186,7 @@ impl SelectedRuntimeDescriptor {
                 }
             }
             RuntimeImplementation::Truffleruby => {
-                if parse_family(&self.engine_version).is_none() {
+                if parse_ruby_family(&self.engine_version).is_none() {
                     return Err(RuntimeConfigError::InvalidEngineVersion(
                         self.engine_version.clone(),
                     ));
@@ -205,13 +209,6 @@ impl From<DiscoveredRuntime> for SelectedRuntimeDescriptor {
             java_home: runtime.java_home,
         }
     }
-}
-
-fn parse_family(source: &str) -> Option<(u16, u16)> {
-    let mut components = source.split('.');
-    let major = components.next()?.parse().ok()?;
-    let minor = components.next()?.parse().ok()?;
-    Some((major, minor))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

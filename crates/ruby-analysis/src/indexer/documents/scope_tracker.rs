@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::fmt;
 
 use crate::core::MethodVisibility;
@@ -46,7 +47,9 @@ pub struct ScopeTracker {
     frames: Vec<ScopeFrame>,
     execution_context_stack: Vec<ExecutionContextFrame>,
     scope_kind_stack: Vec<LocalScopeKind>,
-    method_fqn_stack: Vec<Option<FullyQualifiedName>>,
+    /// Enclosing method definitions with the namespace side that owns each
+    /// stored definition. A constructor is stored as singleton `new`.
+    method_stack: Vec<(FullyQualifiedName, NamespaceKind)>,
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
 }
@@ -89,7 +92,7 @@ impl ScopeTracker {
             frames: Vec::new(),
             execution_context_stack: Vec::new(),
             scope_kind_stack: vec![LocalScopeKind::Constant],
-            method_fqn_stack: Vec::new(),
+            method_stack: Vec::new(),
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
         }
@@ -149,22 +152,30 @@ impl ScopeTracker {
     }
 
     pub fn pop_execution_context(&mut self) {
-        self.execution_context_stack.pop().expect(
-            "INVARIANT VIOLATED: execution context stack underflow. This is a bug because every pushed block execution context must be popped exactly once. Fix: keep execution-context traversal balanced.",
+        self.execution_context_stack.pop().expect_invariant(
+            "execution context stack underflow",
+            "every pushed block execution context must be popped exactly once",
+            "keep execution-context traversal balanced",
         );
-        self.module_function_mode_stack.pop().expect(
-            "INVARIANT VIOLATED: module_function stack underflow after execution context. This is a bug because every execution context owns one module_function flag. Fix: keep execution-context traversal balanced.",
+        self.module_function_mode_stack.pop().expect_invariant(
+            "module_function stack underflow after execution context",
+            "every execution context owns one module_function flag",
+            "keep execution-context traversal balanced",
         );
-        self.visibility_stack.pop().expect(
-            "INVARIANT VIOLATED: visibility stack underflow after execution context. This is a bug because every execution context owns one visibility frame. Fix: keep execution-context traversal balanced.",
+        self.visibility_stack.pop().expect_invariant(
+            "visibility stack underflow after execution context",
+            "every execution context owns one visibility frame",
+            "keep execution-context traversal balanced",
         );
     }
 
     fn current_execution_context(&self) -> Option<&ExecutionContextFrame> {
         let context = self.execution_context_stack.last()?;
-        assert!(
+        invariant!(
             context.local_scope_depth <= self.scope_kind_stack.len(),
-            "INVARIANT VIOLATED: execution context local-scope depth exceeds the active scope stack. This is a bug because scopes present when an execution context was pushed cannot disappear before that context is popped. Fix: keep execution-context and local-scope traversal balanced."
+            what = "execution context local-scope depth exceeds the scope stack",
+            why = "scopes present at context push outlive that context",
+            fix = "keep execution-context and local-scope traversal balanced",
         );
         (context.lexical_frame_depth == self.frames.len()
             && !self.scope_kind_stack[context.local_scope_depth..]
@@ -183,6 +194,13 @@ impl ScopeTracker {
 
     pub fn execution_context_active(&self) -> bool {
         self.current_execution_context().is_some()
+    }
+
+    /// Whether the active execution context was opened by a block call such
+    /// as `class_eval`, rather than by a method definition.
+    pub fn block_execution_context_active(&self) -> bool {
+        self.current_execution_context()
+            .is_some_and(|context| context.origin == ExecutionContextOrigin::Block)
     }
 
     pub fn implicit_receiver_context(&self) -> (Vec<RubyConstant>, NamespaceKind) {
@@ -238,8 +256,11 @@ impl ScopeTracker {
             }
             LocalScopeKind::FrameworkInstanceBlock => true,
             LocalScopeKind::Rescue | LocalScopeKind::ExplicitBlockLocal => {
-                panic!(
-                    "INVARIANT VIOLATED: filtered local-scope kind reached implicit receiver proof classification. This is a bug because rescue and explicit-block-local frames were removed immediately above. Fix: keep filtering and exhaustive classification in one function."
+                unreachable_invariant!(
+                    what =
+                        "filtered local-scope kind reached implicit receiver proof classification",
+                    why = "rescue and explicit-block-local frames were removed immediately above",
+                    fix = "keep filtering and exhaustive classification in one function",
                 )
             }
         }
@@ -280,11 +301,11 @@ impl ScopeTracker {
     }
 
     pub fn push_absolute_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        assert!(
+        invariant!(
             !namespaces.is_empty(),
-            "INVARIANT VIOLATED: absolute namespace frame is empty. \
-             This is a bug because an absolute class/module target must contain at least one Ruby constant. \
-             Fix: validate the resolved namespace before pushing an absolute frame."
+            what = "absolute namespace frame is empty",
+            why = "an absolute class/module target must contain at least one Ruby constant",
+            fix = "validate the resolved namespace before pushing an absolute frame",
         );
         self.frames.push(ScopeFrame::Namespace {
             parts: namespaces,
@@ -297,15 +318,15 @@ impl ScopeTracker {
     pub fn pop_ns_scope(&mut self) {
         if matches!(self.frames.last(), Some(ScopeFrame::Namespace { .. })) {
             self.frames.pop();
-            self.module_function_mode_stack.pop().expect(
-                "INVARIANT VIOLATED: module_function mode stack underflow. \
-                 This is a bug because every namespace frame must own one module_function mode flag. \
-                 Fix: keep namespace frame push/pop balanced.",
+            self.module_function_mode_stack.pop().expect_invariant(
+                "module_function mode stack underflow",
+                "every namespace frame must own one module_function mode flag",
+                "keep namespace frame push/pop balanced",
             );
-            self.visibility_stack.pop().expect(
-                "INVARIANT VIOLATED: visibility stack underflow. \
-                 This is a bug because every namespace frame must own one visibility flag. \
-                 Fix: keep namespace frame push/pop balanced.",
+            self.visibility_stack.pop().expect_invariant(
+                "visibility stack underflow",
+                "every namespace frame must own one visibility flag",
+                "keep namespace frame push/pop balanced",
             );
         }
     }
@@ -352,19 +373,33 @@ impl ScopeTracker {
         self.scope_kind_stack.pop();
     }
 
-    pub fn push_method_fqn(&mut self, fqn: Option<FullyQualifiedName>) {
-        self.method_fqn_stack.push(fqn);
+    /// Enter a method definition stored as `fqn` on the `owner_kind` side of
+    /// its namespace.
+    pub fn push_method_fqn(&mut self, fqn: FullyQualifiedName, owner_kind: NamespaceKind) {
+        invariant!(
+            matches!(fqn, FullyQualifiedName::Method(..)),
+            what = "method scope entered with non-method FQN {fqn:?}",
+            why = "`super` and caller identity read this stack as a method",
+            fix = "push FullyQualifiedName::method for every def scope",
+            fqn = fqn,
+        );
+        self.method_stack.push((fqn, owner_kind));
     }
 
     pub fn pop_method_fqn(&mut self) {
-        self.method_fqn_stack.pop();
+        self.method_stack.pop();
     }
 
     pub fn current_method_fqn(&self) -> Option<&FullyQualifiedName> {
-        self.method_fqn_stack
-            .iter()
-            .rev()
-            .find_map(|entry| entry.as_ref())
+        self.method_stack.last().map(|(fqn, _)| fqn)
+    }
+
+    /// The innermost enclosing method and the namespace side that stores its
+    /// definition. The side differs from the implicit receiver for a
+    /// constructor: `initialize` runs on an instance but is stored as
+    /// singleton `new`.
+    pub fn current_method(&self) -> Option<(&FullyQualifiedName, NamespaceKind)> {
+        self.method_stack.last().map(|(fqn, kind)| (fqn, *kind))
     }
 
     pub fn enable_module_function_mode(&mut self) {
@@ -383,10 +418,10 @@ impl ScopeTracker {
 
     pub fn set_current_visibility(&mut self, visibility: MethodVisibility) {
         let Some(current) = self.visibility_stack.last_mut() else {
-            panic!(
-                "INVARIANT VIOLATED: visibility stack is empty. \
-                 This is a bug because ScopeTracker always starts with public visibility. \
-                 Fix: initialize ScopeTracker with a root visibility frame."
+            unreachable_invariant!(
+                what = "visibility stack is empty",
+                why = "ScopeTracker always starts with public visibility",
+                fix = "initialize ScopeTracker with a root visibility frame",
             );
         };
         *current = visibility;
@@ -394,10 +429,10 @@ impl ScopeTracker {
 
     pub fn current_visibility(&self) -> MethodVisibility {
         self.visibility_stack.last().copied().unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: visibility stack is empty. \
-                 This is a bug because ScopeTracker always starts with public visibility. \
-                 Fix: initialize ScopeTracker with a root visibility frame."
+            unreachable_invariant!(
+                what = "visibility stack is empty",
+                why = "ScopeTracker always starts with public visibility",
+                fix = "initialize ScopeTracker with a root visibility frame",
             )
         })
     }
@@ -410,16 +445,37 @@ impl ScopeTracker {
     pub fn exit_singleton(&mut self) {
         if matches!(self.frames.last(), Some(ScopeFrame::Singleton)) {
             self.frames.pop();
-            self.visibility_stack.pop().expect(
-                "INVARIANT VIOLATED: visibility stack underflow on singleton exit. \
-                 This is a bug because every singleton frame must own one visibility flag. \
-                 Fix: keep singleton enter/exit balanced.",
+            self.visibility_stack.pop().expect_invariant(
+                "visibility stack underflow on singleton exit",
+                "every singleton frame must own one visibility flag",
+                "keep singleton enter/exit balanced",
             );
         }
     }
 
     pub fn in_singleton(&self) -> bool {
         matches!(self.frames.last(), Some(ScopeFrame::Singleton))
+    }
+
+    /// Whether `self` is the singleton class a `class << self` body opens,
+    /// rather than the class object or an instance. Method bodies and eval
+    /// blocks inside that body rebind `self`.
+    pub fn implicit_receiver_is_singleton_class(&self) -> bool {
+        if self.current_execution_context().is_some() {
+            return false;
+        }
+        for kind in self.scope_kind_stack.iter().rev() {
+            match kind {
+                LocalScopeKind::InstanceMethod
+                | LocalScopeKind::ClassMethod
+                | LocalScopeKind::FrameworkInstanceBlock => return false,
+                LocalScopeKind::Constant => break,
+                LocalScopeKind::Block
+                | LocalScopeKind::Rescue
+                | LocalScopeKind::ExplicitBlockLocal => continue,
+            }
+        }
+        self.in_singleton()
     }
 
     pub fn current_method_context(&self) -> NamespaceKind {
@@ -501,39 +557,6 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
             acc.push(constant);
         }
     }
-}
-
-pub fn get_method_namespace_kind(
-    receiver: Option<Node>,
-    current_namespace: &[RubyConstant],
-    in_singleton: bool,
-) -> (NamespaceKind, bool) {
-    let mut namespace_kind = NamespaceKind::Instance;
-    let mut skip_method = false;
-
-    if let Some(receiver) = receiver {
-        if receiver.as_self_node().is_some() {
-            namespace_kind = NamespaceKind::Singleton;
-        } else if let Some(read_node) = receiver.as_constant_read_node() {
-            let recv_name = utf8_str(read_node.name().as_slice());
-            if current_namespace
-                .last()
-                .is_some_and(|last| last.as_str() == recv_name)
-            {
-                namespace_kind = NamespaceKind::Singleton;
-            } else {
-                skip_method = true;
-            }
-        } else if receiver.as_constant_path_node().is_some() {
-            namespace_kind = NamespaceKind::Singleton;
-        } else {
-            skip_method = true;
-        }
-    } else if in_singleton {
-        namespace_kind = NamespaceKind::Singleton;
-    }
-
-    (namespace_kind, skip_method)
 }
 
 pub fn utf8_str(bytes: &[u8]) -> &str {
@@ -685,14 +708,19 @@ mod tests {
         let name = RubyMethod::new("name").expect("test method must be valid");
         let fqn = FullyQualifiedName::method(vec![user], name);
 
-        tracker.push_method_fqn(None);
         assert_eq!(tracker.current_method_fqn(), None);
+        assert_eq!(tracker.current_method(), None);
 
-        tracker.push_method_fqn(Some(fqn.clone()));
+        tracker.push_method_fqn(fqn.clone(), NamespaceKind::Singleton);
         assert_eq!(tracker.current_method_fqn(), Some(&fqn));
+        assert_eq!(
+            tracker.current_method(),
+            Some((&fqn, NamespaceKind::Singleton))
+        );
 
         tracker.pop_method_fqn();
         assert_eq!(tracker.current_method_fqn(), None);
+        assert_eq!(tracker.current_method(), None);
     }
 
     #[test]

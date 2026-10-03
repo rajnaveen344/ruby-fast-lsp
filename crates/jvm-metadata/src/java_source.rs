@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use crate::{parse_method_descriptor, ClassFile, JvmType, MemberInfo};
 use tree_sitter::{Node, Parser};
 
@@ -9,22 +10,22 @@ pub struct SourceByteRange {
 
 impl SourceByteRange {
     pub fn new(start: usize, end: usize) -> Self {
-        assert!(
+        invariant!(
             start <= end,
-            "INVARIANT VIOLATED: Java source range start exceeds its end. \
-             This is a bug because tree-sitter nodes always expose normalized byte ranges. \
-             Fix: preserve node start/end ordering when converting source locations."
+            what = "Java source range start exceeds its end",
+            why = "tree-sitter nodes always expose normalized byte ranges",
+            fix = "preserve node start/end ordering when converting source locations",
         );
         Self {
-            start: u32::try_from(start).expect(
-                "INVARIANT VIOLATED: Java source byte offset exceeded u32. \
-                 This is a bug because bounded source parsing must reject files before range conversion. \
-                 Fix: enforce JavaSourceLimits::max_source_bytes before constructing ranges.",
+            start: u32::try_from(start).expect_invariant(
+                "Java source byte offset exceeded u32",
+                "bounded source parsing must reject files before range conversion",
+                "enforce JavaSourceLimits::max_source_bytes before constructing ranges",
             ),
-            end: u32::try_from(end).expect(
-                "INVARIANT VIOLATED: Java source byte offset exceeded u32. \
-                 This is a bug because bounded source parsing must reject files before range conversion. \
-                 Fix: enforce JavaSourceLimits::max_source_bytes before constructing ranges.",
+            end: u32::try_from(end).expect_invariant(
+                "Java source byte offset exceeded u32",
+                "bounded source parsing must reject files before range conversion",
+                "enforce JavaSourceLimits::max_source_bytes before constructing ranges",
             ),
         }
     }
@@ -81,10 +82,10 @@ pub fn locate_java_source_declarations(
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_java::LANGUAGE.into())
-        .expect(
-            "INVARIANT VIOLATED: bundled tree-sitter Java grammar failed to load. \
-             This is a build/configuration bug because the grammar and parser versions are pinned together. \
-             Fix: keep tree-sitter and tree-sitter-java ABI-compatible.",
+        .expect_invariant(
+            "bundled tree-sitter Java grammar failed to load",
+            "the grammar and parser versions are pinned together",
+            "keep tree-sitter and tree-sitter-java ABI-compatible",
         );
     let tree = parser
         .parse(source, None)
@@ -103,14 +104,16 @@ pub fn locate_java_source_declarations(
     let Some(class_node) = find_class_node(root, source, &expected_classes, &mut Vec::new()) else {
         return Ok(None);
     };
-    let name_node = class_node.child_by_field_name("name").expect(
-        "INVARIANT VIOLATED: recognized Java type declaration has no name field. \
-         This is a tree-sitter grammar contract violation. Fix: update Java source mapping for the pinned grammar.",
+    let name_node = class_node.child_by_field_name("name").expect_invariant(
+        "recognized Java type declaration has no name field",
+        "the pinned tree-sitter Java grammar always provides it",
+        "update Java source mapping for the pinned grammar",
     );
     let method_nodes = direct_children_of_kinds(
-        class_node.child_by_field_name("body").expect(
-            "INVARIANT VIOLATED: recognized Java type declaration has no body field. \
-             This is a tree-sitter grammar contract violation. Fix: update Java source mapping for the pinned grammar.",
+        class_node.child_by_field_name("body").expect_invariant(
+            "recognized Java type declaration has no body field",
+            "the pinned tree-sitter Java grammar always provides it",
+            "update Java source mapping for the pinned grammar",
         ),
         &[
             "method_declaration",
@@ -119,9 +122,10 @@ pub fn locate_java_source_declarations(
         ],
     );
     let field_nodes = direct_children_of_kinds(
-        class_node.child_by_field_name("body").expect(
-            "INVARIANT VIOLATED: recognized Java type declaration has no body field. \
-             This is a tree-sitter grammar contract violation. Fix: update Java source mapping for the pinned grammar.",
+        class_node.child_by_field_name("body").expect_invariant(
+            "recognized Java type declaration has no body field",
+            "the pinned tree-sitter Java grammar always provides it",
+            "update Java source mapping for the pinned grammar",
         ),
         &["field_declaration", "enum_constant"],
     );
@@ -222,10 +226,10 @@ fn find_class_node<'tree>(
         }
     }
     if is_type {
-        stack.pop().expect(
-            "INVARIANT VIOLATED: Java type traversal stack underflowed. \
-             This is a bug because every recognized type pushes exactly once before recursion. \
-             Fix: keep find_class_node push/pop paths balanced.",
+        stack.pop().expect_invariant(
+            "Java type traversal stack underflowed",
+            "every recognized type pushes exactly once before recursion",
+            "keep find_class_node push/pop paths balanced",
         );
     }
     None

@@ -1,5 +1,6 @@
 pub(in crate::engine) mod types;
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
@@ -11,15 +12,15 @@ use crate::engine::queries::namespace_tree::types::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
     MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
-use crate::engine::queries::AnalysisQuery;
-use crate::engine::AnalysisEngine;
+use crate::engine::queries::View;
+use crate::engine::Project;
 
 struct NamespaceTreeResult {
     modules: Vec<NamespaceNode>,
     classes: Vec<NamespaceNode>,
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn namespace_tree_hash(&self, show_external_types: bool) -> u64 {
         compute_namespace_tree_hash(self.engine, show_external_types)
     }
@@ -29,11 +30,12 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: bool) -> u64 {
+fn compute_namespace_tree_hash(engine: &Project, show_external_types: bool) -> u64 {
     let mut hasher = DefaultHasher::new();
     show_external_types.hash(&mut hasher);
 
     let mut node_keys = engine
+        .view()
         .all_graph_nodes()
         .into_iter()
         .filter(|node| {
@@ -54,6 +56,7 @@ fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: boo
     node_keys.hash(&mut hasher);
 
     let mut edge_keys = engine
+        .view()
         .all_graph_edges()
         .into_iter()
         .filter(|edge| {
@@ -78,10 +81,7 @@ fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: boo
     hasher.finish()
 }
 
-fn compute_namespace_tree(
-    engine: &AnalysisEngine,
-    show_external_types: bool,
-) -> NamespaceTreeResponse {
+fn compute_namespace_tree(engine: &Project, show_external_types: bool) -> NamespaceTreeResponse {
     if !show_external_types {
         let project_tree = build_namespace_tree(collect_project_namespace_map(engine, false));
         return NamespaceTreeResponse {
@@ -189,7 +189,7 @@ struct PartitionedNamespaceNodes {
     gem_packages: HashMap<LibraryPackageId, HashMap<FullyQualifiedName, Vec<GraphNodeFact>>>,
 }
 
-fn partition_namespace_nodes(engine: &AnalysisEngine) -> PartitionedNamespaceNodes {
+fn partition_namespace_nodes(engine: &Project) -> PartitionedNamespaceNodes {
     let mut partitioned = PartitionedNamespaceNodes {
         project: HashMap::new(),
         runtime: HashMap::new(),
@@ -198,7 +198,7 @@ fn partition_namespace_nodes(engine: &AnalysisEngine) -> PartitionedNamespaceNod
         gem_packages: HashMap::new(),
     };
 
-    for node in engine.all_graph_nodes() {
+    for node in engine.view().all_graph_nodes() {
         if node.fqn.has_generated_owner() {
             continue;
         }
@@ -213,7 +213,7 @@ fn partition_namespace_nodes(engine: &AnalysisEngine) -> PartitionedNamespaceNod
                 .push(node);
             continue;
         }
-        let Some(file) = engine.file(node.range.file_id) else {
+        let Some(file) = engine.view().file(node.range.file_id) else {
             continue;
         };
         match source_kind_library_section(file.kind) {
@@ -286,12 +286,12 @@ fn source_kind_library_section(kind: SourceKind) -> Option<LibrarySectionId> {
 }
 
 fn collect_project_namespace_map(
-    engine: &AnalysisEngine,
+    engine: &Project,
     show_external_mixins: bool,
 ) -> HashMap<String, NamespaceNode> {
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
 
-    for node in engine.all_graph_nodes() {
+    for node in engine.view().all_graph_nodes() {
         if node.fqn.has_generated_owner() {
             continue;
         }
@@ -308,7 +308,7 @@ fn collect_project_namespace_map(
 }
 
 fn build_namespace_map_from_grouped_nodes(
-    engine: &AnalysisEngine,
+    engine: &Project,
     nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
     show_external_mixins: bool,
     compute_included_by: bool,
@@ -316,10 +316,10 @@ fn build_namespace_map_from_grouped_nodes(
     let mut namespace_map = HashMap::new();
     for (fqn, mut nodes) in nodes_by_fqn {
         nodes.sort_by_key(|node| (node.kind, node.range.file_id, node.range.start_byte));
-        let first_node = nodes.first().expect(
-            "INVARIANT VIOLATED: namespace node bucket is empty. \
-             This is a bug because only non-empty buckets are inserted. \
-             Fix: keep namespace node grouping and iteration coupled.",
+        let first_node = nodes.first().expect_invariant(
+            "namespace node bucket is empty",
+            "only non-empty buckets are inserted",
+            "keep namespace node grouping and iteration coupled",
         );
 
         let fqn_string = fqn.to_string();
@@ -333,6 +333,7 @@ fn build_namespace_map_from_grouped_nodes(
             .collect::<Vec<_>>();
 
         let proven_superclass = engine
+            .view()
             .proven_superclass_edge(&fqn)
             .into_iter()
             .collect::<Vec<_>>();
@@ -401,11 +402,12 @@ fn build_namespace_map_from_grouped_nodes(
 }
 
 fn analysis_edges_from(
-    engine: &AnalysisEngine,
+    engine: &Project,
     fqn: &FullyQualifiedName,
     kind: GraphEdgeKind,
 ) -> Vec<GraphEdgeFact> {
     engine
+        .view()
         .graph_edges_from(fqn)
         .iter()
         .filter(|edge| edge.kind == kind)
@@ -414,7 +416,7 @@ fn analysis_edges_from(
 }
 
 fn analysis_edges_to_mixins(
-    engine: &AnalysisEngine,
+    engine: &Project,
     edges: &[GraphEdgeFact],
     show_external_types: bool,
 ) -> Vec<MixinInfo> {
@@ -439,7 +441,7 @@ fn analysis_edges_to_mixins(
 }
 
 fn analysis_find_includers(
-    engine: &AnalysisEngine,
+    engine: &Project,
     module_fqn: &FullyQualifiedName,
     show_external_types: bool,
 ) -> Vec<IncluderInfo> {
@@ -449,7 +451,7 @@ fn analysis_find_includers(
     queue.push_back((module_fqn.clone(), Vec::<ViaModuleInfo>::new()));
 
     while let Some((target, via_modules)) = queue.pop_front() {
-        for edge in engine.graph_edges_to(&target) {
+        for edge in engine.view().graph_edges_to(&target) {
             if !matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend) {
                 continue;
             }
@@ -486,28 +488,28 @@ fn analysis_find_includers(
     result
 }
 
-fn analysis_node_kind(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-    engine.first_graph_node_kind(fqn)
+fn analysis_node_kind(engine: &Project, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+    engine.view().first_graph_node_kind(fqn)
 }
 
-fn analysis_namespace_is_project(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> bool {
+fn analysis_namespace_is_project(engine: &Project, fqn: &FullyQualifiedName) -> bool {
     engine
+        .view()
         .graph_nodes_for(fqn)
         .iter()
         .any(|node| analysis_range_is_project(engine, node.range))
 }
 
-fn analysis_range_is_project(engine: &AnalysisEngine, range: TextRange) -> bool {
+fn analysis_range_is_project(engine: &Project, range: TextRange) -> bool {
     engine
+        .view()
         .file(range.file_id)
         .is_some_and(|file| file.kind.is_workspace_owned())
 }
 
-fn analysis_namespace_locations(
-    engine: &AnalysisEngine,
-    fqn: &FullyQualifiedName,
-) -> Vec<LocationInfo> {
+fn analysis_namespace_locations(engine: &Project, fqn: &FullyQualifiedName) -> Vec<LocationInfo> {
     engine
+        .view()
         .graph_nodes_for(fqn)
         .iter()
         .filter_map(|node| analysis_location_info(engine, node.range))
@@ -515,10 +517,10 @@ fn analysis_namespace_locations(
 }
 
 pub(in crate::engine) fn analysis_location_info(
-    engine: &AnalysisEngine,
+    engine: &Project,
     range: TextRange,
 ) -> Option<LocationInfo> {
-    let file = engine.file(range.file_id)?;
+    let file = engine.view().file(range.file_id)?;
     let (line, character) = file.byte_offset_to_line_character(range.start_byte)?;
     Some(LocationInfo {
         uri: file.path.to_string_lossy().to_string(),
@@ -601,11 +603,11 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Namesp
 mod tests {
     use super::*;
     use crate::core::{
-        FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
-        GraphNodeKind, LibraryPackageId, RubyConstant, SourceKind, TextRange,
+        FileAnalysis, FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind,
+        GraphNodeFact, GraphNodeKind, LibraryPackageId, RubyConstant, SourceKind, TextRange,
     };
     use crate::engine::queries::namespace_tree::types::LibrarySectionId;
-    use crate::engine::{FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{ResolveMode, SourceFileInput};
 
     fn constant(name: &str) -> RubyConstant {
         RubyConstant::new(name).unwrap()
@@ -613,7 +615,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_filters_external_mixins() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let user_file = engine.register_file(SourceFileInput {
             path: "/tmp/project/user.rb".into(),
             content: "class User; include Auth; end".into(),
@@ -626,9 +628,9 @@ mod tests {
         });
         let user = FullyQualifiedName::namespace(vec![constant("User")]);
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
-        engine.replace_facts(
+        engine.update(
             user_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     user.clone(),
                     GraphNodeKind::Class,
@@ -644,9 +646,9 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             auth_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     auth,
                     GraphNodeKind::Module,
@@ -657,7 +659,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         let project_only = query.namespace_tree(false);
         assert_eq!(project_only.modules.len(), 0);
         assert_eq!(project_only.classes.len(), 1);
@@ -682,7 +684,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_splits_runtime_and_gem_libraries() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let user_file = engine.register_file(SourceFileInput {
             path: "/tmp/project/user.rb".into(),
             content: "class User; end".into(),
@@ -704,9 +706,9 @@ mod tests {
         let user = FullyQualifiedName::namespace(vec![constant("User")]);
         let string = FullyQualifiedName::namespace(vec![constant("String")]);
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
-        engine.replace_facts(
+        engine.update(
             user_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     user,
                     GraphNodeKind::Class,
@@ -716,9 +718,9 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             string_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     string,
                     GraphNodeKind::Class,
@@ -728,9 +730,9 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             auth_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     auth,
                     GraphNodeKind::Module,
@@ -741,7 +743,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let tree = AnalysisQuery::new(&engine).namespace_tree(true);
+        let tree = View::new(&engine).namespace_tree(true);
         assert_eq!(tree.classes[0].fqn, "User");
         assert_eq!(tree.libraries.len(), 2);
         assert_eq!(tree.libraries[0].id, LibrarySectionId::Runtime);
@@ -758,7 +760,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_shows_gem_reopen_of_stdlib_class_under_package() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let stub_string = engine.register_file(SourceFileInput {
             path: "/tmp/stubs/string.rb".into(),
             content: "class String; end".into(),
@@ -773,9 +775,9 @@ mod tests {
             LibraryPackageId::new("activesupport", "7.1.0"),
         );
         let string = FullyQualifiedName::namespace(vec![constant("String")]);
-        engine.replace_facts(
+        engine.update(
             stub_string,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     string.clone(),
                     GraphNodeKind::Class,
@@ -785,9 +787,9 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             as_string,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     string,
                     GraphNodeKind::Class,
@@ -798,7 +800,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let tree = AnalysisQuery::new(&engine).namespace_tree(true);
+        let tree = View::new(&engine).namespace_tree(true);
         assert_eq!(tree.libraries.len(), 2);
         assert_eq!(tree.libraries[0].id, LibrarySectionId::Runtime);
         assert_eq!(tree.libraries[0].classes[0].fqn, "String");
@@ -814,7 +816,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_nests_project_modules_by_fqn() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/project/platform.rb".into(),
             content: "module ExampleApp; module Platform; module API; end; end; end".into(),
@@ -828,9 +830,9 @@ mod tests {
             constant("Platform"),
             constant("API"),
         ]);
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![
                     GraphNodeFact::new(
                         root_namespace,
@@ -849,7 +851,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let tree = AnalysisQuery::new(&engine).namespace_tree(false);
+        let tree = View::new(&engine).namespace_tree(false);
         assert_eq!(tree.modules.len(), 1);
         assert_eq!(tree.modules[0].fqn, "ExampleApp");
         assert_eq!(tree.modules[0].modules.len(), 1);
@@ -863,7 +865,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_hides_generated_semantic_owners() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/user_spec.rb".into(),
             content: "RSpec.describe User do; end".into(),
@@ -873,9 +875,9 @@ mod tests {
             GeneratedOwnerId::new("rspec-ruby", "file:///tmp/user_spec.rb", "group:0:0")
                 .expect("test generated owner identity must be valid"),
         )]);
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     generated,
                     GraphNodeKind::Class,
@@ -885,7 +887,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert!(query.namespace_tree(false).classes.is_empty());
         assert!(query.namespace_tree(true).classes.is_empty());

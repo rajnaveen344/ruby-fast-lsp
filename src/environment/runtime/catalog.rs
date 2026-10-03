@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use futures::{stream, StreamExt};
 use ruby_fast_lsp_jruby_support::{
     JrubySeries, JrubyVersion, RubyCompatibilityVersion, VersionError,
@@ -8,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
-use crate::indexer::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 
@@ -92,39 +93,8 @@ pub struct RuntimeCatalog {
     pub projects: Vec<ProjectRuntimeCatalog>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectRuntimeStatus {
-    pub root: PathBuf,
-    pub mode: String,
-    pub implementation: Option<RuntimeImplementation>,
-    pub family: Option<String>,
-    pub engine_version: Option<String>,
-    pub compatibility_version: Option<String>,
-    pub executable: Option<PathBuf>,
-    pub java_home: Option<PathBuf>,
-    pub stub_overlay: Option<String>,
-    pub classpath_fingerprint_sha256: Option<String>,
-    pub indexing: crate::indexer::scheduling::status::ProjectIndexingSnapshot,
-    /// Backward-compatible projection for clients predating structured
-    /// indexing state. New clients must use `indexing`.
-    pub indexing_complete: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeStatus {
-    pub projects: Vec<ProjectRuntimeStatus>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct RuntimeDiscoverParams {}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeStatusParams {
-    pub project_root: Option<PathBuf>,
-}
 
 #[derive(Debug)]
 pub enum RuntimeMarkerError {
@@ -307,10 +277,10 @@ pub async fn discover_runtimes(
             },
         )
         .await
-        .expect(
-            "INVARIANT VIOLATED: runtime installation discovery failed its fixed resource admission. \
-             This is a bug because its bounded claim must fit the server-owned policy. \
-             Fix: keep runtime discovery within the configured production budget.",
+        .expect_invariant(
+            "runtime installation discovery failed its fixed resource admission",
+            "its bounded claim must fit the server-owned policy",
+            "keep runtime discovery within the configured production budget",
         );
     let mut runtimes = stream::iter(candidates)
         .map(|candidate| {
@@ -552,10 +522,10 @@ async fn bounded_version_output(
             bounded_version_output_admitted(executable, java_home),
         )
         .await
-        .expect(
-            "INVARIANT VIOLATED: a non-cancellable runtime probe failed resource admission. \
-             This is a bug because its fixed positive claim must fit the server-owned policy. \
-             Fix: keep runtime probes within the configured production budget.",
+        .expect_invariant(
+            "a non-cancellable runtime probe failed resource admission",
+            "its fixed positive claim must fit the server-owned policy",
+            "keep runtime probes within the configured production budget",
         )
 }
 
@@ -878,8 +848,8 @@ mod tests {
         with_process_clock(async {
             use std::os::unix::fs::PermissionsExt;
 
-            let governor = crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
-                crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
+            let governor = crate::utils::admission::IndexingResourceGovernor::new(
+                crate::utils::admission::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     64 * 1024 * 1024,
@@ -894,9 +864,9 @@ mod tests {
                 holder_governor
                     .run_async_with_resources(
                         "runtime probe contention holder",
-                        crate::indexer::scheduling::resources::IndexingWorkSpec::new(
+                        crate::utils::admission::IndexingWorkSpec::new(
                             None,
-                            crate::indexer::scheduling::resources::IndexingResourcePriority::Background,
+                            crate::utils::admission::IndexingResourcePriority::Background,
                             1,
                             64 * 1024 * 1024,
                             1,

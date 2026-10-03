@@ -1,8 +1,5 @@
-use std::collections::HashMap;
-
-use crate::core::storage::memory_estimate::{
-    map_table_bytes, string_heap_bytes, vec_payload_bytes,
-};
+use crate::core::storage::file_owned::{FileOwned, FileRow};
+use crate::core::storage::memory_estimate::string_heap_bytes;
 use crate::core::{SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,18 +26,18 @@ impl DiagnosticFact {
         message: impl Into<String>,
     ) -> Self {
         let code = code.into();
-        assert!(
+        invariant!(
             !code.is_empty(),
-            "INVARIANT VIOLATED: diagnostic fact code is empty. \
-             This is a bug because diagnostics must have stable machine-readable codes. \
-             Fix: pass a non-empty diagnostic code when creating DiagnosticFact."
+            what = "diagnostic fact code is empty",
+            why = "diagnostics must have stable machine-readable codes",
+            fix = "pass a non-empty diagnostic code when creating DiagnosticFact",
         );
         let message = message.into();
-        assert!(
+        invariant!(
             !message.is_empty(),
-            "INVARIANT VIOLATED: diagnostic fact message is empty. \
-             This is a bug because diagnostics without messages cannot guide users. \
-             Fix: pass a non-empty diagnostic message when creating DiagnosticFact."
+            what = "diagnostic fact message is empty",
+            why = "diagnostics without messages cannot guide users",
+            fix = "pass a non-empty diagnostic message when creating DiagnosticFact",
         );
         Self {
             range,
@@ -51,32 +48,32 @@ impl DiagnosticFact {
     }
 }
 
+impl FileRow for DiagnosticFact {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DiagnosticStore {
-    facts_by_file: HashMap<SourceFileId, Vec<DiagnosticFact>>,
+    facts: FileOwned<DiagnosticFact>,
 }
 
 impl DiagnosticStore {
     pub fn facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
-        self.facts_by_file
-            .get(&file_id)
-            .cloned()
-            .unwrap_or_default()
+        self.facts.rows(file_id).to_vec()
     }
 
     pub fn all_facts(&self) -> Vec<DiagnosticFact> {
-        self.facts_by_file
-            .values()
-            .flat_map(|facts| facts.iter().cloned())
-            .collect()
+        self.facts.iter().cloned().collect()
     }
 
     pub fn fact_count(&self) -> usize {
-        self.facts_by_file.values().map(Vec::len).sum()
+        self.facts.len()
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
-        self.facts_by_file.remove(&file_id);
+        self.facts.remove(file_id);
     }
 
     pub fn replace_file(
@@ -84,62 +81,32 @@ impl DiagnosticStore {
         file_id: SourceFileId,
         facts: impl IntoIterator<Item = DiagnosticFact>,
     ) {
-        self.remove_file(file_id);
-        for fact in facts {
-            assert!(
-                fact.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement diagnostic fact belongs to a different file id. \
-                 This is a bug because DiagnosticStore::replace_file must only receive facts for the target file. \
-                 Fix: partition diagnostic facts by SourceFileId before replacing."
-            );
-            self.facts_by_file.entry(file_id).or_default().push(fact);
-        }
-        self.sort_file(file_id);
-    }
-
-    fn sort_file(&mut self, file_id: SourceFileId) {
-        if let Some(facts) = self.facts_by_file.get_mut(&file_id) {
-            facts.sort_by(|left, right| {
-                (
-                    left.range.start_byte,
-                    left.range.end_byte,
-                    severity_rank(left.severity),
-                    left.code.as_str(),
-                    left.message.as_str(),
-                )
-                    .cmp(&(
-                        right.range.start_byte,
-                        right.range.end_byte,
-                        severity_rank(right.severity),
-                        right.code.as_str(),
-                        right.message.as_str(),
-                    ))
-            });
-        }
+        self.facts.replace(file_id, facts, |left, right| {
+            (
+                left.range.start_byte,
+                left.range.end_byte,
+                severity_rank(left.severity),
+                left.code.as_str(),
+                left.message.as_str(),
+            )
+                .cmp(&(
+                    right.range.start_byte,
+                    right.range.end_byte,
+                    severity_rank(right.severity),
+                    right.code.as_str(),
+                    right.message.as_str(),
+                ))
+        });
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        map_table_bytes(&self.facts_by_file)
-            + self
-                .facts_by_file
-                .values()
-                .map(|facts| {
-                    vec_payload_bytes(facts)
-                        + facts
-                            .iter()
-                            .map(|fact| {
-                                string_heap_bytes(&fact.code) + string_heap_bytes(&fact.message)
-                            })
-                            .sum::<usize>()
-                })
-                .sum::<usize>()
+        self.facts.estimated_heap_bytes(|fact| {
+            string_heap_bytes(&fact.code) + string_heap_bytes(&fact.message)
+        })
     }
 
     pub fn shrink_to_fit(&mut self) {
-        self.facts_by_file.shrink_to_fit();
-        for facts in self.facts_by_file.values_mut() {
-            facts.shrink_to_fit();
-        }
+        self.facts.shrink_to_fit();
     }
 }
 

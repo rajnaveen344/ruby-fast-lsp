@@ -12,9 +12,11 @@ and `docs/development/server-state.md`; follow their source links as needed.
 1. Identify the state owner and its lifetime: buffer, file facts, isolated project
    engine, process-wide immutable product, or editor projection.
 2. Keep parser/fact production in `indexer`, type derivation in `inference`, and
-   graph/query/diagnostic policy in `engine`. The LSP adapter converts context and
-   responses; it must not introduce a second semantic resolution policy.
-3. Read through `AnalysisQuery`/`TypeQuery`; write through the existing file-fact
+   graph/query/diagnostic policy in `engine`. Each editor feature in
+   `src/features/` converts context and responses behind `handle(server, params)`;
+   it must not introduce a second semantic resolution policy. `src/lsp/` only
+   routes protocol messages and runs the document lifecycle.
+3. Read through `View`; write through the existing file-fact
    lifecycle. Expose domain operations, not mutable stores. Engine and inference
    can cooperate inside the analysis crate while preserving engine state ownership.
 4. Preserve source snapshots, project isolation, lock lifetimes, resource

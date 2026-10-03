@@ -88,7 +88,7 @@ to `Object`.
 
 RBS declarations and bounded Ruby yield/forwarding relations become ordinary
 file-owned method facts. `ruby-analysis::inference` selects signatures and
-solves substitutions through `AnalysisQuery`. Only a canonical `RubyType` or a
+solves substitutions through `Semantics`. Only a canonical `RubyType` or a
 stable explained `Unknown` leaves that proof boundary.
 
 Hover, inlay hints, completion, chained dispatch, diagnostics, navigation, and

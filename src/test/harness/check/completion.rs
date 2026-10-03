@@ -5,20 +5,20 @@ use tower_lsp::lsp_types::{
 };
 
 use super::position_params;
-use crate::lsp::handlers::request;
-use crate::server::RubyLanguageServer;
+use crate::features::editing::completion;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 
 /// `<complete items="a,b" excludes="c">`: labels `a` and `b` are offered and
 /// `c` is not. Labels compare exactly.
-pub(super) async fn check_completion(server: &RubyLanguageServer, cursor: &Location, tag: &Tag) {
+pub(super) async fn check_completion(server: &Server, cursor: &Location, tag: &Tag) {
     let items = tag.list("items");
     let excludes = tag.list("excludes");
     assert!(
         !items.is_empty() || !excludes.is_empty(),
         "<complete> needs `items` or `excludes`"
     );
-    let response = request::handle_completion(
+    let response = completion::handle(
         server,
         CompletionParams {
             text_document_position: position_params(&cursor.uri, cursor.range.start),

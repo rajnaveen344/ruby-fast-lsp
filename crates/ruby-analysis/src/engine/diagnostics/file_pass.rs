@@ -1,24 +1,27 @@
 //! Single-file resolve pass: re-resolves one file's reference candidates and
 //! replaces its references, call outcomes, and diagnostics.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use super::grouped_methods::grouped_method_targets;
-use super::{constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache};
+use super::policy::{MethodAbsenceClaims, UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
+use super::{constant_name, MethodCallOutcomeCaches};
+use crate::core::storage::reference_store::ConstLookup;
+use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
-    ConstLookup, ConstantPath, DiagnosticFact, FullyQualifiedName, MethodReferenceAccess,
-    ReferenceFact, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
-    TypeInferenceOutcome, UnknownReason,
+    ConstantPath, FullyQualifiedName, MethodReferenceAccess, ReferenceFact, RubyMethod, RubyType,
+    SourceFileId, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 
-impl AnalysisEngine {
+impl Project {
     pub(in crate::engine) fn resolve_reference_candidates_in_file(
         &mut self,
         file_id: SourceFileId,
     ) {
-        let reference_candidates = self.facts.references.candidates.candidates_in_file(file_id);
+        let reference_candidates = self.uses.candidates().candidates_in_file(file_id);
         let mut unresolved =
             HashMap::from([(file_id, self.resolve_diagnostic_candidates_in_file(file_id))]);
         let mut method_fact_cache: HashMap<
@@ -29,8 +32,7 @@ impl AnalysisEngine {
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
         let mut method_lookup_chain_cache = MethodLookupChainCache::new();
-        let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
-        let mut method_chain_completeness_cache = MethodChainCompletenessCache::default();
+        let mut method_absence_claims = MethodAbsenceClaims::new(self);
         let mut resolved_refs = Vec::new();
         let mut resolved_call_outcomes = HashMap::new();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
@@ -41,16 +43,16 @@ impl AnalysisEngine {
                     resolved_refs.push((target, ReferenceFact::new(candidate.range, caller)));
                 }
                 StoredReferenceCandidateKind::Constant { lookup } => {
-                    let lookup = self.names.const_lookup(lookup).expect(
-                        "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
-                         This is a bug because stored reference candidates must only contain interned lookup ids. \
-                         Fix: intern constant lookups before inserting candidates.",
+                    let lookup = self.names.const_lookup(lookup).expect_invariant(
+                        "reference candidate points to missing constant lookup",
+                        "stored reference candidates must only contain interned lookup ids",
+                        "intern constant lookups before inserting candidates",
                     );
                     let parts = lookup.path.to_vec();
-                    let context = self.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
-                         This is a bug because constant lookups must only store interned context FQN ids. \
-                         Fix: intern lookup contexts before inserting candidates.",
+                    let context = self.names.fqn(lookup.context).expect_invariant(
+                        "constant lookup points to missing context FQN id",
+                        "constant lookups must only store interned context FQN ids",
+                        "intern lookup contexts before inserting candidates",
                     );
                     if let Some(target) = self.resolve_constant_reference(
                         &parts,
@@ -66,10 +68,8 @@ impl AnalysisEngine {
                         unresolved
                             .entry(file_id)
                             .or_default()
-                            .push(DiagnosticFact::new(
+                            .push(UNRESOLVED_CONSTANT.fact(
                                 candidate.range,
-                                crate::core::DiagnosticSeverity::Error,
-                                "unresolved-constant",
                                 format!("Unresolved constant `{}`", constant_name(&parts)),
                             ));
                     }
@@ -114,6 +114,19 @@ impl AnalysisEngine {
                         }
                         continue;
                     }
+                    let safe_navigation = diagnostics
+                        .as_deref()
+                        .is_some_and(|diagnostics| diagnostics.safe_navigation);
+                    let Some((effective_receiver_type, nil_skips_dispatch)) =
+                        Self::safe_navigation_receiver(
+                            &mut resolved_call_outcomes,
+                            call_expression_range,
+                            safe_navigation,
+                            effective_receiver_type,
+                        )
+                    else {
+                        continue;
+                    };
                     let grouped_receiver_type = effective_receiver_type
                         .as_ref()
                         .filter(|ruby_type| matches!(ruby_type, RubyType::Union(_)))
@@ -141,7 +154,7 @@ impl AnalysisEngine {
                                 );
                             }
                             if let Some(expression_range) = call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     self.call_expression_outcome_from_grouped_resolution(
@@ -149,6 +162,7 @@ impl AnalysisEngine {
                                         method,
                                         &mut call_outcome_caches,
                                     ),
+                                    nil_skips_dispatch,
                                 );
                             }
                         } else if let Some(diagnostics) = diagnostics.as_deref() {
@@ -156,17 +170,17 @@ impl AnalysisEngine {
                                 receiver_type,
                                 method,
                                 diagnostics,
-                                &unresolved_method_edge_sources,
-                                &mut method_chain_completeness_cache,
+                                &mut method_absence_claims,
                                 &mut unresolved,
                             );
                             if let Some(expression_range) = call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     TypeInferenceOutcome::unknown(
                                         UnknownReason::UnresolvedMethodReturn,
                                     ),
+                                    nil_skips_dispatch,
                                 );
                             }
                         }
@@ -182,16 +196,19 @@ impl AnalysisEngine {
                             self.proven_receiver_namespace(receiver_type, allow_unindexed_owner)
                         else {
                             if let Some(expression_range) = call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver),
+                                    nil_skips_dispatch,
                                 );
                             }
                             continue;
                         };
-                        let owner_kind = owner_fqn.namespace_kind().expect(
-                            "INVARIANT VIOLATED: a proven receiver namespace has no namespace kind. This is a bug because type-to-namespace conversion must return a Namespace FQN. Fix: keep receiver proof conversion in AnalysisQuery::type_to_namespace.",
+                        let owner_kind = owner_fqn.namespace_kind().expect_invariant(
+                            "a proven receiver namespace has no namespace kind",
+                            "type-to-namespace conversion must return a Namespace FQN",
+                            "keep receiver proof conversion in View::type_to_namespace",
                         );
                         let root = self
                             .names
@@ -205,10 +222,10 @@ impl AnalysisEngine {
                     } else {
                         (owner, owner_kind)
                     };
-                    let owner_lookup = self.names.const_lookup(owner_lookup_id).expect(
-                        "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
-                         This is a bug because stored reference candidates must only contain interned lookup ids. \
-                         Fix: intern constant lookups before inserting candidates.",
+                    let owner_lookup = self.names.const_lookup(owner_lookup_id).expect_invariant(
+                        "method reference candidate points to missing owner lookup",
+                        "stored reference candidates must only contain interned lookup ids",
+                        "intern constant lookups before inserting candidates",
                     );
                     let owner = owner_lookup.path.to_vec();
                     let owner_fqn = FullyQualifiedName::namespace_with_kind(owner, owner_kind);
@@ -217,7 +234,7 @@ impl AnalysisEngine {
                     let mut fact = method_fact_cache
                         .entry((owner_fqn.clone(), method, is_super, reflects_instance))
                         .or_insert_with(|| {
-                            let query = AnalysisQuery::new(self);
+                            let query = View::new(self);
                             if is_super {
                                 query.resolve_super_method_reference(&owner_fqn, &method)
                             } else if reflects_instance {
@@ -238,14 +255,14 @@ impl AnalysisEngine {
                     if access == MethodReferenceAccess::Normal
                         && matches!(fact, MethodLookupResult::Ambiguous { .. })
                     {
-                        if let Some(source_ordered) = AnalysisQuery::new(self)
+                        if let Some(source_ordered) = View::new(self)
                             .source_ordered_top_level_method_reference(
                                 &owner_fqn,
                                 &method,
                                 candidate.range,
                             )
                         {
-                            fact = MethodLookupResult::Unique(source_ordered);
+                            fact = MethodLookupResult::Found(source_ordered);
                         }
                     }
                     if let Some(expression_range) = call_expression_range {
@@ -257,10 +274,11 @@ impl AnalysisEngine {
                             &fact,
                             &mut call_outcome_caches,
                         );
-                        Self::insert_resolved_call_outcome(
+                        Self::insert_dispatched_call_outcome(
                             &mut resolved_call_outcomes,
                             expression_range,
                             outcome,
+                            nil_skips_dispatch,
                         );
                     }
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {
@@ -292,7 +310,7 @@ impl AnalysisEngine {
                                 }
                             }
                         }
-                    } else if fact.is_missing() {
+                    } else if fact.has_no_target() {
                         let namespace_exists = *method_namespace_exists_cache
                             .entry(owner_fqn.clone())
                             .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn));
@@ -314,15 +332,7 @@ impl AnalysisEngine {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
-                            let explicit_absence =
-                                self.method_absence_has_explicit_contract(&owner_fqn, method);
-                            if !explicit_absence
-                                && self.method_lookup_chain_is_incomplete_cached(
-                                    &owner_fqn,
-                                    &unresolved_method_edge_sources,
-                                    &mut method_chain_completeness_cache,
-                                )
-                            {
+                            if method_absence_claims.suppresses(self, &owner_fqn, method) {
                                 continue;
                             }
                             let suggestion = namespace_exists
@@ -348,46 +358,18 @@ impl AnalysisEngine {
                             if let Some(suggestion) = suggestion {
                                 message.push_str(&format!(". Did you mean `{}`?", suggestion));
                             }
-                            unresolved
-                                .entry(file_id)
-                                .or_default()
-                                .push(DiagnosticFact::new(
-                                    diagnostics.diagnostic_range,
-                                    crate::core::DiagnosticSeverity::Warning,
-                                    "unresolved-method",
-                                    message,
-                                ));
+                            unresolved.entry(file_id).or_default().push(
+                                UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message),
+                            );
                         }
                     }
                 }
             }
         }
 
-        self.facts
-            .references
-            .resolved
-            .replace_file(file_id, resolved_refs);
+        self.uses.replace_resolved_file(file_id, resolved_refs);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
-        let mut diagnostics = self
-            .facts
-            .diagnostics
-            .resolved
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter(|fact| fact.code != "unresolved-constant")
-            .filter(|fact| fact.code != "unresolved-method")
-            .filter(|fact| fact.code != "unsupported-runtime-api")
-            .filter(|fact| fact.code != "wrong-arity")
-            .filter(|fact| fact.code != "unknown-kwarg")
-            .filter(|fact| fact.code != "missing-kwarg")
-            .filter(|fact| fact.code != "raise-non-exception")
-            .filter(|fact| fact.code != "bad-splat")
-            .filter(|fact| fact.code != "nil-call")
-            .collect::<Vec<_>>();
-        diagnostics.extend(unresolved.remove(&file_id).unwrap_or_default());
-        self.facts
-            .diagnostics
-            .resolved
-            .replace_file(file_id, diagnostics);
+        self.diagnostics
+            .rebuild_resolved(file_id, unresolved.remove(&file_id).unwrap_or_default());
     }
 }

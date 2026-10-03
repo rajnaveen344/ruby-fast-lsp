@@ -5,6 +5,7 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeKind, MethodFact, MethodParamFact, MethodParamKind,
     MethodReferenceAccess, NamespaceKind, ReferenceCandidate, RubyMethod, TypeFact, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
 
 use super::names::{
@@ -93,31 +94,35 @@ impl FactCollector {
         };
 
         if let Some((_old_name, old_range)) = define_method_name_and_range(self, node, 1) {
-            self.facts.references.push(ReferenceCandidate::method(
-                old_range,
-                crate::core::MethodReferenceCandidate {
-                    owner: self.scope_tracker.get_ns_stack(),
-                    owner_kind: self.scope_tracker.current_macro_definition_context(),
-                    method: old_method,
-                    is_super: false,
-                    access: MethodReferenceAccess::Normal,
-                    caller: self.scope_tracker.current_method_fqn().cloned(),
-                    call_expression_range: None,
-                    preferred_definition_range: None,
-                    diagnostics: crate::core::MethodReferenceDiagnostics {
-                        diagnostic_range: old_range,
-                        receiver_label: None,
-                        receiver_expression_range: None,
-                        receiver_type: None,
-                        diagnose_unresolved: false,
-                        allow_unindexed_owner: false,
-                        signature: None,
+            self.facts
+                .analysis
+                .reference_candidates
+                .push(ReferenceCandidate::method(
+                    old_range,
+                    crate::core::MethodReferenceCandidate {
+                        owner: self.scope_tracker.method_definition_context().0,
+                        owner_kind: self.scope_tracker.current_macro_definition_context(),
+                        method: old_method,
+                        is_super: false,
+                        access: MethodReferenceAccess::Normal,
+                        caller: self.scope_tracker.current_method_fqn().cloned(),
+                        call_expression_range: None,
+                        preferred_definition_range: None,
+                        diagnostics: crate::core::MethodReferenceDiagnostics {
+                            diagnostic_range: old_range,
+                            receiver_label: None,
+                            receiver_expression_range: None,
+                            receiver_type: None,
+                            diagnose_unresolved: false,
+                            allow_unindexed_owner: false,
+                            safe_navigation: false,
+                            signature: None,
+                        },
                     },
-                },
-            ));
+                ));
         }
 
-        let namespace = self.scope_tracker.get_ns_stack();
+        let namespace = self.scope_tracker.method_definition_context().0;
         let owner_kind = self.scope_tracker.current_macro_definition_context();
         let range = self.direct_range(&node.location());
         self.direct_push_method_fact_with_visibility(
@@ -131,17 +136,23 @@ impl FactCollector {
         let old_fqn = FullyQualifiedName::method(namespace.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
             namespace,
-            RubyMethod::new(&new_name).expect(
-                "INVARIANT VIOLATED: alias_method new method became invalid after validation. \
-                 This is a bug because the same string was already accepted. \
-                 Fix: keep alias_method validation single-sourced.",
+            RubyMethod::new(&new_name).expect_invariant(
+                "alias_method new method became invalid after validation",
+                "the same string was already accepted",
+                "keep alias_method validation single-sourced",
             ),
         );
         let old_subject = TypeSubject::MethodReturn(old_fqn);
-        let Some(old_type) = self.facts.types.facts_for(&old_subject).into_iter().next() else {
+        let Some(old_type) = self
+            .facts
+            .flow_types
+            .facts_for(&old_subject)
+            .into_iter()
+            .next()
+        else {
             return;
         };
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(new_fqn),
             old_type.ruby_type,
             range,
@@ -171,7 +182,7 @@ impl FactCollector {
             if reader {
                 if let Ok(method) = RubyMethod::new(&name) {
                     self.direct_push_method_fact(
-                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.method_definition_context().0,
                         owner_kind,
                         method,
                         range,
@@ -182,7 +193,7 @@ impl FactCollector {
             if writer {
                 if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
                     self.direct_push_method_fact(
-                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.method_definition_context().0,
                         owner_kind,
                         method,
                         range,
@@ -201,7 +212,7 @@ impl FactCollector {
         let namespace = node
             .receiver()
             .and_then(|receiver| self.resolve_constant_receiver_namespace(&receiver))
-            .unwrap_or_else(|| self.scope_tracker.get_ns_stack());
+            .unwrap_or_else(|| self.scope_tracker.method_definition_context().0);
 
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = direct_attr_name_and_range(self, &arg) else {
@@ -261,13 +272,13 @@ impl FactCollector {
             let Ok(method) = RubyMethod::new(&name) else {
                 continue;
             };
-            let namespace = self.scope_tracker.get_ns_stack();
+            let namespace = self.scope_tracker.method_definition_context().0;
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let instance_owner =
                 FullyQualifiedName::namespace_with_kind(namespace.clone(), NamespaceKind::Instance);
             let range = self
                 .facts
-                .direct
+                .analysis
                 .methods
                 .iter()
                 .find(|fact| fact.fqn == fqn && fact.owner == instance_owner)
@@ -275,7 +286,12 @@ impl FactCollector {
                 .unwrap_or(fallback_range);
             let owner =
                 FullyQualifiedName::namespace_with_kind(namespace, NamespaceKind::Singleton);
-            self.push_direct_method_fact(MethodFact::new(fqn, owner, range));
+            // Ruby copies the method as a public singleton method and makes
+            // the instance method private.
+            self.push_direct_method_fact(
+                MethodFact::new(fqn, owner, range).with_visibility(MethodVisibility::Public),
+            );
+            self.direct_set_method_visibility(method, MethodVisibility::Private, fallback_range);
         }
     }
 
@@ -283,13 +299,15 @@ impl FactCollector {
         let Some(arguments) = node.arguments() else {
             return;
         };
-        let source = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
-        let in_singleton = self.scope_tracker.in_singleton();
+        let source =
+            FullyQualifiedName::namespace(self.scope_tracker.method_definition_context().0);
+        let in_singleton =
+            self.scope_tracker.current_macro_definition_context() == NamespaceKind::Singleton;
         let source_for_edge = if in_singleton {
-            source.to_singleton_namespace().expect(
-                "INVARIANT VIOLATED: singleton class mixin source could not convert to singleton namespace. \
-                 This is a bug because class << self can only appear inside a namespace. \
-                 Fix: guard singleton mixin indexing to namespace scopes.",
+            source.to_singleton_namespace().expect_invariant(
+                "singleton class mixin source could not convert to singleton namespace",
+                "class << self can only appear inside a namespace",
+                "guard singleton mixin indexing to namespace scopes",
             )
         } else {
             source.clone()

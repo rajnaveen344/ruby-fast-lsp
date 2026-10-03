@@ -6,17 +6,19 @@ mod project_context;
 mod registry;
 mod responses;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
+use crate::invariant::ExpectInvariant;
 pub use dispatch::call_context::resolved_call_for_stack;
 pub(crate) use patches::types::analysis_ruby_type_from_extension;
 pub(crate) use project_context::{
     ExtensionApplicabilityFingerprint, ProjectContextSeed, ProjectContextSnapshot,
 };
 pub use registry::handle::ExtensionRegistryHandle;
+pub(crate) use registry::seed::ExtensionSemanticSeed;
 pub(crate) use registry::state::ExtensionApplicabilitySnapshot;
 pub use registry::status::{
-    ExtensionStatusParams, ExtensionStatusReport, ExtensionStatusResponse, ExtensionTelemetryReport,
+    ExtensionStat, ExtensionStatusParams, ExtensionStatusReport, ExtensionStatusResponse,
 };
 
 use std::path::Path;
@@ -79,11 +81,11 @@ pub fn validate_extension_package(path: &Path) -> Result<ExtensionStatusReport, 
             packages.len()
         ));
     }
-    let extension = load_wasm_extension(
-        packages
-            .pop()
-            .expect("INVARIANT VIOLATED: package length checked above"),
-    )
+    let extension = load_wasm_extension(packages.pop().expect_invariant(
+        "extension package list is empty",
+        "the length was checked to be one above",
+        "keep the length check before pop",
+    ))
     .map_err(|err| err.to_string())?;
     Ok(extension.status_report())
 }

@@ -1,13 +1,13 @@
 //! Cross-file rename tests for classes, modules, and value constants.
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::{InitializeParams, OneOf, Position, PrepareRenameResponse, Range};
 use tower_lsp::LanguageServer;
 
 #[tokio::test]
 async fn initialization_advertises_prepare_rename() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let initialized = server
         .initialize(InitializeParams::default())
         .await

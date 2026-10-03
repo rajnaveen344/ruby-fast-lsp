@@ -51,8 +51,8 @@ async fn local_variable_completion_follows_unsaved_typing() {
 
 #[tokio::test]
 async fn completion_waits_for_the_in_flight_document_edit() {
-    use crate::indexer::scheduling::test_schedule::Point;
-    use crate::lsp::capabilities::indexing::handle_did_change;
+    use crate::loader::scheduling::test_schedule::Point;
+    use crate::lsp::lifecycle::indexing::handle_did_change;
     use tower_lsp::lsp_types::{
         DidChangeTextDocumentParams, TextDocumentContentChangeEvent,
         VersionedTextDocumentIdentifier,
@@ -63,8 +63,7 @@ async fn completion_waits_for_the_in_flight_document_edit() {
     let uri = crate::test::harness::fixture_uri("/locals.rb");
     let mut pause = editor
         .server()
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::DocumentSourceUpdated, uri.to_file_path().unwrap());
     let server = editor.server().clone();
     let edit = tokio::spawn(async move {

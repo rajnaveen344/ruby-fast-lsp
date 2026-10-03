@@ -8,11 +8,13 @@ feature tests are internal Rust tests in `integration/`; Cargo runs them with
 | --- | --- |
 | One indexed Ruby snippet | `harness::check()` with inline tags |
 | Static cross-file behavior | `harness::check_multi_file()` |
-| Open/edit/save/close, reindexing, or delayed work | `harness::FakeEditor` |
+| Static behavior that needs bundled core (`StandardError`, `Enumerable`, ...) | `harness::check_project()`, which cold-indexes the fixtures as a disk workspace |
+| Open/edit/save/close, reindexing, or delayed work | `harness::FakeEditor`; schedule-gated cases live in `integration/lifecycle/` |
 | Pure graph, inference, parser, or contract behavior | A focused unit test beside the owning code |
 | Public LSP initialization / extension integration | [crates/lsp-test-harness](../../crates/lsp-test-harness/) |
 | Real CLI exit code and serialized output | [cli/process.rs](cli/process.rs) |
-| Generated semantic/edit scenarios and controlled schedules | [simulation guide](../../docs/development/simulation.md) |
+| No panics, edit/fresh-index agreement, open-order independence, clean code over real Ruby | [robustness/](robustness/mod.rs), corpus in `fixtures/robustness/` |
+| Inference scorecard and real-project precision | [acceptance/](acceptance/mod.rs) |
 
 ## CLI test organization
 
@@ -86,11 +88,8 @@ cargo test --locked --workspace
 cargo test --locked --test check_cli
 ```
 
-The workspace suite includes ordinary simulator cases with no ignored tests.
-Explicit scale and read-only corpus campaigns use the opt-in `simulation` binary;
-see the [commands and boundaries](../../docs/development/simulation.md#explicit-campaigns).
-The independent validation workflow runs both synthetic campaigns and records an unselected corpus
-as not run. Do not add an ignore to conceal a failing or flaky regression.
+The workspace suite has no ignored tests. Do not add an ignore to conceal a
+failing or flaky regression.
 
 ## What FakeEditor observes
 
@@ -135,5 +134,5 @@ implementation is not.
 [real_project_precision.toml](../../support/type_inference/real_project_precision.toml)
 are reviewed inference expectations. Their report tests run in the ordinary
 workspace suite and explicitly in the validation workflow. Fixture size, code coverage,
-and passing counts do not measure how many future user defects the simulator
+and passing counts do not measure how many future user defects the suite
 will detect. Keep unsupported or unexercised forms visible.

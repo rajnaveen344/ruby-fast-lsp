@@ -1,8 +1,10 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant, RubyType,
+    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant,
 };
+use crate::indexer::documents::scope_rules::alias_reopen_target;
 use crate::indexer::mixin_ref_from_node;
 use crate::indexer::LocalScopeKind as LVScopeKind;
+use crate::invariant::ExpectInvariant;
 use log::error;
 use ruby_prism::ClassNode;
 
@@ -28,47 +30,22 @@ impl FactCollector {
         let superclass = node.superclass().and_then(|superclass| {
             let reference = mixin_ref_from_node(&superclass)?;
             let super_range = self.direct_range(&superclass.location());
-            let target = self.direct_resolve_namespace_from(
+            let target = self.declared_resolve_namespace_from(
                 &reference.parts,
                 reference.absolute,
                 &lexical_context,
             );
             Some((reference, super_range, target))
         });
-        let mut reopened_target = mixin_ref_from_node(&node.constant_path())
-            .and_then(|reference| {
-                self.resolve_declaration_constant_value_type_from(
-                    &reference.parts,
-                    reference.absolute,
-                    &lexical_context,
-                )
-            })
-            .and_then(|(_constant, ruby_type)| match ruby_type {
-                RubyType::ClassReference(target) => target.to_instance_namespace(),
-                RubyType::Class(_)
-                | RubyType::Module(_)
-                | RubyType::ModuleReference(_)
-                | RubyType::Literal(_)
-                | RubyType::Array(_)
-                | RubyType::Hash(_, _)
-                | RubyType::Shape(_)
-                | RubyType::Union(_)
-                | RubyType::Unknown => None,
-            });
-        if has_explicit_superclass
-            && superclass
+        let reopened_target = alias_reopen_target(
+            &node.constant_path(),
+            GraphNodeKind::Class,
+            superclass
                 .as_ref()
-                .and_then(|(_, _, target)| target.as_ref())
-                == reopened_target.as_ref()
-        {
-            reopened_target = None;
-        }
-        // A prior index of this same `class Name` leaves a ClassReference for
-        // `Name`. That must not be treated as an alias reopen: skipping the
-        // graph node would let replace_facts delete the only class identity.
-        if reopened_target.as_ref() == Some(&syntactic_fqn) {
-            reopened_target = None;
-        }
+                .and_then(|(_, _, target)| target.as_ref()),
+            &lexical_context,
+            |candidates| self.alias_value_type(candidates),
+        );
 
         // Handle namespace setup
         if let Some(target) = &reopened_target {
@@ -90,9 +67,12 @@ impl FactCollector {
         let name_range = self
             .direct_terminal_name_range(&node.constant_path().location(), node.name().as_slice());
         if reopened_target.is_none() {
-            assert_eq!(
-                fqn, syntactic_fqn,
-                "INVARIANT VIOLATED: syntactic class scope differs from the scope used for its declaration. This is a bug because both scopes were derived from the same Prism constant path. Fix: keep class declaration scope construction single-sourced."
+            invariant_eq!(
+                fqn,
+                syntactic_fqn,
+                what = "syntactic class scope differs from the scope used for its declaration",
+                why = "both scopes were derived from the same Prism constant path",
+                fix = "keep class declaration scope construction single-sourced",
             );
             self.direct_push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
         }
@@ -116,7 +96,7 @@ impl FactCollector {
                     );
                 }
             } else {
-                self.facts.direct.unresolved_graph_edges.push(
+                self.facts.analysis.unresolved_graph_edges.push(
                     crate::core::UnresolvedGraphEdgeFact::new(
                         fqn.clone(),
                         superclass_ref.parts,
@@ -131,10 +111,10 @@ impl FactCollector {
             && !has_explicit_superclass
             && class_implicitly_inherits_object(&fqn)
         {
-            let object = RubyConstant::new("Object").expect(
-                "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
-                 This is a bug because Ruby's implicit class superclass must be representable. \
-                 Fix: update RubyConstant validation or implicit superclass construction.",
+            let object = RubyConstant::new("Object").expect_invariant(
+                "Object is not a valid Ruby constant",
+                "ruby's implicit class superclass must be representable",
+                "update RubyConstant validation or implicit superclass construction",
             );
             self.direct_push_edge_with_provenance(
                 fqn.clone(),
@@ -149,13 +129,9 @@ impl FactCollector {
         // Setup local variable scope
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 
-        // Get class name for scope tree
-        let class_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        self.document.variable_scopes_mut().enter_scope(
-            LVScopeKind::Constant,
-            body_range,
-            Some(class_name),
-        );
+        self.document
+            .variable_scopes_mut()
+            .enter_scope(LVScopeKind::Constant, body_range);
         true
     }
 

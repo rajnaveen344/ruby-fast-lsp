@@ -1,8 +1,9 @@
 use ruby_prism::{CallNode, Node};
 
+use crate::core::MethodReceiver;
 use crate::core::RubyType;
 use crate::core::{NamespaceKind, RubyConstant, RubyMethod};
-use crate::indexer::{queries::syntax, Identifier, LVScopeKind, MethodReceiver};
+use crate::indexer::{queries::syntax, Identifier, LVScopeKind};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 

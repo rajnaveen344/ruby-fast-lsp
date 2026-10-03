@@ -6,6 +6,7 @@ pub(in crate::indexer::fact_collector) struct CollectionOptions {
     pub(in crate::indexer::fact_collector) infer_expression_receivers: bool,
     pub(in crate::indexer::fact_collector) infer_call_outcomes: bool,
     pub(in crate::indexer::fact_collector) diagnostics_enabled: bool,
+    pub(in crate::indexer::fact_collector) collect_call_references: bool,
 }
 
 impl Default for CollectionOptions {
@@ -16,6 +17,7 @@ impl Default for CollectionOptions {
             infer_expression_receivers: true,
             infer_call_outcomes: true,
             diagnostics_enabled: true,
+            collect_call_references: true,
         }
     }
 }
@@ -41,6 +43,15 @@ impl FactCollector {
         self.options.infer_expression_receivers = false;
         self.options.resolve_analysis_method_returns = false;
         self.options.infer_call_outcomes = false;
+        self
+    }
+
+    /// Skip method-call reference candidates for sources whose references
+    /// composition discards. Call outcomes and deferred receivers recorded
+    /// alongside a candidate are read only by body inference, which such
+    /// sources also skip.
+    pub fn without_call_references(mut self) -> Self {
+        self.options.collect_call_references = false;
         self
     }
 

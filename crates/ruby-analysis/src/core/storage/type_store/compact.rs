@@ -1,6 +1,7 @@
 //! Compact arena ids and stored fact records behind the type store.
 
 use super::{TextRange, TypeProvenance};
+use crate::invariant::ExpectInvariant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct StoredTypeFact {
@@ -17,9 +18,11 @@ impl StoredTypeSubject {
     const EXPRESSION_TAG: u32 = 1 << 31;
 
     pub(super) fn interned(id: TypeSubjectId) -> Self {
-        assert!(
+        invariant!(
             id.0 < Self::EXPRESSION_TAG,
-            "INVARIANT VIOLATED: the non-expression type subject interner exceeded the compact 31-bit id space. This is a bug because the high bit distinguishes range-owned expression facts. Fix: widen StoredTypeSubject and every stored subject reference together before interning 2^31 subjects."
+            what = "type subject interner exceeded the 31-bit id space",
+            why = "the high bit marks range-owned expression facts",
+            fix = "widen StoredTypeSubject and its references together",
         );
         Self(id.0)
     }
@@ -32,9 +35,11 @@ impl StoredTypeSubject {
         if self.0 == Self::EXPRESSION_TAG {
             None
         } else {
-            assert!(
+            invariant!(
                 self.0 < Self::EXPRESSION_TAG,
-                "INVARIANT VIOLATED: stored type subject has an unknown compact tag. This is a bug because only interned ids and the expression tag are valid. Fix: construct stored subjects through StoredTypeSubject::interned or StoredTypeSubject::expression."
+                what = "stored type subject has an unknown compact tag",
+                why = "only interned ids and the expression tag are valid",
+                fix = "construct subjects via StoredTypeSubject::interned or ::expression",
             );
             Some(TypeSubjectId(self.0))
         }
@@ -50,10 +55,10 @@ pub(super) struct TypeFactId(u32);
 
 impl TypeFactId {
     pub(super) fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: type fact arena exceeded u32 ids. This is a bug because the \
-             retained type indexes use bounded compact ids. Fix: widen TypeFactId and every \
-             stored type-fact index together before retaining more than u32::MAX facts.",
+        Self(u32::try_from(index).expect_invariant(
+            "type fact arena exceeded u32 ids",
+            "type indexes use compact u32 ids",
+            "widen TypeFactId and every stored type-fact index together",
         ))
     }
 
@@ -67,11 +72,10 @@ pub(super) struct TypeSubjectId(u32);
 
 impl TypeSubjectId {
     pub(super) fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: type subject interner exceeded u32 ids. This is a bug because \
-             every stored type fact refers to a compact subject id. Fix: widen TypeSubjectId \
-             and every stored subject reference together before interning more than u32::MAX \
-             subjects.",
+        Self(u32::try_from(index).expect_invariant(
+            "type subject interner exceeded u32 ids",
+            "type facts refer to compact subject ids",
+            "widen TypeSubjectId and every subject reference together",
         ))
     }
 
@@ -85,11 +89,10 @@ pub(crate) struct RubyTypeId(u32);
 
 impl RubyTypeId {
     pub(super) fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: Ruby type interner exceeded u32 ids. This is a bug because \
-             every stored type fact refers to a compact Ruby type id. Fix: widen RubyTypeId \
-             and every stored Ruby type reference together before interning more than \
-             u32::MAX distinct types.",
+        Self(u32::try_from(index).expect_invariant(
+            "Ruby type interner exceeded u32 ids",
+            "type facts refer to compact Ruby type ids",
+            "widen RubyTypeId and every Ruby type reference together",
         ))
     }
 

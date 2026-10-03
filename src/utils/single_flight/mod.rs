@@ -1,4 +1,6 @@
+use crate::invariant::ExpectInvariant;
 use parking_lot::{Condvar, Mutex};
+use ruby_analysis::stats::{self, StatsRegistry, StatsSnapshot};
 use std::collections::HashMap;
 use std::future::Future;
 use std::hash::Hash;
@@ -41,9 +43,11 @@ impl<V> FlightState<V> {
     }
 
     fn complete(&self, result: SharedResult<V>) {
-        assert!(
+        invariant!(
             self.result.set(result).is_ok(),
-            "INVARIANT VIOLATED: a single-flight producer completed the same key more than once. This is a bug because exactly one producer owns each flight. Fix: inspect producer admission and completion ownership."
+            what = "a single-flight producer completed the same key more than once",
+            why = "exactly one producer owns each flight",
+            fix = "inspect producer admission and completion ownership",
         );
         self.ready.notify_waiters();
     }
@@ -57,36 +61,27 @@ pub struct SingleFlightCache<K, V> {
     counters: Arc<SingleFlightCounters>,
 }
 
-#[derive(Debug, Default)]
-struct SingleFlightCounters {
-    lookups: AtomicU64,
-    hits: AtomicU64,
-    joined_flights: AtomicU64,
-    misses: AtomicU64,
-    producers: AtomicU64,
-    failures: AtomicU64,
-    evictions: AtomicU64,
-    producer_wall_ns: AtomicU64,
-    producer_max_wall_ns: AtomicU64,
-    consumer_wait_wall_ns: AtomicU64,
-    consumer_max_wait_wall_ns: AtomicU64,
+ruby_analysis::stat_set! {
+    /// Reuse statistics shared by every single-flight cache shape. `Entries`
+    /// and `RetainedWeightBytes` are gauges observed at snapshot time.
+    pub enum SingleFlightStat {
+        Entries = "entries",
+        RetainedWeightBytes = "retained_weight_bytes",
+        Lookups = "lookups",
+        Hits = "hits",
+        JoinedFlights = "joined_flights",
+        Misses = "misses",
+        Producers = "producers",
+        Failures = "failures",
+        Evictions = "evictions",
+        ProducerWallNs = "producer_wall_ns",
+        ProducerMaxWallNs = "producer_max_wall_ns": max,
+        ConsumerWaitWallNs = "consumer_wait_wall_ns",
+        ConsumerMaxWaitWallNs = "consumer_max_wait_wall_ns": max,
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SingleFlightSnapshot {
-    pub entries: usize,
-    pub lookups: u64,
-    pub hits: u64,
-    pub joined_flights: u64,
-    pub misses: u64,
-    pub producers: u64,
-    pub failures: u64,
-    pub evictions: u64,
-    pub producer_wall_ns: u64,
-    pub producer_max_wall_ns: u64,
-    pub consumer_wait_wall_ns: u64,
-    pub consumer_max_wait_wall_ns: u64,
-}
+type SingleFlightCounters = StatsRegistry<SingleFlightStat>;
 
 impl<K, V> Clone for SingleFlightCache<K, V> {
     fn clone(&self) -> Self {
@@ -116,7 +111,7 @@ where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<V, String>> + Send + 'static,
     {
-        self.counters.lookups.fetch_add(1, Ordering::Relaxed);
+        self.counters.increment(SingleFlightStat::Lookups);
         let (cell, owns_producer) = {
             use std::collections::hash_map::Entry;
 
@@ -124,20 +119,20 @@ where
             match entries.entry(key.clone()) {
                 Entry::Occupied(entry) => {
                     if entry.get().get().is_some() {
-                        self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Hits);
                     } else {
-                        self.counters.joined_flights.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::JoinedFlights);
                     }
                     (entry.get().clone(), false)
                 }
                 Entry::Vacant(entry) => {
-                    self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                    self.counters.increment(SingleFlightStat::Misses);
                     (entry.insert(Arc::new(FlightState::new())).clone(), true)
                 }
             }
         };
         if owns_producer {
-            self.counters.producers.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Producers);
             let producer_started = Instant::now();
             let producer_task = tokio::spawn(producer());
             let producer_cell = cell.clone();
@@ -151,9 +146,9 @@ where
                         "single-flight producer task failed: {error}"
                     ))),
                 };
-                counters.record_producer_wall(producer_started.elapsed());
+                record_producer_wall(&counters, producer_started.elapsed());
                 if result.is_err() {
-                    counters.failures.fetch_add(1, Ordering::Relaxed);
+                    counters.increment(SingleFlightStat::Failures);
                 }
                 producer_cell.complete(result);
                 if producer_cell.get().is_some_and(Result::is_err) {
@@ -169,8 +164,7 @@ where
         }
         let wait_started = Instant::now();
         let result = cell.wait().await;
-        self.counters
-            .record_consumer_wait_wall(wait_started.elapsed());
+        record_consumer_wait_wall(&self.counters, wait_started.elapsed());
         result.map_err(|error| error.as_ref().clone())
     }
 
@@ -182,24 +176,10 @@ where
         self.entries.lock().is_empty()
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
-        SingleFlightSnapshot {
-            entries: self.len(),
-            lookups: self.counters.lookups.load(Ordering::Relaxed),
-            hits: self.counters.hits.load(Ordering::Relaxed),
-            joined_flights: self.counters.joined_flights.load(Ordering::Relaxed),
-            misses: self.counters.misses.load(Ordering::Relaxed),
-            producers: self.counters.producers.load(Ordering::Relaxed),
-            failures: self.counters.failures.load(Ordering::Relaxed),
-            evictions: self.counters.evictions.load(Ordering::Relaxed),
-            producer_wall_ns: self.counters.producer_wall_ns.load(Ordering::Relaxed),
-            producer_max_wall_ns: self.counters.producer_max_wall_ns.load(Ordering::Relaxed),
-            consumer_wait_wall_ns: self.counters.consumer_wait_wall_ns.load(Ordering::Relaxed),
-            consumer_max_wait_wall_ns: self
-                .counters
-                .consumer_max_wait_wall_ns
-                .load(Ordering::Relaxed),
-        }
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
+        let mut snapshot = self.counters.snapshot();
+        snapshot.set(SingleFlightStat::Entries, stats::count(self.len()));
+        snapshot
     }
 }
 
@@ -251,13 +231,17 @@ where
         max_weight: u64,
         weight: impl Fn(&V) -> u64 + Send + Sync + 'static,
     ) -> Self {
-        assert!(
+        invariant!(
             max_entries > 0,
-            "INVARIANT VIOLATED: bounded single-flight cache has a zero entry limit. This is a bug because a zero-retention product should use an explicit ephemeral flight instead of pretending to be a cache. Fix: configure at least one retained entry."
+            what = "bounded single-flight cache has a zero entry limit",
+            why = "zero retention needs an ephemeral flight, not a cache",
+            fix = "configure at least one retained entry",
         );
-        assert!(
+        invariant!(
             max_weight > 0,
-            "INVARIANT VIOLATED: bounded single-flight cache has a zero weight limit. This is a bug because every retained product must have a positive resource budget. Fix: configure a measured positive byte/weight budget."
+            what = "bounded single-flight cache has a zero weight limit",
+            why = "every retained product must have a positive resource budget",
+            fix = "configure a measured positive byte/weight budget",
         );
         Self {
             entries: Arc::new(Mutex::new(HashMap::new())),
@@ -274,7 +258,7 @@ where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<V, String>> + Send + 'static,
     {
-        self.counters.lookups.fetch_add(1, Ordering::Relaxed);
+        self.counters.increment(SingleFlightStat::Lookups);
         let (cell, owns_producer) = {
             use std::collections::hash_map::Entry;
 
@@ -282,20 +266,22 @@ where
             match entries.entry(key.clone()) {
                 Entry::Occupied(entry) => {
                     if entry.get().cell.get().is_some() {
-                        self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Hits);
                     } else {
-                        self.counters.joined_flights.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::JoinedFlights);
                     }
                     (entry.get().cell.clone(), false)
                 }
                 Entry::Vacant(entry) => {
-                    self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                    self.counters.increment(SingleFlightStat::Misses);
                     let generation = self
                         .next_generation
                         .fetch_add(1, Ordering::AcqRel)
                         .checked_add(1)
-                        .expect(
-                            "INVARIANT VIOLATED: bounded single-flight cache generation overflowed. This is a bug because one process cannot create 2^64 cache entries. Fix: inspect the cache key/invalidation loop.",
+                        .expect_invariant(
+                            "bounded single-flight cache generation overflowed",
+                            "one process cannot create 2^64 cache entries",
+                            "inspect the cache key/invalidation loop",
                         );
                     (
                         entry
@@ -311,7 +297,7 @@ where
             }
         };
         if owns_producer {
-            self.counters.producers.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Producers);
             let producer_started = Instant::now();
             let producer_task = tokio::spawn(producer());
             let producer_cell = cell.clone();
@@ -324,11 +310,9 @@ where
                         "single-flight producer task failed: {error}"
                     ))),
                 };
-                cache
-                    .counters
-                    .record_producer_wall(producer_started.elapsed());
+                record_producer_wall(&cache.counters, producer_started.elapsed());
                 if result.is_err() {
-                    cache.counters.failures.fetch_add(1, Ordering::Relaxed);
+                    cache.counters.increment(SingleFlightStat::Failures);
                 }
                 producer_cell.complete(result);
                 if producer_cell.get().is_some_and(Result::is_err) {
@@ -346,8 +330,7 @@ where
         }
         let wait_started = Instant::now();
         let result = cell.wait().await;
-        self.counters
-            .record_consumer_wait_wall(wait_started.elapsed());
+        record_consumer_wait_wall(&self.counters, wait_started.elapsed());
         result.map_err(|error| error.as_ref().clone())
     }
 
@@ -368,24 +351,14 @@ where
         completed_weight(&entries, self.weight.as_ref())
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
-        SingleFlightSnapshot {
-            entries: self.len(),
-            lookups: self.counters.lookups.load(Ordering::Relaxed),
-            hits: self.counters.hits.load(Ordering::Relaxed),
-            joined_flights: self.counters.joined_flights.load(Ordering::Relaxed),
-            misses: self.counters.misses.load(Ordering::Relaxed),
-            producers: self.counters.producers.load(Ordering::Relaxed),
-            failures: self.counters.failures.load(Ordering::Relaxed),
-            evictions: self.counters.evictions.load(Ordering::Relaxed),
-            producer_wall_ns: self.counters.producer_wall_ns.load(Ordering::Relaxed),
-            producer_max_wall_ns: self.counters.producer_max_wall_ns.load(Ordering::Relaxed),
-            consumer_wait_wall_ns: self.counters.consumer_wait_wall_ns.load(Ordering::Relaxed),
-            consumer_max_wait_wall_ns: self
-                .counters
-                .consumer_max_wait_wall_ns
-                .load(Ordering::Relaxed),
-        }
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
+        let mut snapshot = self.counters.snapshot();
+        snapshot.set(SingleFlightStat::Entries, stats::count(self.len()));
+        snapshot.set(
+            SingleFlightStat::RetainedWeightBytes,
+            self.retained_weight(),
+        );
+        snapshot
     }
 
     fn evict_completed_to_limits(&self) {
@@ -409,7 +382,7 @@ where
                 break;
             };
             entries.remove(&oldest_key);
-            self.counters.evictions.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Evictions);
         }
     }
 }
@@ -442,9 +415,11 @@ impl<V, E> BlockingFlightState<V, E> {
 
     fn complete(&self, result: Result<Arc<V>, Arc<E>>) {
         let mut completion = self.completion.lock();
-        assert!(
+        invariant!(
             matches!(*completion, BlockingFlightCompletion::Pending),
-            "INVARIANT VIOLATED: a blocking single-flight producer completed the same key more than once. This is a bug because exactly one blocking worker owns each flight. Fix: inspect blocking producer admission and completion ownership."
+            what = "a blocking single-flight producer completed the same key more than once",
+            why = "exactly one blocking worker owns each flight",
+            fix = "inspect blocking producer admission and completion ownership",
         );
         *completion = BlockingFlightCompletion::Completed(result);
         self.ready.notify_all();
@@ -452,9 +427,11 @@ impl<V, E> BlockingFlightState<V, E> {
 
     fn complete_panicked(&self) {
         let mut completion = self.completion.lock();
-        assert!(
+        invariant!(
             matches!(*completion, BlockingFlightCompletion::Pending),
-            "INVARIANT VIOLATED: a panicked blocking single-flight producer had already completed. This is a bug because one producer cannot have two terminal states. Fix: inspect panic and completion ownership."
+            what = "a panicked blocking single-flight producer had already completed",
+            why = "one producer cannot have two terminal states",
+            fix = "inspect panic and completion ownership",
         );
         *completion = BlockingFlightCompletion::ProducerPanicked;
         self.ready.notify_all();
@@ -474,8 +451,10 @@ where
                     return result.clone().map_err(|error| error.as_ref().clone());
                 }
                 BlockingFlightCompletion::ProducerPanicked => {
-                    panic!(
-                        "INVARIANT VIOLATED: a blocking single-flight consumer observed a panicked producer. This is a bug because the requested immutable product was not constructed. Fix: inspect the producer panic reported by the owning worker."
+                    unreachable_invariant!(
+                        what = "a blocking single-flight consumer observed a panicked producer",
+                        why = "the requested immutable product was not constructed",
+                        fix = "inspect the producer panic reported by the owning worker",
                     );
                 }
             }
@@ -524,13 +503,17 @@ where
         max_weight: u64,
         weight: impl Fn(&V) -> u64 + Send + Sync + 'static,
     ) -> Self {
-        assert!(
+        invariant!(
             max_entries > 0,
-            "INVARIANT VIOLATED: blocking single-flight cache has a zero entry limit. This is a bug because completed synchronous products need an explicit retention policy. Fix: configure at least one retained entry."
+            what = "blocking single-flight cache has a zero entry limit",
+            why = "completed synchronous products need an explicit retention policy",
+            fix = "configure at least one retained entry",
         );
-        assert!(
+        invariant!(
             max_weight > 0,
-            "INVARIANT VIOLATED: blocking single-flight cache has a zero weight limit. This is a bug because retained synchronous products must have a positive resource bound. Fix: configure a measured positive weight budget."
+            what = "blocking single-flight cache has a zero weight limit",
+            why = "retained synchronous products must have a positive resource bound",
+            fix = "configure a measured positive weight budget",
         );
         Self {
             entries: Arc::new(Mutex::new(HashMap::new())),
@@ -546,7 +529,7 @@ where
     where
         F: FnOnce() -> Result<V, E>,
     {
-        self.counters.lookups.fetch_add(1, Ordering::Relaxed);
+        self.counters.increment(SingleFlightStat::Lookups);
         let (cell, owns_producer) = {
             use std::collections::hash_map::Entry;
 
@@ -554,20 +537,22 @@ where
             match entries.entry(key.clone()) {
                 Entry::Occupied(entry) => {
                     if entry.get().cell.is_completed_successfully() {
-                        self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Hits);
                     } else {
-                        self.counters.joined_flights.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::JoinedFlights);
                     }
                     (entry.get().cell.clone(), false)
                 }
                 Entry::Vacant(entry) => {
-                    self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                    self.counters.increment(SingleFlightStat::Misses);
                     let generation = self
                         .next_generation
                         .fetch_add(1, Ordering::AcqRel)
                         .checked_add(1)
-                        .expect(
-                            "INVARIANT VIOLATED: blocking single-flight generation overflowed. This is a bug because one process cannot construct 2^64 immutable products. Fix: inspect cache invalidation and key creation.",
+                        .expect_invariant(
+                            "blocking single-flight generation overflowed",
+                            "one process cannot construct 2^64 immutable products",
+                            "inspect cache invalidation and key creation",
                         );
                     let cell = Arc::new(BlockingFlightState::new());
                     entry.insert(BlockingBoundedFlightEntry {
@@ -580,24 +565,22 @@ where
         };
 
         if owns_producer {
-            self.counters.producers.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Producers);
             let producer_started = Instant::now();
             match catch_unwind(AssertUnwindSafe(producer)) {
                 Ok(result) => {
-                    self.counters
-                        .record_producer_wall(producer_started.elapsed());
+                    record_producer_wall(&self.counters, producer_started.elapsed());
                     let shared = result.map(Arc::new).map_err(Arc::new);
                     if shared.is_err() {
-                        self.counters.failures.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Failures);
                         self.remove_if_owned(&key, &cell);
                     }
                     cell.complete(shared);
                     self.evict_completed_to_limits();
                 }
                 Err(payload) => {
-                    self.counters
-                        .record_producer_wall(producer_started.elapsed());
-                    self.counters.failures.fetch_add(1, Ordering::Relaxed);
+                    record_producer_wall(&self.counters, producer_started.elapsed());
+                    self.counters.increment(SingleFlightStat::Failures);
                     self.remove_if_owned(&key, &cell);
                     cell.complete_panicked();
                     resume_unwind(payload);
@@ -607,8 +590,7 @@ where
 
         let wait_started = Instant::now();
         let result = cell.wait();
-        self.counters
-            .record_consumer_wait_wall(wait_started.elapsed());
+        record_consumer_wait_wall(&self.counters, wait_started.elapsed());
         result
     }
 
@@ -629,24 +611,14 @@ where
         blocking_completed_weight(&entries, self.weight.as_ref())
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
-        SingleFlightSnapshot {
-            entries: self.len(),
-            lookups: self.counters.lookups.load(Ordering::Relaxed),
-            hits: self.counters.hits.load(Ordering::Relaxed),
-            joined_flights: self.counters.joined_flights.load(Ordering::Relaxed),
-            misses: self.counters.misses.load(Ordering::Relaxed),
-            producers: self.counters.producers.load(Ordering::Relaxed),
-            failures: self.counters.failures.load(Ordering::Relaxed),
-            evictions: self.counters.evictions.load(Ordering::Relaxed),
-            producer_wall_ns: self.counters.producer_wall_ns.load(Ordering::Relaxed),
-            producer_max_wall_ns: self.counters.producer_max_wall_ns.load(Ordering::Relaxed),
-            consumer_wait_wall_ns: self.counters.consumer_wait_wall_ns.load(Ordering::Relaxed),
-            consumer_max_wait_wall_ns: self
-                .counters
-                .consumer_max_wait_wall_ns
-                .load(Ordering::Relaxed),
-        }
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
+        let mut snapshot = self.counters.snapshot();
+        snapshot.set(SingleFlightStat::Entries, stats::count(self.len()));
+        snapshot.set(
+            SingleFlightStat::RetainedWeightBytes,
+            self.retained_weight(),
+        );
+        snapshot
     }
 
     fn remove_if_owned(&self, key: &K, cell: &Arc<BlockingFlightState<V, E>>) {
@@ -679,31 +651,19 @@ where
                 break;
             };
             entries.remove(&oldest_key);
-            self.counters.evictions.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Evictions);
         }
     }
 }
 
-impl SingleFlightCounters {
-    fn record_producer_wall(&self, elapsed: Duration) {
-        record_duration(&self.producer_wall_ns, &self.producer_max_wall_ns, elapsed);
-    }
-
-    fn record_consumer_wait_wall(&self, elapsed: Duration) {
-        record_duration(
-            &self.consumer_wait_wall_ns,
-            &self.consumer_max_wait_wall_ns,
-            elapsed,
-        );
-    }
+fn record_producer_wall(counters: &SingleFlightCounters, elapsed: Duration) {
+    counters.record_duration(SingleFlightStat::ProducerWallNs, elapsed);
+    counters.record_duration(SingleFlightStat::ProducerMaxWallNs, elapsed);
 }
 
-fn record_duration(total: &AtomicU64, maximum: &AtomicU64, elapsed: Duration) {
-    let nanoseconds = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
-    let _ = total.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(current.saturating_add(nanoseconds))
-    });
-    maximum.fetch_max(nanoseconds, Ordering::Relaxed);
+fn record_consumer_wait_wall(counters: &SingleFlightCounters, elapsed: Duration) {
+    counters.record_duration(SingleFlightStat::ConsumerWaitWallNs, elapsed);
+    counters.record_duration(SingleFlightStat::ConsumerMaxWaitWallNs, elapsed);
 }
 
 fn completed_weight<K, V>(
@@ -717,8 +677,10 @@ fn completed_weight<K, V>(
             Some(Err(_)) | None => None,
         })
         .try_fold(0u64, |total, value| total.checked_add(value))
-        .expect(
-            "INVARIANT VIOLATED: bounded single-flight cache retained weight overflowed u64. This is a bug because the configured process memory budget is far below u64::MAX. Fix: validate product weight accounting before retention.",
+        .expect_invariant(
+            "bounded single-flight cache retained weight overflowed u64",
+            "the configured process memory budget is far below u64::MAX",
+            "validate product weight accounting before retention",
         )
 }
 
@@ -735,8 +697,10 @@ fn blocking_completed_weight<K, V, E>(
             | BlockingFlightCompletion::ProducerPanicked => None,
         })
         .try_fold(0u64, |total, value| total.checked_add(value))
-        .expect(
-            "INVARIANT VIOLATED: blocking single-flight retained weight overflowed u64. This is a bug because the configured process memory budget is far below u64::MAX. Fix: validate synchronous product weight accounting before retention.",
+        .expect_invariant(
+            "blocking single-flight retained weight overflowed u64",
+            "the configured process memory budget is far below u64::MAX",
+            "validate synchronous product weight accounting before retention",
         )
 }
 

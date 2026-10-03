@@ -1,6 +1,6 @@
 //! `workspace/didChangeWorkspaceFolders` add/remove tests.
 
-use crate::lsp::handlers::notification::handle_did_change_workspace_folders;
+use crate::lsp::lifecycle::notification::handle_did_change_workspace_folders;
 use crate::test::harness::FakeEditor;
 use std::fs;
 use tempfile::tempdir;
@@ -72,7 +72,7 @@ async fn remove_workspace_at_runtime_drops_it() {
 }
 
 #[tokio::test]
-async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
+async fn removing_workspace_rehomes_open_documents_in_orphan_project() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("temporary");
     editor
@@ -99,8 +99,9 @@ async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
         .unwrap();
     assert!(editor
         .server()
-        .orphan_engine()
-        .read()
+        .orphan_project()
+        .test_read()
+        .view()
         .file_id(path)
         .is_some());
 }
@@ -116,8 +117,9 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
         .await;
     assert!(editor
         .server()
-        .orphan_engine()
-        .read()
+        .orphan_project()
+        .test_read()
+        .view()
         .file_id(&file)
         .is_some());
 
@@ -133,7 +135,7 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
     .await;
 
     let project = editor.workspace_for(&filename).unwrap();
-    assert!(project.analysis_engine.read().file_id(&file).is_some());
+    assert!(project.handle().test_read().view().file_id(&file).is_some());
 }
 
 #[tokio::test]
@@ -184,7 +186,7 @@ fn container_workspace_registration_expands_to_isolated_gemfile_projects() {
     fs::create_dir_all(workspace.path().join("vendor/cache/dependency")).unwrap();
     fs::write(workspace.path().join("vendor/cache/dependency/Gemfile"), "").unwrap();
 
-    let server = crate::server::RubyLanguageServer::default();
+    let server = crate::server::Server::default();
     let uri = Url::from_directory_path(workspace.path()).unwrap();
     let projects = server.add_workspace_folder(uri).unwrap();
 

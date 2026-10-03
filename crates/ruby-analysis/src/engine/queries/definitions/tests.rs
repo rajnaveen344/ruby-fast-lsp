@@ -1,11 +1,12 @@
 use super::*;
 use crate::core::{
-    GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant, SourceKind, SymbolFact, SymbolKind,
+    FileAnalysis, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant, SourceKind, SymbolFact,
+    SymbolKind,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput};
 
 fn declaration(
-    engine: &mut AnalysisEngine,
+    engine: &mut Project,
     path: &str,
     kind: SourceKind,
     name: &str,
@@ -19,9 +20,9 @@ fn declaration(
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new(name).unwrap()]);
     let range = TextRange::new(file, 0, source.len() as u32);
     let method = RubyMethod::new("label").unwrap();
-    engine.replace_facts(
+    engine.update(
         file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(owner.clone(), SymbolKind::Class, range),
                 SymbolFact::new(
@@ -41,7 +42,7 @@ fn declaration(
                 range,
                 Vec::new(),
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ResolveMode::Immediate,
     );
@@ -50,7 +51,7 @@ fn declaration(
 
 #[test]
 fn definition_source_preference_is_shared_and_falls_back_after_removal() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let (_, signature) = declaration(
         &mut engine,
         "/a_record.rbs",
@@ -61,7 +62,7 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
     let (owner, implementation) =
         declaration(&mut engine, "/z_record.rb", SourceKind::Gem, "Record");
     for expected in [implementation, stub, signature] {
-        let query = engine.query();
+        let query = engine.view();
         assert_eq!(
             query.constant_definition_ranges(&owner.namespace_parts(), &[]),
             vec![expected]
@@ -84,9 +85,9 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
             query.method_definition_ranges(&owner, &RubyMethod::new("label").unwrap(), true, None),
             Some(vec![expected])
         );
-        engine.replace_facts(
+        engine.update(
             expected.file_id,
-            FileFacts::default(),
+            FileAnalysis::default(),
             ResolveMode::Immediate,
         );
     }
@@ -94,14 +95,14 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
 
 #[test]
 fn definition_source_preference_retains_a_different_receivers_signature() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let (other, signature) =
         declaration(&mut engine, "/a_other.rbs", SourceKind::Signature, "Other");
     let (record, implementation) =
         declaration(&mut engine, "/z_record.rb", SourceKind::Project, "Record");
     let receiver = RubyType::union(vec![RubyType::Class(other), RubyType::Class(record)]);
     assert_eq!(
-        engine.query().method_definition_ranges_for_type(
+        engine.view().method_definition_ranges_for_type(
             &receiver,
             &RubyMethod::new("label").unwrap(),
             true,

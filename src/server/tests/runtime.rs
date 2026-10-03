@@ -6,11 +6,11 @@ use crate::environment::config::runtime::{
 };
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::{
-    DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeStatusParams,
-    RuntimeSupportStatus,
+    DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeSupportStatus,
 };
-use crate::indexer::scheduling::status::{IndexingPhase, IndexingSingleFlightReuseSnapshot};
-use crate::server::RubyLanguageServer;
+use crate::loader::jruby_add_on::JrubyAddOn;
+use crate::loader::scheduling::status::{IndexingPhase, IndexingSingleFlightReuseSnapshot};
+use crate::server::{RuntimeStatusParams, Server};
 use tower_lsp::lsp_types::Url;
 
 #[test]
@@ -40,7 +40,7 @@ fn indexing_snapshot_reports_process_local_classpath_file_reuse() {
         additional_classpath: Vec::new(),
         additional_sources: Vec::new(),
     };
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     for _ in 0..2 {
         classpath::discover_project_classpath_with_cache(
             &inputs,
@@ -72,7 +72,7 @@ async fn runtime_status_reports_server_owned_project_identity_and_classpath() {
     let server_project = fixture.path().join("server");
     std::fs::create_dir_all(&admin).unwrap();
     std::fs::create_dir_all(&server_project).unwrap();
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
     let admin_workspace = language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
     language_server.add_workspace(Url::from_directory_path(&server_project).unwrap());
     *language_server.config.lock() = RubyFastLspConfig {
@@ -93,7 +93,10 @@ async fn runtime_status_reports_server_owned_project_identity_and_classpath() {
         },
         ..RubyFastLspConfig::default()
     };
-    language_server.set_runtime_classpath_fingerprint(&admin, Some("a".repeat(64)));
+    language_server.set_jruby_add_on(
+        &admin,
+        Some(JrubyAddOn::for_classpath_fingerprint("a".repeat(64))),
+    );
     let generation = admin_workspace
         .indexing_status
         .begin_generation()
@@ -160,7 +163,7 @@ async fn auto_runtime_resolves_exact_project_marker_through_server_catalog() {
     std::fs::write(admin.join(".ruby-version"), "jruby-9.2.21.0\n").unwrap();
     let executable = fixture.path().join("jruby-9.2.21.0/bin/jruby");
     let java_home = fixture.path().join("jdk-17");
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
     language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
     language_server.set_discovered_runtimes_for_tests(vec![DiscoveredRuntime {
         implementation: RuntimeImplementation::Jruby,
@@ -178,6 +181,8 @@ async fn auto_runtime_resolves_exact_project_marker_through_server_catalog() {
     }]);
 
     let resolved = language_server
+        .load_context_for_project(&admin)
+        .discovery
         .resolve_auto_runtime(&admin)
         .await
         .unwrap()

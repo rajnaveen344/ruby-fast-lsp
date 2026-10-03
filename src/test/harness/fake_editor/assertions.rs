@@ -1,5 +1,6 @@
 //! Fixture checks and delivered-diagnostic assertions.
 
+use crate::invariant::ExpectInvariant;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use super::FakeEditor;
@@ -15,9 +16,11 @@ impl FakeEditor {
     /// must match the file's current buffer content.
     pub async fn check(&self, filename: &str, fixture: &str) {
         let (buffer_content, _) = self.buffers.get(filename).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: File '{}' is not open. Call open() before check().",
-                filename
+            unreachable_invariant!(
+                what = "file '{}' is not open",
+                why = "FakeEditor checks need an open buffer",
+                fix = "call open() before check()",
+                filename,
             )
         });
         let fixture = parse_fixture(fixture);
@@ -55,8 +58,29 @@ impl FakeEditor {
     pub async fn diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
         self.assert_open(filename, "diagnostics");
         let uri = Self::filename_to_uri(filename);
-        let submitted = self.server.last_diagnostic_publication(&uri)
-            .expect("INVARIANT VIOLATED: open document has no diagnostic publication. This is a bug because a missing notification must not count as an empty diagnostic result. Fix: inspect the document publication lifecycle; do not recompute diagnostics in the observer.");
+        let submitted = self
+            .server
+            .last_diagnostic_publication(&uri)
+            .expect_invariant(
+                "open document has no diagnostic publication",
+                "a missing notification is not an empty result",
+                "inspect the publication lifecycle; do not recompute in the observer",
+            );
+        self.client_messages.diagnostics(&uri, &submitted).await
+    }
+
+    /// Observe the diagnostics last delivered for a file in any buffer state,
+    /// including a closed or deleted file. Panics when nothing was published.
+    pub async fn delivered_diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
+        let uri = Self::filename_to_uri(filename);
+        let submitted = self
+            .server
+            .last_diagnostic_publication(&uri)
+            .expect_invariant(
+                "file has no diagnostic publication",
+                "a missing notification is not an empty result",
+                "inspect the publication lifecycle; do not recompute in the observer",
+            );
         self.client_messages.diagnostics(&uri, &submitted).await
     }
 

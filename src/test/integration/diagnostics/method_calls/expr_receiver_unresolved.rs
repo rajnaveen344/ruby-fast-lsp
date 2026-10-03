@@ -12,12 +12,11 @@
 //! chains, so universal methods such as `User.new` are resolved consistently
 //! with constructor inference.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, check_multi_file, FakeEditor};
 use ruby_analysis::core::{
     FullyQualifiedName, MethodAvailability, NamespaceKind, RubyConstant, RubyMethod, SourceKind,
 };
-use ruby_analysis::engine::AnalysisQuery;
 use tower_lsp::lsp_types::{NumberOrString, Url};
 
 #[tokio::test]
@@ -270,8 +269,8 @@ end
         vec![process],
         RubyMethod::new("fork").expect("fork must be a valid Ruby method"),
     );
-    let engine = editor.server().orphan_engine().read();
-    let facts = AnalysisQuery::new(&engine).methods_for_fqn(&fork);
+    let engine = editor.server().orphan_project().test_read();
+    let facts = engine.view().method_facts_for(&fork);
     assert!(
         facts.iter().any(|fact| {
             fact.owner
@@ -744,6 +743,97 @@ end
 MetaTarget.define_singleton_method(:singleton_generated) do
   <warn none code="unresolved-method">singleton_helper</warn>
 end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn bare_kernel_method_in_basic_object_subclass_warns() {
+    check_multi_file(&[
+        (
+            "leaf.rb",
+            r#"
+class Leaf < BasicObject
+  def to_output
+    <warn code="unresolved-method">puts</warn> "ok"
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            "module Kernel\n  def puts(obj = nil, *args)\n  end\nend\n",
+        ),
+        ("object.rb", "class Object\n  include Kernel\nend\n"),
+        ("basic_object.rb", "class BasicObject\nend\n"),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn literal_receivers_use_core_signatures_for_missing_methods() {
+    check(
+        r#"
+items = [1, 2, 3]
+lookup = { name: "ruby" }
+name = "ruby"
+count = 1
+<warn none code="unresolved-method">items.first</warn>
+<warn none code="unresolved-method">items << 4</warn>
+<warn none code="unresolved-method">lookup.fetch(:name)</warn>
+<warn none code="unresolved-method">lookup.each_key {}</warn>
+<warn none code="unresolved-method">name.upcase</warn>
+<warn none code="unresolved-method">count.zero?</warn>
+items.<warn code="unresolved-method">nope_array</warn>
+lookup.<warn code="unresolved-method">nope_hash</warn>
+name.<warn code="unresolved-method">nope_string</warn>
+count.<warn code="unresolved-method">nope_integer</warn>
+"#,
+    )
+    .await;
+}
+
+/// `&.` never sends the message to `nil`, so the nil branch of a receiver
+/// cannot make the method unresolved.
+#[tokio::test]
+async fn safe_navigation_does_not_dispatch_on_a_nil_receiver() {
+    check(
+        r#"
+class Shelf
+  def initialize
+    @bags = {}
+  end
+
+  def label_for(key)
+    @bags[key]&.<warn none>label</warn>
+  end
+end
+
+skipped<type label="NilClass" kind="var"> = nil&.<warn none>label</warn>
+"#,
+    )
+    .await;
+}
+
+/// The non-nil branches of a safe-navigation receiver are still checked.
+#[tokio::test]
+async fn safe_navigation_checks_the_non_nil_receiver() {
+    check(
+        r#"
+class Bag
+  def label
+    "bag"
+  end
+end
+
+def pick(flag)
+  bag = flag ? Bag.new : nil
+  bag&.<warn none>label</warn>
+end
+
+Bag.new&.<warn none>label</warn>
+Bag.new&.<warn code="unresolved-method">missing</warn>
 "#,
     )
     .await;

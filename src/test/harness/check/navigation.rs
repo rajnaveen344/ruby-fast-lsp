@@ -9,14 +9,14 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{assert_same_locations, position_params};
-use crate::lsp::capabilities::editing::rename::handle_rename;
-use crate::lsp::handlers::request;
-use crate::server::RubyLanguageServer;
+use crate::features::editing::rename;
+use crate::features::navigation::{call_hierarchy, definition, implementation, references};
+use crate::server::Server;
 use crate::test::harness::fixture::{Tag, TagKind};
 
 /// `<def>`, `<ref>`, `<impl>`: the request at the cursor returns exactly the tagged ranges.
 pub(super) async fn check_locations(
-    server: &RubyLanguageServer,
+    server: &Server,
     cursor: &Location,
     kind: TagKind,
     expected: &[Location],
@@ -28,16 +28,16 @@ pub(super) async fn check_locations(
     };
     let actual = match kind {
         TagKind::Def => goto_locations(
-            request::handle_goto_definition(server, params())
+            definition::handle(server, params())
                 .await
                 .expect("definition request failed"),
         ),
         TagKind::Impl => goto_locations(
-            request::handle_goto_implementation(server, params())
+            implementation::handle(server, params())
                 .await
                 .expect("implementation request failed"),
         ),
-        TagKind::Ref => request::handle_references(
+        TagKind::Ref => references::handle(
             server,
             ReferenceParams {
                 text_document_position: position_params(&cursor.uri, cursor.range.start),
@@ -71,12 +71,12 @@ fn goto_locations(response: Option<GotoDefinitionResponse>) -> Vec<Location> {
 /// `<incoming>`, `<outgoing>`: the hierarchy of the item at the cursor contains
 /// exactly the tagged caller/callee definitions.
 pub(super) async fn check_calls(
-    server: &RubyLanguageServer,
+    server: &Server,
     cursor: &Location,
     kind: TagKind,
     expected: &[Location],
 ) {
-    let items = request::handle_prepare_call_hierarchy(
+    let items = call_hierarchy::handle_prepare(
         server,
         CallHierarchyPrepareParams {
             text_document_position_params: position_params(&cursor.uri, cursor.range.start),
@@ -94,7 +94,7 @@ pub(super) async fn check_calls(
     );
     let item = items[0].clone();
     let actual: Vec<Location> = match kind {
-        TagKind::Incoming => request::handle_incoming_calls(
+        TagKind::Incoming => call_hierarchy::handle_incoming(
             server,
             CallHierarchyIncomingCallsParams {
                 item,
@@ -108,7 +108,7 @@ pub(super) async fn check_calls(
         .into_iter()
         .map(|call| Location::new(call.from.uri, call.from.range))
         .collect(),
-        TagKind::Outgoing => request::handle_outgoing_calls(
+        TagKind::Outgoing => call_hierarchy::handle_outgoing(
             server,
             CallHierarchyOutgoingCallsParams {
                 item,
@@ -129,7 +129,7 @@ pub(super) async fn check_calls(
 
 /// `<rename to="new">` marks where rename is requested; it and every bare
 /// `<rename>` tag are exactly the edited ranges, each replaced by `new`.
-pub(super) async fn check_rename(server: &RubyLanguageServer, tags: &[(&Url, &Tag)]) {
+pub(super) async fn check_rename(server: &Server, tags: &[(&Url, &Tag)]) {
     let mut requests = tags
         .iter()
         .filter_map(|(uri, tag)| Some((*uri, tag, tag.attr("to")?)));
@@ -141,7 +141,7 @@ pub(super) async fn check_rename(server: &RubyLanguageServer, tags: &[(&Url, &Ta
         "<rename> tags need exactly one tag with a `to` attribute"
     );
 
-    let edit = handle_rename(
+    let edit = rename::handle(
         server,
         RenameParams {
             text_document_position: position_params(uri, request_tag.range.start),
@@ -150,6 +150,7 @@ pub(super) async fn check_rename(server: &RubyLanguageServer, tags: &[(&Url, &Ta
         },
     )
     .await
+    .expect("rename request failed")
     .unwrap_or_else(|| {
         panic!(
             "rename at {:?} to `{new_name}` returned no edit",

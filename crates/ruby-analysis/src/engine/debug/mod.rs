@@ -4,17 +4,15 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant,
-    RubyMethod, SymbolFact, SymbolKind, TextRange,
+    RubyMethod, SymbolFact, TextRange,
 };
 use crate::engine::debug::types::{
-    AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
-    InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
-    StatsResponse,
+    ExportGraphResponse, GraphNodeSnapshot, LookupEntry, LookupResponse,
 };
 use crate::engine::queries::namespace_tree::analysis_location_info;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::resolution::{method_lookup_chain, node_kind};
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 
 /// Native sizes for profiler output without exposing stored representations.
 pub fn reference_storage_sizes() -> [(&'static str, usize); 4] {
@@ -43,7 +41,7 @@ pub fn reference_storage_sizes() -> [(&'static str, usize); 4] {
     ]
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn debug_lookup(&self, fqn: &str) -> LookupResponse {
         let Some(fqn) = parse_debug_fqn(fqn) else {
             return LookupResponse {
@@ -55,8 +53,7 @@ impl<'a> AnalysisQuery<'a> {
         let mut entries = Vec::new();
         if let FullyQualifiedName::Method(_, _) = &fqn {
             entries.extend(
-                self.engine
-                    .method_facts_for(&fqn)
+                self.method_facts_for(&fqn)
                     .iter()
                     .map(|fact| lookup_entry_from_method_fact(self.engine, fact)),
             );
@@ -65,8 +62,7 @@ impl<'a> AnalysisQuery<'a> {
         if entries.is_empty() {
             for candidate in lookup_candidates(&fqn) {
                 entries.extend(
-                    self.engine
-                        .symbol_facts_for(&candidate)
+                    self.symbol_facts_for(&candidate)
                         .iter()
                         .map(|fact| lookup_entry_from_symbol_fact(self.engine, fact)),
                 );
@@ -86,147 +82,13 @@ impl<'a> AnalysisQuery<'a> {
         }
     }
 
-    pub fn debug_stats(&self, indexing_complete: bool) -> StatsResponse {
-        let symbols = self.engine.all_symbol_facts();
-        let unique_definitions = symbols
-            .iter()
-            .map(|fact| fact.fqn.clone())
-            .collect::<HashSet<_>>()
-            .len();
-
-        StatsResponse {
-            total_definitions: unique_definitions,
-            total_entries: symbols.len(),
-            classes: count_symbols(&symbols, SymbolKind::Class),
-            modules: count_symbols(&symbols, SymbolKind::Module),
-            methods: count_symbols(&symbols, SymbolKind::Method),
-            constants: count_symbols(&symbols, SymbolKind::Constant),
-            instance_variables: count_symbols(&symbols, SymbolKind::InstanceVariable),
-            files_indexed: self.engine.file_count(),
-            indexing_complete,
-        }
-    }
-
-    pub fn debug_ancestors(&self, class_name: &str) -> AncestorsResponse {
-        let Some(namespace) = parse_namespace(class_name) else {
-            return AncestorsResponse {
-                class: class_name.to_string(),
-                ancestors: Vec::new(),
-            };
-        };
-        let fqn = FullyQualifiedName::namespace_with_kind(
-            namespace,
-            crate::core::NamespaceKind::Instance,
-        );
-        let ancestors = self
-            .engine
-            .graph_edges_from(&fqn)
-            .iter()
-            .map(|edge| AncestorEntry {
-                name: fqn_to_key(&edge.target),
-                kind: graph_edge_kind_label(edge.kind).to_string(),
-            })
-            .collect();
-
-        AncestorsResponse {
-            class: class_name.to_string(),
-            ancestors,
-        }
-    }
-
-    pub fn debug_methods(&self, class_name: &str) -> MethodsResponse {
-        let Some(namespace) = parse_namespace(class_name) else {
-            return MethodsResponse {
-                class: class_name.to_string(),
-                methods: Vec::new(),
-            };
-        };
-        let mut methods = self
-            .engine
-            .all_method_facts()
-            .into_iter()
-            .filter(|fact| fact.owner.namespace_parts() == namespace)
-            .map(|fact| MethodEntry {
-                name: method_name(&fact),
-                kind: format!(
-                    "{:?}",
-                    fact.owner
-                        .namespace_kind()
-                        .unwrap_or(crate::core::NamespaceKind::Instance)
-                ),
-                visibility: "Public".to_string(),
-                return_type: self
-                    .method_return_type(&fact)
-                    .and_then(non_unknown_type_string),
-            })
-            .collect::<Vec<_>>();
-        methods.sort_by_key(|method| (method.kind.clone(), method.name.clone()));
-
-        MethodsResponse {
-            class: class_name.to_string(),
-            methods,
-        }
-    }
-
-    pub fn debug_inference_stats(&self) -> InferenceStatsResponse {
-        let methods = self.engine.all_method_facts();
-        let total_methods = methods.len();
-        let mut methods_with_return_type = 0usize;
-        let mut file_method_counts: HashMap<String, usize> = HashMap::new();
-
-        for fact in &methods {
-            if self
-                .method_return_type(fact)
-                .and_then(non_unknown_type_string)
-                .is_some()
-            {
-                methods_with_return_type += 1;
-            }
-            let file_name = self
-                .engine
-                .file(fact.range.file_id)
-                .and_then(|file| {
-                    file.path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                })
-                .unwrap_or_else(|| "unknown".to_string());
-            *file_method_counts.entry(file_name).or_insert(0) += 1;
-        }
-
-        let methods_without_return_type = total_methods - methods_with_return_type;
-        let inference_coverage_percent = if total_methods > 0 {
-            (methods_with_return_type as f64 / total_methods as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        let mut file_counts = file_method_counts.into_iter().collect::<Vec<_>>();
-        file_counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-        let top_files_by_method_count = file_counts
-            .into_iter()
-            .take(10)
-            .map(|(file, method_count)| FileMethodCount { file, method_count })
-            .collect();
-
-        InferenceStatsResponse {
-            total_methods,
-            methods_with_return_type,
-            methods_without_return_type,
-            inference_coverage_percent,
-            top_files_by_method_count,
-            proof_telemetry: self.engine.inference_telemetry(),
-        }
-    }
-
     pub fn debug_export_graph(&self) -> ExportGraphResponse {
         let nodes_by_fqn = graph_nodes_by_fqn(self.engine);
         let mut nodes = HashMap::new();
 
         for (fqn, kind) in &nodes_by_fqn {
-            let outgoing = self.engine.graph_edges_from(fqn);
+            let outgoing = self.graph_edges_from(fqn);
             let superclass = self
-                .engine
                 .proven_superclass_edge(fqn)
                 .map(|edge| fqn_to_key(&edge.target));
             let includes = edge_targets(&outgoing, GraphEdgeKind::Include);
@@ -281,7 +143,7 @@ fn lookup_candidates(fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
     }
 }
 
-fn lookup_entry_from_symbol_fact(engine: &AnalysisEngine, fact: &SymbolFact) -> LookupEntry {
+fn lookup_entry_from_symbol_fact(engine: &Project, fact: &SymbolFact) -> LookupEntry {
     LookupEntry {
         fqn: fact.fqn.to_string(),
         kind: format!("{:?}", fact.kind),
@@ -292,8 +154,8 @@ fn lookup_entry_from_symbol_fact(engine: &AnalysisEngine, fact: &SymbolFact) -> 
     }
 }
 
-fn lookup_entry_from_method_fact(engine: &AnalysisEngine, fact: &MethodFact) -> LookupEntry {
-    let query = AnalysisQuery::new(engine);
+fn lookup_entry_from_method_fact(engine: &Project, fact: &MethodFact) -> LookupEntry {
+    let query = View::new(engine);
     LookupEntry {
         fqn: fact.fqn.to_string(),
         kind: format!(
@@ -315,10 +177,6 @@ fn lookup_entry_from_method_fact(engine: &AnalysisEngine, fact: &MethodFact) -> 
     }
 }
 
-fn count_symbols(symbols: &[SymbolFact], kind: SymbolKind) -> usize {
-    symbols.iter().filter(|fact| fact.kind == kind).count()
-}
-
 fn non_unknown_type_string(ruby_type: crate::core::RubyType) -> Option<String> {
     if ruby_type == crate::core::RubyType::Unknown {
         None
@@ -327,19 +185,7 @@ fn non_unknown_type_string(ruby_type: crate::core::RubyType) -> Option<String> {
     }
 }
 
-fn method_name(fact: &MethodFact) -> String {
-    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-        panic!(
-            "INVARIANT VIOLATED: MethodFact FQN is not a method: {}. \
-             This is a bug because MethodStore must only contain method FQNs. \
-             Fix: validate MethodFact before insertion.",
-            fact.fqn
-        );
-    };
-    method.get_name().to_string()
-}
-
-fn location_string(engine: &AnalysisEngine, range: TextRange) -> String {
+fn location_string(engine: &Project, range: TextRange) -> String {
     analysis_location_info(engine, range)
         .map(|location| format!("{}:{}:{}", location.uri, location.line, location.character))
         .unwrap_or_else(|| "unknown".to_string())
@@ -406,9 +252,9 @@ fn fqn_to_key(fqn: &FullyQualifiedName) -> String {
     }
 }
 
-fn graph_nodes_by_fqn(engine: &AnalysisEngine) -> HashMap<FullyQualifiedName, GraphNodeKind> {
+fn graph_nodes_by_fqn(engine: &Project) -> HashMap<FullyQualifiedName, GraphNodeKind> {
     let mut nodes = HashMap::new();
-    for node in engine.all_graph_nodes() {
+    for node in engine.view().all_graph_nodes() {
         nodes.entry(node.fqn).or_insert(node.kind);
     }
     nodes
@@ -423,11 +269,12 @@ fn edge_targets(edges: &[GraphEdgeFact], kind: GraphEdgeKind) -> Vec<String> {
 }
 
 fn reverse_edge_sources(
-    engine: &AnalysisEngine,
+    engine: &Project,
     target: &FullyQualifiedName,
     kind: GraphEdgeKind,
 ) -> Vec<String> {
     let mut result = engine
+        .view()
         .all_graph_edges()
         .into_iter()
         .filter(|edge| edge.kind == kind && edge.target == *target)
@@ -437,12 +284,12 @@ fn reverse_edge_sources(
     result
 }
 
-fn included_by_classes(engine: &AnalysisEngine, module_fqn: &FullyQualifiedName) -> Vec<String> {
+fn included_by_classes(engine: &Project, module_fqn: &FullyQualifiedName) -> Vec<String> {
     let mut result = Vec::new();
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
 
-    for edge in engine.all_graph_edges() {
+    for edge in engine.view().all_graph_edges() {
         if edge.target == *module_fqn
             && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
             && visited.insert(edge.source.clone())
@@ -455,7 +302,7 @@ fn included_by_classes(engine: &AnalysisEngine, module_fqn: &FullyQualifiedName)
         match node_kind(engine, &current) {
             Some(GraphNodeKind::Class) => result.push(fqn_to_key(&current)),
             Some(GraphNodeKind::Module) => {
-                for edge in engine.all_graph_edges() {
+                for edge in engine.view().all_graph_edges() {
                     if edge.target == current
                         && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
                         && visited.insert(edge.source.clone())
@@ -472,19 +319,9 @@ fn included_by_classes(engine: &AnalysisEngine, module_fqn: &FullyQualifiedName)
     result
 }
 
-fn method_resolution_order(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Vec<String> {
+fn method_resolution_order(engine: &Project, fqn: &FullyQualifiedName) -> Vec<String> {
     method_lookup_chain(engine, fqn)
         .into_iter()
         .map(|item| fqn_to_key(&item))
         .collect()
-}
-
-fn graph_edge_kind_label(kind: GraphEdgeKind) -> &'static str {
-    match kind {
-        GraphEdgeKind::Superclass => "superclass",
-        GraphEdgeKind::Include => "include",
-        GraphEdgeKind::Extend => "extend",
-        GraphEdgeKind::Prepend => "prepend",
-        GraphEdgeKind::ExecutionContextApplication => "execution-context-application",
-    }
 }

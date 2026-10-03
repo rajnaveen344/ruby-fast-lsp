@@ -3,19 +3,21 @@
 
 use std::collections::HashMap;
 
-use super::helpers::{EXCEPTION_WHITELIST, NON_EXCEPTION_TYPES};
+use super::policy::{
+    BAD_SPLAT, EXCEPTION_WHITELIST, NIL_CALL, NON_EXCEPTION_TYPES, RAISE_NON_EXCEPTION,
+};
 use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FullyQualifiedName,
     RaiseArgCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId,
 };
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn resolve_diagnostic_candidates(
         &self,
     ) -> HashMap<SourceFileId, Vec<DiagnosticFact>> {
         let mut diagnostics = HashMap::new();
-        for candidate in self.facts.diagnostics.candidates.iter_candidates() {
+        for candidate in self.diagnostics.candidates() {
             if let Some(diagnostic) = self.resolve_diagnostic_candidate(candidate) {
                 diagnostics
                     .entry(diagnostic.range.file_id)
@@ -30,9 +32,7 @@ impl AnalysisEngine {
         &self,
         file_id: SourceFileId,
     ) -> Vec<DiagnosticFact> {
-        self.facts
-            .diagnostics
-            .candidates
+        self.diagnostics
             .candidates_in_file(file_id)
             .iter()
             .filter_map(|candidate| self.resolve_diagnostic_candidate(candidate))
@@ -49,15 +49,13 @@ impl AnalysisEngine {
                 variable,
                 method,
             } => {
-                let ruby_type = AnalysisQuery::new(self)
-                    .exact_call_receiver_type(candidate.range, *local_read)?;
+                let ruby_type =
+                    View::new(self).exact_call_receiver_type(candidate.range, *local_read)?;
                 if ruby_type != RubyType::nil_class() {
                     return None;
                 }
-                Some(DiagnosticFact::new(
+                Some(NIL_CALL.fact(
                     candidate.range,
-                    crate::core::DiagnosticSeverity::Warning,
-                    "nil-call",
                     format!("Calling `{method}` on `{variable}` which is `nil` here."),
                 ))
             }
@@ -65,10 +63,8 @@ impl AnalysisEngine {
                 operator,
                 arg_repr,
                 expected,
-            } => Some(DiagnosticFact::new(
+            } => Some(BAD_SPLAT.fact(
                 candidate.range,
-                crate::core::DiagnosticSeverity::Warning,
-                "bad-splat",
                 format!(
                     "`{}{}` expected {} but got non-{} value",
                     operator, arg_repr, expected, expected
@@ -78,10 +74,8 @@ impl AnalysisEngine {
                 if self.raise_arg_is_exception(arg.clone()) {
                     None
                 } else {
-                    Some(DiagnosticFact::new(
+                    Some(RAISE_NON_EXCEPTION.fact(
                         candidate.range,
-                        crate::core::DiagnosticSeverity::Warning,
-                        "raise-non-exception",
                         format!(
                             "`raise` argument `{}` is not an Exception subclass",
                             arg_repr
@@ -117,7 +111,7 @@ impl AnalysisEngine {
         current_namespace: &[RubyConstant],
         method: &RubyMethod,
     ) -> Option<RubyType> {
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         let mut namespace = current_namespace.to_vec();
         loop {
             let namespace_fqn = FullyQualifiedName::namespace_with_kind(
@@ -175,17 +169,17 @@ impl AnalysisEngine {
             vec![ruby_const],
             crate::core::NamespaceKind::Instance,
         );
-        if !self.has_graph_node(&ns_fqn) && !self.has_symbol_facts(&ns_fqn) {
+        if !self.view().has_graph_node(&ns_fqn) && !self.view().has_symbol_facts(&ns_fqn) {
             return true;
         }
 
         let mut current = ns_fqn;
         let mut visited = std::collections::HashSet::new();
         while visited.insert(current.clone()) {
-            if self.superclass_is_ambiguous(&current) {
+            if self.view().superclass_is_ambiguous(&current) {
                 return true;
             }
-            let Some(edge) = self.proven_superclass_edge(&current) else {
+            let Some(edge) = self.view().proven_superclass_edge(&current) else {
                 break;
             };
             let last = edge.target.namespace_parts().last().map(|c| c.to_string());

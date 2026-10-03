@@ -1,13 +1,14 @@
 //! Buffer lifecycle and editing operations routed through the real handlers.
 
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, VersionedTextDocumentIdentifier, WorkspaceEdit,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, FileChangeType, FileEvent,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    VersionedTextDocumentIdentifier, WorkspaceEdit,
 };
 
 use super::FakeEditor;
-use crate::lsp::capabilities::indexing;
+use crate::lsp::lifecycle::indexing;
 
 impl FakeEditor {
     /// Open a file in the editor with the given content.
@@ -15,10 +16,12 @@ impl FakeEditor {
     /// Routes through the real `handle_did_open` handler.
     /// Panics if the file is already open (use `set()` to update).
     pub async fn open(&mut self, filename: &str, content: &str) {
-        assert!(
+        invariant!(
             !self.buffers.contains_key(filename),
-            "INVARIANT VIOLATED: File '{}' is already open. Use set() to update content.",
-            filename
+            what = "file '{}' is already open",
+            why = "open() starts a new buffer",
+            fix = "use set() to update content",
+            filename,
         );
 
         let uri = Self::filename_to_uri(filename);
@@ -44,9 +47,11 @@ impl FakeEditor {
     /// Panics if the file is not open (use `open()` first).
     pub async fn set(&mut self, filename: &str, new_content: &str) {
         let (_, version) = self.buffers.get(filename).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: File '{}' is not open. Call open() before set().",
-                filename
+            unreachable_invariant!(
+                what = "file '{}' is not open",
+                why = "set() edits an open buffer",
+                fix = "call open() before set()",
+                filename,
             )
         });
         let new_version = version + 1;
@@ -76,10 +81,12 @@ impl FakeEditor {
     /// Triggers YARD diagnostics and inlay hint refresh.
     /// Panics if the file is not open.
     pub async fn save(&mut self, filename: &str) {
-        assert!(
+        invariant!(
             self.buffers.contains_key(filename),
-            "INVARIANT VIOLATED: File '{}' is not open. Call open() before save().",
-            filename
+            what = "file '{}' is not open",
+            why = "save() writes an open buffer",
+            fix = "call open() before save()",
+            filename,
         );
 
         let uri = Self::filename_to_uri(filename);
@@ -96,10 +103,12 @@ impl FakeEditor {
     /// Routes through the real `handle_did_close` handler.
     /// Index entries are preserved (matching real LSP behavior).
     pub async fn close(&mut self, filename: &str) {
-        assert!(
+        invariant!(
             self.buffers.remove(filename).is_some(),
-            "INVARIANT VIOLATED: File '{}' is not open. Cannot close a file that was never opened.",
-            filename
+            what = "file '{}' is not open",
+            why = "close() needs a buffer that was opened",
+            fix = "open the file before closing it",
+            filename,
         );
 
         let uri = Self::filename_to_uri(filename);
@@ -110,6 +119,27 @@ impl FakeEditor {
         indexing::handle_did_close(&self.server, params).await;
     }
 
+    /// Report a file-system change to a closed file.
+    ///
+    /// Routes through the real `handle_watched_files_changed` handler, which
+    /// reads created and changed files from disk. Panics if the file is open.
+    pub async fn watched_file_changed(&mut self, filename: &str, typ: FileChangeType) {
+        invariant!(
+            !self.buffers.contains_key(filename),
+            what = "watched change reported for open file '{}'",
+            why = "open buffers are authoritative, so the handler ignores their disk events",
+            fix = "close the file before reporting a disk change",
+            filename,
+        );
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Self::filename_to_uri(filename),
+                typ,
+            }],
+        };
+        indexing::handle_watched_files_changed(&self.server, params).await;
+    }
+
     // ─── Editing Helpers ───────────────────────────────────────────────
 
     /// Insert text at a 0-indexed position, triggering a `did_change`.
@@ -118,9 +148,11 @@ impl FakeEditor {
     /// The position is in the file's current content (before insertion).
     pub async fn type_at(&mut self, filename: &str, line: u32, character: u32, text: &str) {
         let (content, _) = self.buffers.get(filename).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: File '{}' is not open. Call open() before type_at().",
-                filename
+            unreachable_invariant!(
+                what = "file '{}' is not open",
+                why = "type_at() edits an open buffer",
+                fix = "call open() before type_at()",
+                filename,
             )
         });
 
@@ -138,9 +170,11 @@ impl FakeEditor {
     /// Simulates the user pressing backspace at a specific cursor position.
     pub async fn backspace_at(&mut self, filename: &str, line: u32, character: u32, count: usize) {
         let (content, _) = self.buffers.get(filename).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: File '{}' is not open. Call open() before backspace_at().",
-                filename
+            unreachable_invariant!(
+                what = "file '{}' is not open",
+                why = "backspace_at() edits an open buffer",
+                fix = "call open() before backspace_at()",
+                filename,
             )
         });
 
@@ -169,9 +203,11 @@ impl FakeEditor {
                     .cloned();
 
                 let filename = filename.unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: WorkspaceEdit references URI '{}' which is not open in the editor.",
-                        uri
+                    unreachable_invariant!(
+                        what = "WorkspaceEdit references URI '{}' that is not open",
+                        why = "edits apply to open buffers",
+                        fix = "open the file before applying the edit",
+                        uri,
                     )
                 });
 
@@ -215,9 +251,11 @@ impl FakeEditor {
     /// Get the current content of an open file.
     pub fn content(&self, filename: &str) -> &str {
         let (content, _) = self.buffers.get(filename).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: File '{}' is not open. Call open() before content().",
-                filename
+            unreachable_invariant!(
+                what = "file '{}' is not open",
+                why = "content() reads an open buffer",
+                fix = "call open() before content()",
+                filename,
             )
         });
         content

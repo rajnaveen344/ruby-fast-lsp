@@ -1,8 +1,9 @@
 //! Call receiver classification and receiver namespace/type resolution.
 
+use crate::core::VariableTypeKind;
 use crate::core::{FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant};
-use crate::engine::{AnalysisQuery, VariableTypeKind};
 use crate::indexer::{build_constant_path_name, mixin_ref_from_node, utf8_str};
+use crate::invariant::ExpectInvariant;
 use ruby_prism::Node;
 
 use crate::core::RubyType;
@@ -78,6 +79,7 @@ impl FactCollector {
         let name = utf8_str(constant_read.name().as_slice());
         if let Ok(constant) = RubyConstant::new(name) {
             let mut lexical_namespace = current_namespace.to_vec();
+            let mut unproven_value_constant = false;
             let value_type = loop {
                 let mut parts = lexical_namespace.clone();
                 parts.push(constant.clone());
@@ -85,14 +87,11 @@ impl FactCollector {
                 let namespace_fqn = FullyQualifiedName::namespace(constant_fqn.namespace_parts());
                 let is_namespace = self
                     .facts
-                    .direct
+                    .analysis
                     .graph_nodes
                     .iter()
                     .any(|fact| fact.fqn == namespace_fqn)
-                    || {
-                        let engine = self.semantics.engine.read();
-                        AnalysisQuery::new(&engine).has_graph_node(&namespace_fqn)
-                    };
+                    || self.semantics.project.has_graph_node(&namespace_fqn);
                 if is_namespace {
                     return (
                         constant_fqn.namespace_parts(),
@@ -103,20 +102,21 @@ impl FactCollector {
                 if let Some(ruby_type) = self.direct_constant_value_type(&constant_fqn) {
                     break Some(ruby_type);
                 }
+                if self.direct_constant_has_value(&constant_fqn) {
+                    unproven_value_constant = true;
+                    break None;
+                }
                 if lexical_namespace.pop().is_none() {
                     break None;
                 }
             }
             .or_else(|| {
-                let engine = self.semantics.engine.read();
-                let query = AnalysisQuery::new(&engine);
-                query
-                    .resolve_constant_in_context(std::slice::from_ref(&constant), current_namespace)
-                    .and_then(|resolved| {
-                        query.constant_value_type(&FullyQualifiedName::constant(
-                            resolved.namespace_parts(),
-                        ))
-                    })
+                if unproven_value_constant {
+                    return None;
+                }
+                self.semantics
+                    .project
+                    .resolved_constant_value_type(&constant, current_namespace)
             });
             if let Some(ref ruby_type) = value_type {
                 if let Some(namespace) = self.type_to_namespace_parts(ruby_type) {
@@ -130,16 +130,25 @@ impl FactCollector {
                         | RubyType::Literal(_)
                         | RubyType::Shape(_)
                         | RubyType::Union(_)
-                        | RubyType::Unknown => {
-                            let engine = self.semantics.engine.read();
-                            AnalysisQuery::new(&engine)
-                                .type_to_namespace(ruby_type)
-                                .and_then(|fqn| fqn.namespace_kind())
-                                .unwrap_or(NamespaceKind::Instance)
-                        }
+                        | RubyType::Unknown => self
+                            .semantics
+                            .project
+                            .type_namespace(ruby_type)
+                            .and_then(|fqn| fqn.namespace_kind())
+                            .unwrap_or(NamespaceKind::Instance),
                     };
                     return (namespace, kind, value_type);
                 }
+            }
+            if unproven_value_constant {
+                // The constant holds an object whose type is not proven, such
+                // as a class built by a factory method. Its receiver is
+                // unknown, not the constant's own singleton namespace.
+                return (
+                    current_namespace.to_vec(),
+                    NamespaceKind::Instance,
+                    Some(RubyType::Unknown),
+                );
             }
             let mut receiver_namespace = current_namespace.to_vec();
             receiver_namespace.push(constant);
@@ -261,10 +270,10 @@ impl FactCollector {
 
         if let Some(ivar) = receiver_node.as_instance_variable_read_node() {
             let var_name = utf8_str(ivar.name().as_slice());
-            let byte_offset = u32::try_from(ivar.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. \
-                 This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            let byte_offset = u32::try_from(ivar.location().start_offset()).expect_invariant(
+                "Prism location offset exceeded u32",
+                "ruby-analysis::core TextRange currently stores u32 offsets",
+                "widen TextRange offsets before indexing files larger than u32::MAX bytes",
             );
             let owner = FullyQualifiedName::namespace_with_kind(
                 self.scope_tracker.get_ns_stack(),
@@ -280,8 +289,10 @@ impl FactCollector {
 
         if let Some(class_var) = receiver_node.as_class_variable_read_node() {
             let var_name = utf8_str(class_var.name().as_slice());
-            let byte_offset = u32::try_from(class_var.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            let byte_offset = u32::try_from(class_var.location().start_offset()).expect_invariant(
+                "Prism location offset exceeded u32",
+                "ruby-analysis::core TextRange currently stores u32 offsets",
+                "widen TextRange offsets before indexing files larger than u32::MAX bytes",
             );
             let owner = FullyQualifiedName::namespace_with_kind(
                 self.scope_tracker.get_ns_stack(),
@@ -297,8 +308,10 @@ impl FactCollector {
 
         if let Some(global_var) = receiver_node.as_global_variable_read_node() {
             let var_name = utf8_str(global_var.name().as_slice());
-            let byte_offset = u32::try_from(global_var.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            let byte_offset = u32::try_from(global_var.location().start_offset()).expect_invariant(
+                "Prism location offset exceeded u32",
+                "ruby-analysis::core TextRange currently stores u32 offsets",
+                "widen TextRange offsets before indexing files larger than u32::MAX bytes",
             );
             let owner = FullyQualifiedName::namespace_with_kind(
                 self.scope_tracker.get_ns_stack(),
@@ -332,7 +345,7 @@ impl FactCollector {
         let namespace = FullyQualifiedName::namespace(namespace_parts.to_vec());
         let kind = self
             .facts
-            .direct
+            .analysis
             .graph_nodes
             .iter()
             .filter(|fact| fact.fqn == namespace)
@@ -344,10 +357,7 @@ impl FactCollector {
                 )
             })
             .map(|fact| fact.kind)
-            .or_else(|| {
-                let engine = self.semantics.engine.read();
-                AnalysisQuery::new(&engine).namespace_node_kind(&namespace)
-            })?;
+            .or_else(|| self.semantics.project.namespace_node_kind(&namespace))?;
         let constant = FullyQualifiedName::constant(namespace_parts.to_vec());
         Some(match kind {
             GraphNodeKind::Class => RubyType::ClassReference(constant),
@@ -368,9 +378,9 @@ impl FactCollector {
             | RubyType::Union(_)
             | RubyType::Unknown => {}
         }
-        let engine = self.semantics.engine.read();
-        AnalysisQuery::new(&engine)
-            .type_to_namespace(ruby_type)
+        self.semantics
+            .project
+            .type_namespace(ruby_type)
             .map(|namespace| namespace.namespace_parts())
     }
 
@@ -379,8 +389,8 @@ impl FactCollector {
         parts: &[RubyConstant],
         current_namespace: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let engine = self.semantics.engine.read();
-        crate::engine::AnalysisQuery::new(&engine)
+        self.semantics
+            .project
             .resolve_constant_in_context(parts, current_namespace)
     }
 }

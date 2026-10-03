@@ -1,9 +1,9 @@
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason};
-use crate::engine::AnalysisQuery;
 use crate::inference::control_flow;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -46,7 +46,7 @@ impl TypeTracker {
         if self.environment.callables.is_empty() {
             return;
         }
-        if crate::indexer::is_static_callable_literal(value)
+        if crate::inference::callable_body::is_static_callable_literal(value)
             || value.as_local_variable_read_node().is_some()
         {
             return;
@@ -205,9 +205,7 @@ impl TypeTracker {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let prepared_result = if let Some(analysis_engine) = &self.analysis.engine {
-            let engine = analysis_engine.read();
-            let query = AnalysisQuery::new(&engine);
+        let prepared_result = if let Some(project) = &self.analysis.project {
             let namespace = FullyQualifiedName::namespace(
                 self.context
                     .class
@@ -215,18 +213,15 @@ impl TypeTracker {
                     .map(FullyQualifiedName::namespace_parts)
                     .unwrap_or_default(),
             );
-            crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-                Some(&query),
-                self.analysis.query_cache.as_deref(),
+            project.prepare_higher_order_call(
                 receiver_type.as_ref(),
-                Some(&namespace),
+                &namespace,
                 method_name,
                 &argument_types,
             )
         } else {
             crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-                None,
-                None,
+                None::<&dyn crate::inference::semantics::Semantics>,
                 receiver_type.as_ref(),
                 None,
                 method_name,
@@ -388,12 +383,17 @@ impl TypeTracker {
                 self.resolve_static_method_return_outcome(receiver, method.as_str())
             },
         );
-        let popped = stack.pop().expect(
-            "INVARIANT VIOLATED: callable instantiation stack underflowed. This is a bug because every accepted callable pushes exactly one identity. Fix: keep push/evaluate/pop in one function.",
+        let popped = stack.pop().expect_invariant(
+            "callable instantiation stack underflowed",
+            "every accepted callable pushes exactly one identity",
+            "keep push/evaluate/pop in one function",
         );
-        assert_eq!(
-            popped, callable.identity,
-            "INVARIANT VIOLATED: callable instantiation stack order changed during evaluation. This is a bug because nested evaluation must be strictly LIFO. Fix: do not retain or reorder stack entries."
+        invariant_eq!(
+            popped,
+            callable.identity,
+            what = "callable instantiation stack order changed during evaluation",
+            why = "nested evaluation must be strictly LIFO",
+            fix = "do not retain or reorder stack entries",
         );
         result
     }
@@ -402,13 +402,15 @@ impl TypeTracker {
         &mut self,
         value: &Node,
     ) -> Option<crate::inference::higher_order::KnownProcType> {
-        crate::indexer::is_static_callable_literal(value).then(|| {
+        crate::inference::callable_body::is_static_callable_literal(value).then(|| {
             let outer_locals = self.environment.types.keys().cloned();
             crate::inference::higher_order::KnownProcType {
-                identity: u32::try_from(value.location().start_offset()).expect(
-                    "INVARIANT VIOLATED: callable literal offset exceeded u32. This is a bug because analysis ranges already require u32 offsets. Fix: reject oversized source before callable lowering.",
+                identity: u32::try_from(value.location().start_offset()).expect_invariant(
+                    "callable literal offset exceeded u32",
+                    "analysis ranges already require u32 offsets",
+                    "reject oversized source before callable lowering",
                 ),
-                summary: crate::indexer::lower_callable_literal_with_outer_locals(
+                summary: crate::inference::callable_body::lower_callable_literal_with_outer_locals(
                     value,
                     outer_locals,
                 ),

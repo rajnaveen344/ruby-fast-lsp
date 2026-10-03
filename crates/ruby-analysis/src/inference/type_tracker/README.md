@@ -13,17 +13,18 @@ method solve into `returns/`.
 
 Construct with `TypeTracker::new()`. The tracker takes Prism nodes in its
 tracking methods and does not retain source bytes or a source lifetime. The
-collector supplies method contracts, same-file evidence, and optional engine
-queries through builders and context setters. Local tracking without an engine
-remains supported; unavailable lookup evidence stays unproven.
+collector supplies method contracts, same-file evidence, and optional project
+reads through builders and context setters. Project reads go through the
+read-only `inference::semantics::Semantics` trait, never the engine lock. Local tracking
+without it remains supported; unavailable lookup evidence stays unproven.
 
 | Entry point | Responsibility |
 | --- | --- |
 | `track_program` | Follow top-level statements |
-| `track_method` / `track_method_outcome` | Infer explicit and fallthrough returns, retaining an Unknown reason when requested |
+| `track_method` / `track_method_outcome` (tests only) | Solve one method standalone, retaining an Unknown reason when requested |
 | `track_method_equation` (crate-private) | Collect a same-file return equation for engine resolution |
 | `track_isolated_block_body` (crate-private) | Infer a block body with the supplied parameter types |
-| `into_var_types` | Return variable snapshots for offset queries |
+| `into_var_types` (tests only) | Return variable snapshots for offset queries |
 | `take_local_read_types` (crate-private) | Return exact reads, collapsing repeated loop visits to their final evidence |
 
 ## State ownership
@@ -35,7 +36,7 @@ tree; splitting implementation files does not expose mutable state to callers.
 | --- | --- | --- |
 | `environment` | `flow/environment.rs` | Current locals, callable bindings, correlated shape aliases and containment, and their proof metadata |
 | `context` | `context.rs` | Parameter contracts and the current class and method |
-| `analysis` | `context.rs` | Optional engine/query cache and supplied same-file lookup evidence |
+| `analysis` | `context.rs` | Optional `Semantics` reads (the walk handle carries its lookup memo) and supplied same-file lookup evidence |
 | `returns` | `returns/mod.rs` | Private return terms, dependencies, explicit returns, and recursive approximation |
 | `observations` | `observations.rs` | Offset snapshots and exact local-read evidence for publication |
 | `control_flow` | `flow/mod.rs` | Loop bounds/depth and lexical rescue-entry accumulators |
@@ -78,6 +79,6 @@ publication collapses them. It exercises the production traversal and verifies
 linear visits without a test-only counter or an alternate execution path.
 
 Use the focused tracker suite while changing local inference, then the workspace
-suite for collector, engine, editor, and simulation consumers. Keep branch clone
+suite for collector, engine, editor, and robustness consumers. Keep branch clone
 boundaries, method reset order, and return dependency publication explicit when
 adding state.

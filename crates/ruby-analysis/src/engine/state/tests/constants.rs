@@ -4,13 +4,13 @@ use super::*;
 
 #[test]
 fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declaration() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/user.rb", "class User; end\n");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -30,14 +30,14 @@ fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declarati
 
 #[test]
 fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/eigen.rb", "class << User; end\n");
     let instance = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let singleton =
         FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 singleton.clone(),
                 GraphNodeKind::Class,
@@ -57,13 +57,13 @@ fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
 
 #[test]
 fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
     let constant = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
     let as_namespace = FullyQualifiedName::namespace(vec![RubyConstant::new("STATUS").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 constant.clone(),
                 SymbolKind::Constant,
@@ -83,13 +83,13 @@ fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
 
 #[test]
 fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
     let ref_file = register_project_file(&mut engine, "lib/use_status.rb", "STATUS\n");
     let status = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 status.clone(),
                 SymbolKind::Constant,
@@ -99,9 +99,9 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 6),
                 status.namespace_parts(),
@@ -112,8 +112,9 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&status).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&status).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-constant"));
@@ -121,7 +122,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
 
 #[test]
 fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "lib/nested.rb",
@@ -142,9 +143,9 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
         RubyConstant::new("Outer").unwrap(),
         RubyConstant::new("C").unwrap(),
     ]);
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(
                     outer.clone(),
@@ -184,9 +185,9 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 1),
                 vec![RubyConstant::new("C").unwrap()],
@@ -197,16 +198,19 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&nested_class).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&nested_class).len(), 1);
     assert!(
-        engine.reference_facts_for(&outer_constant).is_empty(),
+        engine
+            .view()
+            .reference_facts_for(&outer_constant)
+            .is_empty(),
         "lexical Inner::C must win over Outer::C"
     );
 }
 
 #[test]
 fn constant_reference_walks_out_to_an_outer_value_constant() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "lib/outer.rb",
@@ -222,9 +226,9 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
         RubyConstant::new("Outer").unwrap(),
         RubyConstant::new("C").unwrap(),
     ]);
-    engine.replace_facts(
+    engine.update(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(
                     outer.clone(),
@@ -254,9 +258,9 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 1),
                 vec![RubyConstant::new("C").unwrap()],
@@ -267,5 +271,53 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.reference_facts_for(&outer_constant).len(), 1);
+    assert_eq!(engine.view().reference_facts_for(&outer_constant).len(), 1);
+}
+
+#[test]
+fn method_facts_alone_do_not_prove_a_missing_method_on_their_owner() {
+    let mut engine = Project::new();
+    let stub_file = engine.register_file(SourceFileInput {
+        path: PathBuf::from("/stubs/seeded.rb"),
+        content: String::new(),
+        kind: SourceKind::Stub,
+    });
+    let ref_file = register_project_file(&mut engine, "app/use_seeded.rb", "Seeded.run");
+    let seeded = vec![RubyConstant::new("Seeded").unwrap()];
+    let run = RubyMethod::new("run").unwrap();
+    engine.update(
+        stub_file,
+        FileAnalysis {
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(seeded.clone(), run),
+                FullyQualifiedName::singleton_namespace(seeded.clone()),
+                TextRange::new(stub_file, 0, 0),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.update(
+        ref_file,
+        FileAnalysis {
+            reference_candidates: vec![explicit_method_call_candidate(
+                TextRange::new(ref_file, 7, 10),
+                TextRange::new(ref_file, 0, 10),
+                seeded,
+                NamespaceKind::Singleton,
+                run,
+                None,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let diagnostics = engine.view().diagnostic_facts_in_file(ref_file);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|fact| fact.code != "unresolved-method"),
+        "a receiver namespace without a declaration leaves method absence unknown: {diagnostics:?}"
+    );
 }

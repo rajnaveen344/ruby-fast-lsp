@@ -26,6 +26,11 @@
 //! }
 //! ```
 
+#[macro_use]
+#[allow(unused_macros, dead_code)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 mod converter;
 mod embedded;
 mod loader;
@@ -39,7 +44,12 @@ pub use converter::{
 pub use embedded::{core_file_count, core_rbs_file};
 pub use loader::{LoadError, Loader};
 pub use parser::Parser;
-pub use types::*;
+pub use types::{
+    AliasDecl, AttrDecl, AttrKind, Block, ClassDecl, ConstantDecl, Declaration, GlobalDecl,
+    InterfaceDecl, Literal, Location, Member, MethodDecl, MethodKind, MethodParam, MethodType,
+    ModuleDecl, ParamKind, ParseError, RbsType, RecordField, TypeAliasDecl, TypeParam, Variance,
+    Visibility,
+};
 
 /// Parse RBS source code and return declarations
 pub fn parse(source: &str) -> Result<Vec<Declaration>, ParseError> {
@@ -180,8 +190,10 @@ end
         let declarations = parse("class Collection[Elem]\n  include Enumerable[Elem]\nend\n")
             .expect("generic mixin fixture must parse");
         let Declaration::Class(class) = &declarations[0] else {
-            panic!(
-                "INVARIANT VIOLATED: generic class fixture produced a non-class declaration. This is a bug because the parser accepted `class Collection`. Fix: preserve declaration kinds during conversion."
+            unreachable_invariant!(
+                what = "generic class fixture produced a non-class declaration",
+                why = "the parser accepted `class Collection`",
+                fix = "preserve declaration kinds during conversion",
             );
         };
         assert_eq!(class.type_params, vec![TypeParam::new("Elem")]);

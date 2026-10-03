@@ -1,14 +1,16 @@
 //! Rename targets and their safety checks for methods and constants.
 
-use std::collections::HashSet;
+use crate::invariant::ExpectInvariant;
 
 use super::lookup_chain::method_lookup_chain;
 use super::ConstantRenameTarget;
+use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
+use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, SourceFileId,
-    StoredMethodReferenceCandidate, StoredReferenceCandidateRef, SymbolKind, TextRange,
+    FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolKind, TextRange,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::diagnostics::policy::AncestryCompleteness;
+use crate::engine::queries::View;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct MethodRenameIdentity {
@@ -23,7 +25,7 @@ pub struct MethodRenameTarget {
     pub ranges: Vec<TextRange>,
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     /// Resolve a method declaration or call at a byte offset into a safe,
     /// project-editable rename target.
     ///
@@ -56,7 +58,6 @@ impl<'a> AnalysisQuery<'a> {
         byte_offset: u32,
     ) -> Option<MethodRenameIdentity> {
         let mut identities = self
-            .engine
             .method_facts_in_file(file_id)
             .into_iter()
             .filter(|fact| fact.name_range.contains_offset(file_id, byte_offset))
@@ -71,15 +72,11 @@ impl<'a> AnalysisQuery<'a> {
             })
             .collect::<Vec<_>>();
 
-        for candidate in self
-            .engine
-            .reference_candidate_store()
-            .candidates_in_file(file_id)
-        {
+        for candidate in self.engine.uses.candidates().candidates_in_file(file_id) {
             if !candidate.range.contains_offset(file_id, byte_offset) {
                 continue;
             }
-            let crate::core::StoredReferenceCandidateKind::Method {
+            let crate::core::storage::reference_store::StoredReferenceCandidateKind::Method {
                 owner,
                 owner_kind,
                 method,
@@ -111,8 +108,10 @@ impl<'a> AnalysisQuery<'a> {
         identities.sort();
         identities.dedup();
         (identities.len() == 1).then(|| {
-            identities.pop().expect(
-                "INVARIANT VIOLATED: method rename identity disappeared after length validation. This is a bug because the local identity vector is not mutated between the check and pop. Fix: keep identity selection atomic.",
+            identities.pop().expect_invariant(
+                "method rename identity disappeared after length validation",
+                "the local identity vector is not mutated between the check and pop",
+                "keep identity selection atomic",
             )
         })
     }
@@ -137,27 +136,29 @@ impl<'a> AnalysisQuery<'a> {
         }) {
             return None;
         }
-        if self.method_lookup_chain_is_incomplete_for_rename(&identity.owner) {
+        // The same completeness walk that suppresses `unresolved-method`
+        // claims: an unknown lookup edge leaves the collision proof open.
+        if !AncestryCompleteness::new(self.engine)
+            .chain(self.engine, &identity.owner, |_| false)
+            .is_missing()
+        {
             return None;
         }
         if let Some(new_name) = new_name {
             let target_chain = method_lookup_chain(self.engine, &identity.owner);
             let collision = target_chain.iter().any(|owner| {
-                self.engine
-                    .method_facts_matching_owner_name(&owner, &new_name)
+                self.method_facts_matching_owner_name(&owner, &new_name)
                     .into_iter()
                     .any(|fact| {
-                        self.engine
-                            .file(fact.range.file_id)
+                        self.file(fact.range.file_id)
                             .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     })
-            }) || self.engine.all_method_facts().into_iter().any(|fact| {
+            }) || self.all_method_facts().into_iter().any(|fact| {
                 let FullyQualifiedName::Method(_, fact_method) = fact.fqn else {
                     return false;
                 };
                 fact_method == new_name
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     && (target_chain.contains(&fact.owner)
@@ -170,20 +171,18 @@ impl<'a> AnalysisQuery<'a> {
 
         let method_fqn =
             FullyQualifiedName::method(identity.owner.namespace_parts(), identity.method);
-        let all_method_facts = self.engine.method_facts_for(&method_fqn);
+        let all_method_facts = self.method_facts_for(&method_fqn);
         let declaration_facts = all_method_facts
             .iter()
             .filter(|fact| fact.owner == identity.owner)
             .filter(|fact| {
-                self.engine
-                    .file(fact.range.file_id)
+                self.file(fact.range.file_id)
                     .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
             })
             .collect::<Vec<_>>();
         if declaration_facts.is_empty()
             || declaration_facts.iter().any(|fact| {
                 !self
-                    .engine
                     .file(fact.range.file_id)
                     .is_some_and(|file| file.kind.is_editable())
                     || fact
@@ -200,7 +199,7 @@ impl<'a> AnalysisQuery<'a> {
         // One Ruby declaration can materialize multiple semantic owners (for
         // example `module_function`). Renaming only one of those identities
         // would lie about the resulting program, so reject the coupled token.
-        let every_method_fact = self.engine.all_method_facts();
+        let every_method_fact = self.all_method_facts();
         if declaration_facts.iter().any(|declaration| {
             every_method_fact.iter().any(|other| {
                 other.owner != identity.owner
@@ -216,25 +215,23 @@ impl<'a> AnalysisQuery<'a> {
             .map(|fact| fact.name_range)
             .collect::<Vec<_>>();
         ranges.extend(
-            self.engine
-                .method_visibility_overrides_matching_owner_name(&identity.owner, &identity.method)
+            self.method_visibility_overrides_matching_owner_name(&identity.owner, &identity.method)
                 .into_iter()
                 .filter(|fact| {
-                    self.engine
-                        .file(fact.range.file_id)
+                    self.file(fact.range.file_id)
                         .is_some_and(|file| file.kind.is_editable())
                 })
                 .map(|fact| fact.range),
         );
 
-        for candidate in self.engine.reference_candidate_store().iter_candidates() {
+        for candidate in self.engine.uses.candidates().iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Method(candidate)
                     if candidate.method == identity.method =>
                 {
                     let targets = self.method_candidate_rename_identities(candidate);
                     let caller_is_target = candidate.caller.is_some_and(|caller| {
-                        self.engine.fqn_for_id(caller).is_some_and(|caller| {
+                        self.engine.names.fqn(caller).is_some_and(|caller| {
                             matches!(
                                 caller,
                                 FullyQualifiedName::Method(parts, method)
@@ -262,7 +259,6 @@ impl<'a> AnalysisQuery<'a> {
                             }
                         }
                         if self
-                            .engine
                             .file(candidate.range.file_id)
                             .is_some_and(|file| file.kind.is_editable())
                         {
@@ -271,9 +267,11 @@ impl<'a> AnalysisQuery<'a> {
                     }
                 }
                 StoredReferenceCandidateRef::Resolved(candidate) => {
-                    let Some(target) = self.engine.fqn_for_id(candidate.target) else {
-                        panic!(
-                            "INVARIANT VIOLATED: resolved rename candidate points to a missing FQN. This is a bug because resolved candidates retain interned targets. Fix: retain interned names for the candidate lifetime."
+                    let Some(target) = self.engine.names.fqn(candidate.target) else {
+                        unreachable_invariant!(
+                            what = "resolved rename candidate points to a missing FQN",
+                            why = "resolved candidates retain interned targets",
+                            fix = "retain interned names for the candidate lifetime",
                         );
                     };
                     if target != &method_fqn {
@@ -289,7 +287,6 @@ impl<'a> AnalysisQuery<'a> {
                         return None;
                     }
                     if self
-                        .engine
                         .file(candidate.range.file_id)
                         .is_some_and(|file| file.kind.is_editable())
                     {
@@ -311,7 +308,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     fn method_candidate_rename_identities(
         &self,
         candidate: &StoredMethodReferenceCandidate,
@@ -333,54 +330,9 @@ impl<'a> AnalysisQuery<'a> {
         identities.dedup();
         identities
     }
-
-    fn method_lookup_chain_is_incomplete_for_rename(&self, owner: &FullyQualifiedName) -> bool {
-        let unresolved_sources = self
-            .engine
-            .graph
-            .unresolved_edges()
-            .into_iter()
-            .filter_map(|edge| {
-                let lookup = self.engine.names.const_lookup(edge.target).expect(
-                    "INVARIANT VIOLATED: unresolved rename graph edge points to a missing lookup. This is a bug because graph edges retain interned targets. Fix: retain target lookups for the graph edge lifetime.",
-                );
-                if edge.kind == GraphEdgeKind::Superclass
-                    && lookup.absolute
-                    && lookup.path.len() == 1
-                    && lookup.path[0].as_str() == "Object"
-                {
-                    return None;
-                }
-                self.engine
-                    .names
-                    .fqn(edge.source)
-                    .map(FullyQualifiedName::namespace_parts)
-            })
-            .collect::<HashSet<_>>();
-        let mut pending = vec![owner.clone()];
-        let mut visited = HashSet::new();
-        while let Some(current) = pending.pop() {
-            if !visited.insert(current.clone()) {
-                continue;
-            }
-            if self.engine.superclass_is_ambiguous(&current) {
-                return true;
-            }
-            if unresolved_sources.contains(&current.namespace_parts()) {
-                return true;
-            }
-            pending.extend(
-                self.engine
-                    .graph_ancestry_edges_from(&current)
-                    .into_iter()
-                    .map(|edge| self.engine.expand_interned_fqn(edge.target)),
-            );
-        }
-        false
-    }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     /// Resolve a constant-like symbol and return every editable project range.
     ///
     /// Definition token boundaries come from indexer facts; references come
@@ -398,7 +350,6 @@ impl<'a> AnalysisQuery<'a> {
         }
         let current_name = *fqn.namespace_parts_slice().last()?;
         let symbol_facts = self
-            .engine
             .symbol_facts_for(&fqn)
             .into_iter()
             .filter(|fact| {
@@ -411,7 +362,6 @@ impl<'a> AnalysisQuery<'a> {
                     .checked_sub(fact.name_range.start_byte)
                     == u32::try_from(current_name.as_str().len()).ok()
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind.is_editable())
             })
@@ -423,12 +373,10 @@ impl<'a> AnalysisQuery<'a> {
             .into_iter()
             .map(|fact| fact.name_range)
             .chain(
-                self.engine
-                    .reference_facts_for(&fqn)
+                self.reference_facts_for(&fqn)
                     .iter()
                     .filter(|fact| {
-                        self.engine
-                            .file(fact.range.file_id)
+                        self.file(fact.range.file_id)
                             .is_some_and(|file| file.kind.is_editable())
                     })
                     .filter_map(|fact| {
@@ -495,11 +443,11 @@ fn method_name_is_refactorable(method: RubyMethod) -> bool {
 }
 
 fn constant_reference_name_range(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     range: TextRange,
     name: RubyConstant,
 ) -> Option<TextRange> {
-    let file = engine.file(range.file_id)?;
+    let file = engine.view().file(range.file_id)?;
     let start = usize::try_from(range.start_byte).ok()?;
     let end = usize::try_from(range.end_byte).ok()?;
     if let Some(source) = file.source_text() {
@@ -508,11 +456,11 @@ fn constant_reference_name_range(
             return None;
         }
     } else {
-        assert!(
+        invariant!(
             file.line_index.is_ascii(),
-            "INVARIANT VIOLATED: source text was discarded for a non-ASCII file. \
-             This is a bug because exact rename validation requires retained non-ASCII source. \
-             Fix: retain SourceFile::source whenever SourceLineIndex::is_ascii is false."
+            what = "source text was discarded for a non-ASCII file",
+            why = "exact rename validation requires retained non-ASCII source",
+            fix = "retain SourceFile::source whenever SourceLineIndex::is_ascii is false",
         );
     }
     let name_start = end.checked_sub(name.as_str().len())?;
@@ -527,21 +475,21 @@ fn constant_reference_name_range(
 }
 
 fn constant_name_collides(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     target: &FullyQualifiedName,
     new_name: RubyConstant,
 ) -> bool {
     let mut parts = target.namespace_parts();
-    let last = parts.last_mut().expect(
-        "INVARIANT VIOLATED: rename target has no constant path component. \
-         This is a bug because constant_rename_target only returns constant-like FQNs. \
-         Fix: reject empty constant paths before constructing a rename target.",
+    let last = parts.last_mut().expect_invariant(
+        "rename target has no constant path component",
+        "constant_rename_target only returns constant-like FQNs",
+        "reject empty constant paths before constructing a rename target",
     );
     *last = new_name;
 
     let namespace = FullyQualifiedName::namespace(parts.clone());
     let constant = FullyQualifiedName::constant(parts);
-    engine.has_symbol_facts(&namespace)
-        || engine.has_graph_node(&namespace)
-        || engine.has_symbol_facts(&constant)
+    engine.view().has_symbol_facts(&namespace)
+        || engine.view().has_graph_node(&namespace)
+        || engine.view().has_symbol_facts(&constant)
 }

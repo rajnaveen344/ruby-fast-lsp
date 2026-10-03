@@ -1,9 +1,8 @@
 //! Method inputs and semantic lookup context supplied before traversal.
 
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
-use crate::engine::{AnalysisEngine, AnalysisQueryCache};
+use crate::inference::semantics::Semantics;
 use crate::inference::type_tracker::TypeTracker;
-use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -21,9 +20,8 @@ pub(in crate::inference::type_tracker) struct MethodContext {
 
 #[derive(Default)]
 pub(in crate::inference::type_tracker) struct AnalysisContext {
-    /// Engine for method return type lookups on analysis path
-    pub(in crate::inference::type_tracker) engine: Option<Arc<RwLock<AnalysisEngine>>>,
-    pub(in crate::inference::type_tracker) query_cache: Option<Arc<AnalysisQueryCache>>,
+    /// Read-only project semantics for mid-walk reads; see [`Semantics`].
+    pub(in crate::inference::type_tracker) project: Option<Arc<dyn Semantics>>,
     /// Same-file method return facts already collected before this method.
     pub(in crate::inference::type_tracker) method_returns: HashMap<FullyQualifiedName, RubyType>,
     /// Same-file methods whose complete current-pass declaration set proves
@@ -42,13 +40,8 @@ pub(in crate::inference::type_tracker) struct AnalysisContext {
 }
 
 impl TypeTracker {
-    pub fn with_analysis_engine(mut self, analysis_engine: Arc<RwLock<AnalysisEngine>>) -> Self {
-        self.analysis.engine = Some(analysis_engine);
-        self
-    }
-
-    pub fn with_analysis_query_cache(mut self, cache: Arc<AnalysisQueryCache>) -> Self {
-        self.analysis.query_cache = Some(cache);
+    pub(crate) fn with_semantics(mut self, project: Arc<dyn Semantics>) -> Self {
+        self.analysis.project = Some(project);
         self
     }
 

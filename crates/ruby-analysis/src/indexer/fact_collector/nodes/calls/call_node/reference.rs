@@ -5,11 +5,14 @@ use crate::core::{
     TypeInferenceOutcome, UnknownReason,
 };
 use crate::indexer::utf8_str;
+use crate::invariant::ExpectInvariant;
 use log::trace;
 use ruby_prism::CallNode;
 
 use crate::core::RubyType;
-use crate::inference::method::{rbs_class_exists_for_type, rbs_method_exists_for_type};
+use crate::inference::method::return_type::{
+    rbs_class_exists_for_type, rbs_method_exists_for_type,
+};
 use crate::inference::r#type::literal::literal_key;
 use crate::inference::r#type::shape as shape_reads;
 
@@ -19,6 +22,9 @@ use crate::indexer::fact_collector::FactCollector;
 
 impl FactCollector {
     pub(super) fn process_call_reference_candidate(&mut self, node: &CallNode) {
+        if !self.options.collect_call_references {
+            return;
+        }
         let static_send_target = static_send_target_name_and_range(self, node);
         let method_name = static_send_target
             .as_ref()
@@ -71,13 +77,18 @@ impl FactCollector {
                 }
             };
 
-        let inference_failed = matches!(
-            receiver_info,
-            ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
-        ) && inferred_expr_type
-            .as_ref()
-            .is_none_or(|ruby_type| *ruby_type == RubyType::Unknown)
-            && target_namespace == current_namespace;
+        // A constant receiver reports Unknown only when it names a value
+        // whose type is unproven; an unresolved constant keeps its namespace.
+        let inference_failed = match receiver_info {
+            ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
+                inferred_expr_type
+                    .as_ref()
+                    .is_none_or(|ruby_type| *ruby_type == RubyType::Unknown)
+                    && target_namespace == current_namespace
+            }
+            ReceiverInfo::ConstantReceiver(_) => inferred_expr_type == Some(RubyType::Unknown),
+            ReceiverInfo::NoReceiver | ReceiverInfo::SelfReceiver => false,
+        };
 
         let method = match RubyMethod::new(method_name) {
             Ok(method) => method,
@@ -92,6 +103,7 @@ impl FactCollector {
             .filter(|ruby_type| **ruby_type != RubyType::Unknown)
             .cloned()
             .or_else(|| match &receiver_info {
+                ReceiverInfo::ConstantReceiver(_) if inference_failed => None,
                 ReceiverInfo::ConstantReceiver(_) if !target_namespace.is_empty() => {
                     self.proven_namespace_receiver_type(&target_namespace)
                 }
@@ -117,6 +129,17 @@ impl FactCollector {
                     )
                 })
             });
+        // `&.` sends no message to nil: only the non-nil receiver is
+        // dispatched, and a nil branch contributes nil to the call result.
+        let safe_navigation = node.is_safe_navigation();
+        let (dispatch_receiver_type, nil_skips_dispatch) = match receiver_type.clone() {
+            Some(ruby_type) if safe_navigation => match ruby_type.safe_navigation_dispatch() {
+                Some((receiver, nil_skips_dispatch)) => (Some(receiver), nil_skips_dispatch),
+                None => (None, true),
+            },
+            receiver_type => (receiver_type, false),
+        };
+        let receiver_is_only_nil = nil_skips_dispatch && dispatch_receiver_type.is_none();
         let receiver_expression_range = matches!(
             receiver_info,
             ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
@@ -165,8 +188,10 @@ impl FactCollector {
                     | UnknownReason::CallableBodyBoundExceeded
                     | UnknownReason::CallableRecursionUnsupported
                     | UnknownReason::UnsupportedCallableFlow,
-                ) => receiver_reason.expect(
-                    "INVARIANT VIOLATED: checked shape receiver reason disappeared. This is a bug because receiver_reason is immutable. Fix: bind the matched reason directly.",
+                ) => receiver_reason.expect_invariant(
+                    "checked shape receiver reason disappeared",
+                    "receiver_reason is immutable",
+                    "bind the matched reason directly",
                 ),
                 // Ordinary assignment/scope failures prove only that this
                 // call has no receiver. The receiver expression retains its
@@ -184,17 +209,20 @@ impl FactCollector {
                 | None => UnknownReason::UnknownReceiver,
             };
             Some(TypeInferenceOutcome::unknown(reason))
-        } else if let Some(receiver_type) = receiver_type.as_ref() {
+        } else if receiver_is_only_nil {
+            Some(TypeInferenceOutcome::proven(RubyType::nil_class()))
+        } else if let Some(receiver_type) = dispatch_receiver_type.as_ref() {
             if method_name == "freeze" {
                 Some(TypeInferenceOutcome::proven(receiver_type.clone()))
             } else if let Some(outcome) = self.shape_call_outcome(node, receiver_type) {
                 Some(outcome)
             } else {
-                let syntax_outcome = crate::inference::method::method_call_type_outcome(
-                    None,
-                    receiver_type,
-                    method_name,
-                );
+                let syntax_outcome =
+                    crate::inference::method::return_type::method_call_type_outcome(
+                        None::<&dyn crate::inference::semantics::Semantics>,
+                        receiver_type,
+                        method_name,
+                    );
                 let outcome = if matches!(receiver_type, RubyType::Union(_))
                     && syntax_outcome.unknown_reason() == Some(UnknownReason::IncompleteUnionMember)
                 {
@@ -251,6 +279,11 @@ impl FactCollector {
                 UnknownReason::UnknownReceiver,
             ))
         };
+        let immediate_outcome = if nil_skips_dispatch {
+            immediate_outcome.map(TypeInferenceOutcome::with_nil_alternative)
+        } else {
+            immediate_outcome
+        };
         let defer_call_outcome = immediate_outcome.is_none();
         if let Some(outcome) = immediate_outcome {
             self.record_immediate_call_outcome(call_range, outcome);
@@ -282,48 +315,54 @@ impl FactCollector {
             let rbs_receiver_class_exists = inferred_expr_type
                 .as_ref()
                 .is_some_and(rbs_class_exists_for_type);
-            self.facts.references.push(ReferenceCandidate::method(
-                message_range,
-                crate::core::MethodReferenceCandidate {
-                    owner: target_namespace,
-                    owner_kind: namespace_kind,
-                    method,
-                    is_super: false,
-                    access,
-                    caller: self.scope_tracker.current_method_fqn().cloned(),
-                    call_expression_range: defer_call_outcome.then_some(call_range),
-                    preferred_definition_range: None,
-                    diagnostics: crate::core::MethodReferenceDiagnostics {
-                        diagnostic_range: message_range,
-                        receiver_label,
-                        receiver_expression_range,
-                        receiver_type: receiver_type.clone().map(Box::new),
-                        diagnose_unresolved: self.options.diagnostics_enabled
-                            && !rbs_resolves_method
-                            && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
-                        allow_unindexed_owner: rbs_receiver_class_exists,
-                        signature: Some(signature),
+            self.facts
+                .analysis
+                .reference_candidates
+                .push(ReferenceCandidate::method(
+                    message_range,
+                    crate::core::MethodReferenceCandidate {
+                        owner: target_namespace,
+                        owner_kind: namespace_kind,
+                        method,
+                        is_super: false,
+                        access,
+                        caller: self.scope_tracker.current_method_fqn().cloned(),
+                        call_expression_range: defer_call_outcome.then_some(call_range),
+                        preferred_definition_range: None,
+                        diagnostics: crate::core::MethodReferenceDiagnostics {
+                            diagnostic_range: message_range,
+                            receiver_label,
+                            receiver_expression_range,
+                            receiver_type: receiver_type.clone().map(Box::new),
+                            diagnose_unresolved: self.options.diagnostics_enabled
+                                && !rbs_resolves_method
+                                && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
+                            allow_unindexed_owner: rbs_receiver_class_exists,
+                            safe_navigation,
+                            signature: Some(signature),
+                        },
                     },
-                },
-            ));
+                ));
             if defer_call_outcome {
-                assert!(
+                invariant!(
                     self.expressions.deferred_calls.insert(call_range),
-                    "INVARIANT VIOLATED: one call expression registered multiple deferred outcomes. This is a bug because one runtime call has exactly one method candidate. Fix: classify each CallNode once before retaining its deferred range."
+                    what = "one call expression registered multiple deferred outcomes",
+                    why = "one runtime call has exactly one method candidate",
+                    fix = "classify each CallNode once before retaining its deferred range",
                 );
             }
         }
 
         if self.options.diagnostics_enabled && method_name == "raise" && node.receiver().is_none() {
             if let Some(candidate) = self.raise_non_exception_candidate(node) {
-                self.facts.diagnostic_candidates.push(candidate);
+                self.facts.analysis.diagnostic_candidates.push(candidate);
             }
         }
 
         if self.options.diagnostics_enabled {
             for entry in super::super::bad_splat::check(node, &self.document) {
                 let candidate = self.bad_splat_candidate(entry);
-                self.facts.diagnostic_candidates.push(candidate);
+                self.facts.analysis.diagnostic_candidates.push(candidate);
             }
         }
     }
@@ -401,11 +440,11 @@ fn method_reference_access(
         return match node.name().as_slice() {
             b"send" | b"__send__" => MethodReferenceAccess::VisibilityBypass,
             b"public_send" => MethodReferenceAccess::ExplicitReceiver,
-            other => panic!(
-                "INVARIANT VIOLATED: static send target came from unsupported call `{}`. \
-                 This is a bug because only send/public_send/__send__ calls expose a reflected target. \
-                 Fix: keep static_send_target_name_and_range and method_reference_access in sync.",
-                String::from_utf8_lossy(other)
+            other => unreachable_invariant!(
+                what = "static send target came from unsupported call `{}`",
+                why = "only send/public_send/__send__ calls expose a reflected target",
+                fix = "keep static_send_target_name_and_range and method_reference_access in sync",
+                String::from_utf8_lossy(other),
             ),
         };
     }

@@ -40,7 +40,7 @@ Build and validate this package with the reusable SDK toolchain:
 
 ```bash
 extensions/mruby-sdk/scripts/build-wasm-docker.sh extensions/example-dsl
-cargo run --bin extension -- validate extensions/example-dsl
+cargo run -p devtools --bin extension -- validate extensions/example-dsl
 RUBY_FAST_LSP_TEST_BUILT_EXAMPLE=1 \
   cargo test -p ruby-fast-lsp-test-harness --test third_party_extension
 ```

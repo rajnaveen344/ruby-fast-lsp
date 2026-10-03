@@ -1,5 +1,5 @@
 use crate::environment::config::{FormatterKind, RubyFastLspConfig};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 #[cfg(unix)]
 use crate::test::harness::with_process_clock;
 use crate::test::harness::FakeEditor;
@@ -11,7 +11,7 @@ use tower_lsp::LanguageServer;
 
 #[tokio::test]
 async fn initialization_advertises_full_document_formatting() {
-    let initialized = RubyLanguageServer::default()
+    let initialized = Server::default()
         .initialize(InitializeParams::default())
         .await
         .unwrap();
@@ -48,11 +48,11 @@ async fn formats_current_unsaved_buffer_with_utf16_full_document_edit() {
     with_process_clock(async {
         let (_temp, command, captured_stdin) = fake_formatter("puts 'formatted'\n", 0);
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             formatter: FormatterKind::Standard,
             formatter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("sample.rb", "puts 'disk'\n").await;
         editor.set("sample.rb", "puts '😀 unsaved'").await;
 
@@ -90,11 +90,11 @@ async fn embedded_templates_are_never_sent_to_a_ruby_formatter() {
     with_process_clock(async {
         let (_temp, command, captured_stdin) = fake_formatter("corrupted", 0);
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             formatter: FormatterKind::Standard,
             formatter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor
             .open("app/views/users/show.html.erb", "<p><%= User.name %></p>\n")
             .await;
@@ -124,16 +124,18 @@ async fn formatter_failure_and_unchanged_output_return_no_edits() {
     with_process_clock(async {
         let (_failed_temp, failed_command, _) = fake_formatter("ignored", 2);
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             formatter: FormatterKind::RuboCop,
             formatter_command: vec![failed_command],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("sample.rb", "puts 1\n").await;
         assert!(editor.format("sample.rb").await.is_empty());
 
         let (_same_temp, same_command, _) = fake_formatter("puts 1\n", 0);
-        editor.server().config.lock().formatter_command = vec![same_command];
+        editor
+            .server()
+            .update_configuration(|config| config.formatter_command = vec![same_command]);
         assert!(editor.format("sample.rb").await.is_empty());
         assert_eq!(editor.content("sample.rb"), "puts 1\n");
     })

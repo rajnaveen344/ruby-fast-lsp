@@ -1,23 +1,25 @@
 //! Method return type queries, including cached receiver lookups.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, ResolvedMethodCallee, RubyMethod, RubyType,
     SourceFileId, TypeResolution, TypeSubject,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
+use crate::engine::queries::View;
 use crate::engine::resolution::{
-    chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
-    method_lookup_chain, method_missing_method, module_instance_receivers, namespace_target_exists,
+    chain_has_custom_method_missing, execution_context_application_targets, method_lookup_chain,
+    method_missing_method, module_instance_receivers, namespace_target_exists,
 };
+use crate::inference::semantics::ReceiverAccess;
 
-use super::memo::{AnalysisQueryCache, MethodReturnQueryAccess, MethodReturnQueryKey};
-use super::thread_memo::thread_receiver_has_non_public;
+use super::thread_memo::thread_protected_return_may_differ;
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn method_return_type_at(
         &self,
         name: &str,
@@ -50,7 +52,6 @@ impl<'a> AnalysisQuery<'a> {
         byte_offset: u32,
     ) -> Option<RubyType> {
         let method_fact = self
-            .engine
             .method_facts_in_file(file_id)
             .into_iter()
             .find(|fact| {
@@ -112,7 +113,6 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         let mut facts = self
-            .engine
             .method_facts_matching_owner_name(&callee.owner, &callee.method)
             .into_iter()
             .filter(|fact| callee.definition_ranges.contains(&fact.range))
@@ -147,7 +147,7 @@ impl<'a> AnalysisQuery<'a> {
             return None;
         }
 
-        match self.engine.type_at(
+        match self.type_at(
             &TypeSubject::MethodReturn(fact.fqn.clone()),
             fact.range.file_id,
             fact.range.end_byte,
@@ -157,24 +157,22 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-            panic!(
-                "INVARIANT VIOLATED: method return lookup received a non-method fact {}. \
-                 This is a bug because MethodFact FQNs must always use the Method variant. \
-                 Fix: validate method facts before engine insertion.",
-                fact.fqn
+            unreachable_invariant!(
+                what = "method return lookup received a non-method fact {}",
+                why = "MethodFact FQNs must always use the Method variant",
+                fix = "validate method facts before engine insertion",
+                fact.fqn,
             );
         };
         let signatures = self
-            .engine
             .method_facts_matching_owner_name(&fact.owner, method)
             .into_iter()
             .filter(|signature| {
-                self.engine
-                    .file(signature.range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: RBS method fact references an unregistered source file. \
-                         This is a bug because type overlay requires stable signature metadata. \
-                         Fix: remove signature facts through per-file replacement.",
+                self.file(signature.range.file_id)
+                    .expect_invariant(
+                        "RBS method fact references an unregistered source file",
+                        "type overlay requires stable signature metadata",
+                        "remove signature facts through per-file replacement",
                     )
                     .kind
                     == crate::core::SourceKind::Signature
@@ -182,7 +180,7 @@ impl<'a> AnalysisQuery<'a> {
             .collect::<Vec<_>>();
         if !signatures.is_empty() {
             return RubyType::union_from_proven(signatures, |signature| {
-                match self.engine.type_at(
+                match self.type_at(
                     &TypeSubject::MethodReturn(signature.fqn),
                     signature.range.file_id,
                     signature.range.end_byte,
@@ -196,113 +194,72 @@ impl<'a> AnalysisQuery<'a> {
         self.delegate_method_return_type(fact, seen)
     }
 
-    pub fn method_return_type_for_receiver(
+    /// A return type through receiver dispatch with the given visibility.
+    pub(in crate::engine) fn method_return_type_for_receiver_access(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-    ) -> Option<crate::core::RubyType> {
-        let mut seen = HashSet::new();
-        self.method_return_type_for_receiver_inner(namespace_fqn, method, true, None, &mut seen)
-    }
-
-    pub fn method_return_type_for_receiver_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<crate::core::RubyType> {
-        let key = MethodReturnQueryKey {
-            namespace: namespace_fqn.clone(),
-            method: *method,
-            access: MethodReturnQueryAccess::Private,
-        };
-        cache.method_return(self.engine.query_cache_identity(), key, || {
-            self.method_return_type_for_receiver(namespace_fqn, method)
-        })
-    }
-
-    pub fn method_return_type_for_public_receiver(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<crate::core::RubyType> {
-        let mut seen = HashSet::new();
-        self.method_return_type_for_receiver_inner(namespace_fqn, method, false, None, &mut seen)
-    }
-
-    pub fn method_return_type_for_public_receiver_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<crate::core::RubyType> {
-        let key = MethodReturnQueryKey {
-            namespace: namespace_fqn.clone(),
-            method: *method,
-            access: MethodReturnQueryAccess::Public,
-        };
-        cache.method_return(self.engine.query_cache_identity(), key, || {
-            self.method_return_type_for_public_receiver(namespace_fqn, method)
-        })
-    }
-
-    pub fn method_return_type_for_protected_receiver(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<crate::core::RubyType> {
-        let mut seen = HashSet::new();
+        access: ReceiverAccess<'_>,
+    ) -> Option<RubyType> {
         self.method_return_type_for_receiver_inner(
             namespace_fqn,
             method,
-            false,
-            Some(caller_namespace_fqn),
-            &mut seen,
+            access,
+            &mut HashSet::new(),
         )
     }
 
-    pub fn method_return_type_for_protected_receiver_cached(
+    /// The access a memoized return lookup is keyed and computed with. A
+    /// protected lookup that the return walk would answer exactly like a
+    /// public one shares the public entry, so the caller namespace is not
+    /// part of the hot key.
+    pub(in crate::engine) fn return_memo_access<'r>(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-        cache: &AnalysisQueryCache,
-    ) -> Option<crate::core::RubyType> {
-        let identity = self.engine.query_cache_identity();
-        if !thread_receiver_has_non_public(identity, namespace_fqn, *method, || {
-            self.receiver_method_has_non_public(namespace_fqn, method)
-        }) {
-            return self.method_return_type_for_public_receiver_cached(
-                namespace_fqn,
-                method,
-                cache,
-            );
+        access: ReceiverAccess<'r>,
+    ) -> ReceiverAccess<'r> {
+        match access {
+            ReceiverAccess::Protected { .. }
+                if !thread_protected_return_may_differ(
+                    self.engine.query_cache_identity(),
+                    namespace_fqn,
+                    *method,
+                    || self.protected_return_may_differ(namespace_fqn, method),
+                ) =>
+            {
+                ReceiverAccess::Public
+            }
+            ReceiverAccess::Any | ReceiverAccess::Protected { .. } | ReceiverAccess::Public => {
+                access
+            }
         }
-        let key = MethodReturnQueryKey {
-            namespace: namespace_fqn.clone(),
-            method: *method,
-            access: MethodReturnQueryAccess::Protected(caller_namespace_fqn.clone()),
-        };
-        cache.method_return(identity, key, || {
-            self.method_return_type_for_protected_receiver(
-                namespace_fqn,
-                method,
-                caller_namespace_fqn,
-            )
-        })
     }
 
-    fn receiver_method_has_non_public(
+    /// Whether the return walk may answer a protected lookup differently from
+    /// a public one. Only the receiver's own chain is compared, so a walk
+    /// that leaves it, through module includers, execution-context
+    /// applications, or a custom `method_missing`, may differ.
+    fn protected_return_may_differ(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> bool {
-        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-        let private_facts = method_facts_in_chain(self.engine, &ancestor_chain, method, true, None);
-        let public_facts = method_facts_in_chain(self.engine, &ancestor_chain, method, false, None);
+        if !module_instance_receivers(self.engine, namespace_fqn).is_empty() {
+            return true;
+        }
+        let private_facts = self.own_chain_method_facts(namespace_fqn, method, ReceiverAccess::Any);
+        let public_facts =
+            self.own_chain_method_facts(namespace_fqn, method, ReceiverAccess::Public);
         match (private_facts, public_facts) {
-            (None, None) => false,
+            (None, None) => {
+                !execution_context_application_targets(self.engine, namespace_fqn).is_empty()
+                    || (*method != method_missing_method()
+                        && chain_has_custom_method_missing(
+                            self.engine,
+                            &method_lookup_chain(self.engine, namespace_fqn),
+                        ))
+            }
             (Some((private_owner, private_facts)), Some((public_owner, public_facts))) => {
                 private_owner != public_owner
                     || private_facts
@@ -314,12 +271,31 @@ impl<'a> AnalysisQuery<'a> {
         }
     }
 
+    /// The winning facts on `namespace_fqn`'s own ancestor chain. Reflection
+    /// is the right receiver: callers dispatch to module includers first.
+    fn own_chain_method_facts(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        access: ReceiverAccess<'_>,
+    ) -> Option<(FullyQualifiedName, Vec<MethodFact>)> {
+        lookup::method(
+            self,
+            MethodRequest {
+                receiver: LookupReceiver::Reflection(namespace_fqn),
+                method: *method,
+                access,
+                want: MethodWant::Facts,
+            },
+        )
+        .into_facts()
+    }
+
     fn method_return_type_for_receiver_inner(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        allow_private: bool,
-        protected_caller: Option<&FullyQualifiedName>,
+        access: ReceiverAccess<'_>,
         seen: &mut HashSet<MethodVisitKey>,
     ) -> Option<crate::core::RubyType> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
@@ -334,21 +310,13 @@ impl<'a> AnalysisQuery<'a> {
                 self.method_return_type_for_receiver_inner(
                     &receiver,
                     method,
-                    allow_private,
-                    protected_caller,
+                    access,
                     &mut seen.clone(),
                 )
             });
         }
 
-        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-        if let Some((_owner, facts)) = method_facts_in_chain(
-            self.engine,
-            &ancestor_chain,
-            method,
-            allow_private,
-            protected_caller,
-        ) {
+        if let Some((_owner, facts)) = self.own_chain_method_facts(namespace_fqn, method, access) {
             return RubyType::union_from_proven(facts, |fact| {
                 self.method_return_type_inner(&fact, seen)
             });
@@ -357,13 +325,7 @@ impl<'a> AnalysisQuery<'a> {
         let applications = execution_context_application_targets(self.engine, namespace_fqn);
         if !applications.is_empty() {
             return RubyType::union_from_proven(applications, |application| {
-                self.method_return_type_for_receiver_inner(
-                    &application,
-                    method,
-                    allow_private,
-                    protected_caller,
-                    seen,
-                )
+                self.method_return_type_for_receiver_inner(&application, method, access, seen)
             });
         }
 
@@ -371,13 +333,15 @@ impl<'a> AnalysisQuery<'a> {
         // return. Navigation already treats that stub as Missing; walking it
         // here redoes MRO on every unresolved call.
         if *method != method_missing_method()
-            && chain_has_custom_method_missing(self.engine, &ancestor_chain)
+            && chain_has_custom_method_missing(
+                self.engine,
+                &method_lookup_chain(self.engine, namespace_fqn),
+            )
         {
             return self.method_return_type_for_receiver_inner(
                 namespace_fqn,
                 &method_missing_method(),
-                allow_private,
-                protected_caller,
+                access,
                 seen,
             );
         }
@@ -397,19 +361,17 @@ impl<'a> AnalysisQuery<'a> {
         let receiver_type = self.method_return_type_for_receiver_inner(
             &fact.owner,
             &receiver_method,
-            true,
-            None,
+            ReceiverAccess::Any,
             seen,
         )?;
 
         RubyType::union_from_proven(
-            AnalysisQuery::receiver_type_to_method_namespaces(&receiver_type),
+            crate::core::receiver_type_to_method_namespaces(&receiver_type),
             |namespace| {
                 self.method_return_type_for_receiver_inner(
                     &namespace,
                     delegated_method,
-                    true,
-                    None,
+                    ReceiverAccess::Any,
                     seen,
                 )
             },

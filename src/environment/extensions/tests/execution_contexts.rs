@@ -1,4 +1,5 @@
 use super::*;
+use crate::environment::extensions::ExtensionStat;
 
 #[test]
 fn guest_call_context_delivers_project_only_for_legacy_per_call_guests() {
@@ -148,26 +149,32 @@ fn wasm_private_state_is_isolated_per_project_uri() {
         "code lenses must use the same project-aware response dispatch as document symbols"
     );
     let telemetry = extension.status_report().telemetry;
-    assert_eq!(telemetry.project_instances, 2);
-    assert_eq!(telemetry.project_instance_creations, 2);
-    assert_eq!(telemetry.project_instance_failures, 0);
-    assert!(telemetry.max_project_instance_time_ns <= telemetry.total_project_instance_time_ns);
+    assert_eq!(telemetry.get(ExtensionStat::ProjectInstances), 2);
+    assert_eq!(telemetry.get(ExtensionStat::ProjectInstanceCreations), 2);
+    assert_eq!(telemetry.get(ExtensionStat::ProjectInstanceFailures), 0);
+    assert!(
+        telemetry.get(ExtensionStat::MaxProjectInstanceTimeNs)
+            <= telemetry.get(ExtensionStat::TotalProjectInstanceTimeNs)
+    );
     assert_eq!(
-        telemetry.guest_calls, 8,
+        telemetry.get(ExtensionStat::GuestCalls), 8,
         "activation, three call hooks, three symbol requests, and one lens request must all be observed: {telemetry:?}"
     );
-    assert_eq!(telemetry.lifecycle_calls, 1);
-    assert_eq!(telemetry.index_calls, 3);
-    assert_eq!(telemetry.event_calls, 4);
-    assert!(telemetry.emitted_index_patches >= 2);
-    assert!(telemetry.emitted_response_patches >= 3);
-    assert_eq!(telemetry.guest_failures, 0);
-    assert_eq!(telemetry.guest_traps, 0);
-    assert_eq!(telemetry.resource_limit_failures, 0);
-    assert_eq!(telemetry.disablements, 0);
-    assert_eq!(telemetry.rejected_outputs, 0);
-    assert_eq!(telemetry.patch_conflicts, 0);
-    assert!(telemetry.max_guest_time_ns <= telemetry.total_guest_time_ns);
+    assert_eq!(telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(telemetry.get(ExtensionStat::IndexCalls), 3);
+    assert_eq!(telemetry.get(ExtensionStat::EventCalls), 4);
+    assert!(telemetry.get(ExtensionStat::EmittedIndexPatches) >= 2);
+    assert!(telemetry.get(ExtensionStat::EmittedResponsePatches) >= 3);
+    assert_eq!(telemetry.get(ExtensionStat::GuestFailures), 0);
+    assert_eq!(telemetry.get(ExtensionStat::GuestTraps), 0);
+    assert_eq!(telemetry.get(ExtensionStat::ResourceLimitFailures), 0);
+    assert_eq!(telemetry.get(ExtensionStat::Disablements), 0);
+    assert_eq!(telemetry.get(ExtensionStat::RejectedOutputs), 0);
+    assert_eq!(telemetry.get(ExtensionStat::PatchConflicts), 0);
+    assert!(
+        telemetry.get(ExtensionStat::MaxGuestTimeNs)
+            <= telemetry.get(ExtensionStat::TotalGuestTimeNs)
+    );
 }
 
 #[test]
@@ -327,8 +334,10 @@ fn execution_context_connection_validates_exact_targets_and_project_requirement(
 
     let mut invalid = patch;
     let IndexPatch::ConnectExecutionContext(connection) = &mut invalid else {
-        panic!(
-            "INVARIANT VIOLATED: connection fixture changed variant. This is a test bug because target mutation requires ConnectExecutionContext. Fix: preserve the fixture variant."
+        unreachable_invariant!(
+            what = "connection fixture changed variant",
+            why = "target mutation requires ConnectExecutionContext",
+            fix = "preserve the fixture variant",
         );
     };
     connection.application = ExecutionContextTarget::GeneratedOwner {

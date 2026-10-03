@@ -1,196 +1,123 @@
 //! Process-wide immutable products. Projects bind results into isolated engines.
-use super::RubyLanguageServer;
-use crate::environment::config::runtime::SelectedRuntimeDescriptor;
+use super::Server;
 use crate::environment::runtime::catalog::{
-    DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
-    RuntimeStatusParams,
+    DiscoveredRuntime, RuntimeCatalog, RuntimeDiscoverParams, RuntimeImplementation,
 };
-use anyhow::Result;
-use log::warn;
-use ruby_analysis::engine::AnalysisEngine;
+#[cfg(test)]
+use crate::invariant::ExpectInvariant;
+use crate::loader::cache::dependency_product::GemBindingStat;
+use crate::loader::context::{RuntimeDiscovery, SharedProducts};
+use crate::loader::scheduling::status::ProjectIndexingSnapshot;
+use crate::utils::admission::IndexingResourceGovernor;
+use crate::utils::persistent_cache::PersistentProductStat;
+use crate::utils::single_flight::SingleFlightStat;
+use ruby_analysis::stats::StatsSnapshot;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
 
-const MIB: u64 = 1024 * 1024;
-pub(super) const CORE_ENGINE_CACHE_MAX_ENTRIES: usize = 8;
-pub(super) const CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES: u64 = 128 * MIB;
-const RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES: usize = 32;
-const RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES: u64 = MIB;
-fn new_core_engine_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
-    String,
-    ruby_analysis::engine::AnalysisEngine,
-> {
-    crate::utils::single_flight::BoundedSingleFlightCache::new(
-        CORE_ENGINE_CACHE_MAX_ENTRIES,
-        CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
-        |engine: &ruby_analysis::engine::AnalysisEngine| {
-            u64::try_from(engine.estimated_memory_stats().total()).expect(
-                "INVARIANT VIOLATED: a core template heap estimate does not fit u64. This is a bug because one in-memory engine cannot exceed the process address space. Fix: inspect engine memory estimation overflow.",
-            )
-        },
-    )
-}
-
-fn new_gem_dependency_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
-    crate::indexer::cache::dependency_product::GemDependencyProductKey,
-    crate::indexer::cache::dependency_product::GemDependencyProduct,
-> {
-    crate::utils::single_flight::BoundedSingleFlightCache::ephemeral(
-        |product: &crate::indexer::cache::dependency_product::GemDependencyProduct| {
-            product.estimated_weight_bytes()
-        },
-    )
-}
-
-fn new_runtime_stdlib_path_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
-    crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
-    crate::indexer::sources::stdlib::RuntimeStdlibPaths,
-> {
-    crate::utils::single_flight::BoundedSingleFlightCache::new(
-        RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES,
-        RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES,
-        crate::indexer::sources::stdlib::RuntimeStdlibPaths::estimated_weight_bytes,
-    )
-}
-
-/// Detached counters and estimated retained bytes for one immutable-product cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RetainedProductSnapshot {
-    pub reuse: crate::utils::single_flight::SingleFlightSnapshot,
-    pub retained_weight_bytes: u64,
-}
-
 /// Detached process-wide telemetry. This view owns no caches or project facts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeProductSnapshot {
-    pub core_templates: RetainedProductSnapshot,
-    pub stdlib_paths: RetainedProductSnapshot,
-    pub gem_dependencies: RetainedProductSnapshot,
-    pub classpath_files: RetainedProductSnapshot,
-    pub java_artifacts: RetainedProductSnapshot,
-    pub persistent_gems: crate::indexer::cache::persistent::PersistentProductSnapshot,
-    pub persistent_java: crate::indexer::cache::persistent::PersistentProductSnapshot,
-    pub compiled_wasm: crate::indexer::cache::persistent::PersistentProductSnapshot,
-    pub gem_bindings: crate::indexer::cache::dependency_product::GemDependencyBindingSnapshot,
+    pub core_templates: StatsSnapshot<SingleFlightStat>,
+    pub stdlib_paths: StatsSnapshot<SingleFlightStat>,
+    pub gem_dependencies: StatsSnapshot<SingleFlightStat>,
+    pub classpath_files: StatsSnapshot<SingleFlightStat>,
+    pub java_artifacts: StatsSnapshot<SingleFlightStat>,
+    pub persistent_gems: StatsSnapshot<PersistentProductStat>,
+    pub persistent_java: StatsSnapshot<PersistentProductStat>,
+    pub compiled_wasm: StatsSnapshot<PersistentProductStat>,
+    pub gem_bindings: StatsSnapshot<GemBindingStat>,
 }
 
+/// One project's runtime selection and indexing state for
+/// `ruby-fast-lsp/runtime/status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRuntimeStatus {
+    pub root: PathBuf,
+    pub mode: String,
+    pub implementation: Option<RuntimeImplementation>,
+    pub family: Option<String>,
+    pub engine_version: Option<String>,
+    pub compatibility_version: Option<String>,
+    pub executable: Option<PathBuf>,
+    pub java_home: Option<PathBuf>,
+    pub stub_overlay: Option<String>,
+    pub classpath_fingerprint_sha256: Option<String>,
+    pub indexing: ProjectIndexingSnapshot,
+    /// Backward-compatible projection for clients predating structured
+    /// indexing state. New clients must use `indexing`.
+    pub indexing_complete: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub projects: Vec<ProjectRuntimeStatus>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatusParams {
+    pub project_root: Option<PathBuf>,
+}
+
+/// Server-held products: the loader-visible shared products plus the
+/// process-wide runtime discovery snapshot.
 #[derive(Clone)]
 pub(crate) struct RuntimeProducts {
-    pub(super) discovered_runtimes: Arc<tokio::sync::OnceCell<Vec<DiscoveredRuntime>>>,
-    core_templates: crate::utils::single_flight::BoundedSingleFlightCache<String, AnalysisEngine>,
-    stdlib_paths: crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
-        crate::indexer::sources::stdlib::RuntimeStdlibPaths,
-    >,
-    gem_dependencies: crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::cache::dependency_product::GemDependencyProductKey,
-        crate::indexer::cache::dependency_product::GemDependencyProduct,
-    >,
-    classpath_files: crate::environment::runtime::jruby::classpath::ClasspathFileProductCache,
-    java_artifacts: crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache,
-    persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache,
-    gem_bindings: Arc<crate::indexer::cache::dependency_product::GemDependencyBindingCounters>,
+    discovered_runtimes: Arc<tokio::sync::OnceCell<Vec<DiscoveredRuntime>>>,
+    shared: SharedProducts,
+}
+impl std::ops::Deref for RuntimeProducts {
+    type Target = SharedProducts;
+    fn deref(&self) -> &SharedProducts {
+        &self.shared
+    }
 }
 impl RuntimeProducts {
     fn snapshot(&self) -> RuntimeProductSnapshot {
         RuntimeProductSnapshot {
-            core_templates: RetainedProductSnapshot {
-                reuse: self.core_templates.snapshot(),
-                retained_weight_bytes: self.core_templates.retained_weight(),
-            },
-            stdlib_paths: RetainedProductSnapshot {
-                reuse: self.stdlib_paths.snapshot(),
-                retained_weight_bytes: self.stdlib_paths.retained_weight(),
-            },
-            gem_dependencies: RetainedProductSnapshot {
-                reuse: self.gem_dependencies.snapshot(),
-                retained_weight_bytes: self.gem_dependencies.retained_weight(),
-            },
-            classpath_files: RetainedProductSnapshot {
-                reuse: self.classpath_files.snapshot(),
-                retained_weight_bytes: self.classpath_files.retained_weight_bytes(),
-            },
-            java_artifacts: RetainedProductSnapshot {
-                reuse: self.java_artifacts.snapshot(),
-                retained_weight_bytes: self.java_artifacts.retained_weight_bytes(),
-            },
-            persistent_gems: self.persistent.gem_product_snapshot(),
-            persistent_java: self.persistent.java_artifact_snapshot(),
-            compiled_wasm: self.persistent.compiled_wasm_snapshot(),
-            gem_bindings: self.gem_bindings.snapshot(),
+            core_templates: self.core_templates().snapshot(),
+            stdlib_paths: self.stdlib_paths().snapshot(),
+            gem_dependencies: self.gem_dependencies().snapshot(),
+            classpath_files: self.classpath_files().snapshot(),
+            java_artifacts: self.java_artifacts().snapshot(),
+            persistent_gems: self.persistent().gem_product_snapshot(),
+            persistent_java: self.persistent().java_artifact_snapshot(),
+            compiled_wasm: self.persistent().compiled_wasm_snapshot(),
+            gem_bindings: self.gem_bindings().snapshot(),
         }
     }
 
     pub(super) fn new(root: PathBuf) -> Self {
         Self {
             discovered_runtimes: Arc::new(tokio::sync::OnceCell::new()),
-            core_templates: new_core_engine_cache(),
-            stdlib_paths: new_runtime_stdlib_path_cache(),
-            gem_dependencies: new_gem_dependency_cache(),
-            classpath_files: Default::default(),
-            java_artifacts: Default::default(),
-            persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache::new(root),
-            gem_bindings: Arc::default(),
+            shared: SharedProducts::new(root),
         }
     }
-    pub(crate) fn core_templates(
-        &self,
-    ) -> &crate::utils::single_flight::BoundedSingleFlightCache<String, AnalysisEngine> {
-        &self.core_templates
-    }
-    pub(crate) fn stdlib_paths(
-        &self,
-    ) -> &crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
-        crate::indexer::sources::stdlib::RuntimeStdlibPaths,
-    > {
-        &self.stdlib_paths
-    }
-    pub(crate) fn gem_dependencies(
-        &self,
-    ) -> &crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::cache::dependency_product::GemDependencyProductKey,
-        crate::indexer::cache::dependency_product::GemDependencyProduct,
-    > {
-        &self.gem_dependencies
-    }
-    pub(crate) fn classpath_files(
-        &self,
-    ) -> &crate::environment::runtime::jruby::classpath::ClasspathFileProductCache {
-        &self.classpath_files
-    }
-    pub(crate) fn java_artifacts(
-        &self,
-    ) -> &crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache {
-        &self.java_artifacts
-    }
-    pub(crate) fn persistent(
-        &self,
-    ) -> &crate::indexer::cache::persistent::PersistentDerivedProductCache {
-        &self.persistent
-    }
-    pub(crate) fn gem_bindings(
-        &self,
-    ) -> &Arc<crate::indexer::cache::dependency_product::GemDependencyBindingCounters> {
-        &self.gem_bindings
+
+    /// Shared product handles for one loader context.
+    pub(crate) fn shared(&self) -> SharedProducts {
+        self.shared.clone()
     }
 
-    pub(crate) fn cache_root(&self) -> PathBuf {
-        self.persistent.cache_root()
+    /// Runtime discovery bound to the given resource governor.
+    pub(crate) fn discovery(&self, resources: &IndexingResourceGovernor) -> RuntimeDiscovery {
+        RuntimeDiscovery::new(self.discovered_runtimes.clone(), resources.clone())
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Read process-wide counters and retained weights without exposing cache handles.
     /// Each component is observed independently, matching its own synchronization.
     pub fn runtime_product_snapshot(&self) -> RuntimeProductSnapshot {
         self.products.snapshot()
     }
 
-    pub fn compiled_wasm_cache_snapshot(
-        &self,
-    ) -> crate::indexer::cache::persistent::PersistentProductSnapshot {
+    pub fn compiled_wasm_cache_snapshot(&self) -> StatsSnapshot<PersistentProductStat> {
         self.products.persistent().compiled_wasm_snapshot()
     }
 
@@ -209,52 +136,22 @@ impl RubyLanguageServer {
     }
 
     async fn discovered_runtimes(&self) -> Vec<DiscoveredRuntime> {
-        let indexing_resources = self.indexing.resources().clone();
         self.products
-            .discovered_runtimes
-            .get_or_init(|| {
-                crate::environment::runtime::catalog::discover_runtimes(indexing_resources)
-            })
+            .discovery(self.indexing.resources())
+            .discovered_runtimes()
             .await
-            .clone()
     }
 
     #[cfg(test)]
     pub(crate) fn set_discovered_runtimes_for_tests(&self, runtimes: Vec<DiscoveredRuntime>) {
-        self.products.discovered_runtimes.set(runtimes).expect(
-            "INVARIANT VIOLATED: test runtime catalog was initialized more than once. This is a bug because each test server must own one immutable discovery snapshot. Fix: create a fresh RubyLanguageServer per runtime test.",
-        );
-    }
-
-    pub(crate) async fn resolve_auto_runtime(
-        &self,
-        project_root: &std::path::Path,
-    ) -> Result<Option<SelectedRuntimeDescriptor>> {
-        let Some(marker) =
-            crate::environment::runtime::catalog::project_runtime_marker(project_root)?
-        else {
-            return Ok(None);
-        };
-        let runtime = crate::environment::runtime::catalog::select_runtime_for_marker(
-            &marker,
-            &self.discovered_runtimes().await,
-        )?;
-        let Some(runtime) = runtime else {
-            warn!(
-                "Project runtime marker `{marker}` has no exact installed runtime for {}",
-                project_root.display()
+        self.products
+            .discovered_runtimes
+            .set(runtimes)
+            .expect_invariant(
+                "test runtime catalog was initialized more than once",
+                "each test server must own one immutable discovery snapshot",
+                "create a fresh Server per runtime test",
             );
-            return Ok(None);
-        };
-        if runtime.support_status
-            != crate::environment::runtime::catalog::RuntimeSupportStatus::Supported
-        {
-            return Err(anyhow::anyhow!(
-                "project runtime marker `{marker}` selects unsupported {}",
-                runtime.display_name
-            ));
-        }
-        Ok(Some(runtime.into()))
     }
 
     pub async fn handle_runtime_status(
@@ -288,7 +185,7 @@ impl RubyLanguageServer {
                 ) = match selection {
                     crate::environment::config::runtime::EffectiveRuntimeSelection::Explicit(runtime) => {
                         let stub_overlay = (runtime.implementation
-                            == crate::environment::runtime::catalog::RuntimeImplementation::Jruby)
+                            == RuntimeImplementation::Jruby)
                             .then(|| runtime.family.clone());
                         (
                             "explicit".to_string(),
@@ -302,9 +199,9 @@ impl RubyLanguageServer {
                         )
                     }
                     crate::environment::config::runtime::EffectiveRuntimeSelection::Auto => {
-                        if let Some(runtime) = workspace.runtime.selected().read().clone() {
+                        if let Some(runtime) = workspace.handle().runtime().selected().read().clone() {
                             let stub_overlay = (runtime.implementation
-                                == crate::environment::runtime::catalog::RuntimeImplementation::Jruby)
+                                == RuntimeImplementation::Jruby)
                                 .then(|| runtime.family.clone());
                             (
                                 "auto".to_string(),
@@ -327,7 +224,7 @@ impl RubyLanguageServer {
                         let compatibility = format!("{major}.{minor}");
                         (
                             "legacy".to_string(),
-                            Some(crate::environment::runtime::catalog::RuntimeImplementation::Mri),
+                            Some(RuntimeImplementation::Mri),
                             Some(compatibility.clone()),
                             None,
                             Some(compatibility),
@@ -337,6 +234,8 @@ impl RubyLanguageServer {
                         )
                     }
                 };
+                let classpath_fingerprint_sha256 =
+                    workspace.handle().runtime().classpath_fingerprint();
                 ProjectRuntimeStatus {
                     root: workspace.root_path,
                     mode,
@@ -347,11 +246,7 @@ impl RubyLanguageServer {
                     executable,
                     java_home,
                     stub_overlay,
-                    classpath_fingerprint_sha256: workspace
-                        .runtime
-                        .classpath_fingerprint()
-                        .read()
-                        .clone(),
+                    classpath_fingerprint_sha256,
                     indexing_complete: workspace.indexing_status.snapshot().is_ready(),
                     indexing: workspace.indexing_status.snapshot(),
                 }

@@ -1,8 +1,8 @@
 # Integration Tests
 
 This directory contains integration tests for the Ruby Fast LSP server. Tests
-are grouped by the same feature families as `src/lsp/capabilities/` and
-`src/lsp/query/`, then by the Ruby behaviour under test.
+are grouped by the same feature families as `src/features/`, then by the Ruby
+behaviour under test.
 
 ## Structure
 
@@ -14,6 +14,10 @@ are grouped by the same feature families as `src/lsp/capabilities/` and
 - `navigation/` - `goto/`, `references/`, `implementation/`, `call_hierarchy/`,
   `type_hierarchy/`, `document_highlights.rs`
 - `editing/` - `completion/`, `rename/`, `formatting.rs`, `signature_help.rs`
+- `lifecycle/` - Deterministic schedules around collection, commit, dependency
+  refresh, and diagnostic publication; observer controls; exact results and
+  method targets across edits, partial opens, and closed buffers; server-driven
+  extension workspace discovery and watched-file routing
 - `presentation/` - `hover/`, `inlay_hints/`, `code_lens/`, `folding_range/`,
   `selection_ranges.rs`
   - `inlay_hints/variable_type/assigned_values/` - Hints from literals, constants,

@@ -61,23 +61,25 @@ describe supported forms and limits.
 
 | Path | Purpose |
 | --- | --- |
-| [src/](src/ARCHITECTURE.md) | Server, workspace lifecycle, and LSP adapters; start at `src/main.rs` and `src/server/mod.rs` |
+| [src/](src/ARCHITECTURE.md) | Server, workspace lifecycle, and LSP adapters; start at `src/main.rs`, `src/lsp/service.rs`, and `src/server/mod.rs` |
 | [crates/ruby-analysis/](crates/ruby-analysis/README.md) | Shared facts, indexing, inference, and semantic queries |
 | [crates/](Cargo.toml) | RBS/JVM support, extension APIs and hosts, and the external LSP test harness |
 | [extensions/](extensions/README.md) | Framework integrations and extension examples |
 | [editors/](editors/README.md) | Editor adapters and npm/VSIX packaging |
-| [src/test/](src/test/README.md) | Feature and CLI tests, lifecycle simulation, and shared fixtures |
+| [src/test/](src/test/README.md) | Feature, lifecycle, robustness, and CLI tests, and shared fixtures |
 | [docs/](docs/README.md) / [support/](support/README.md) | Maintained guides / validation tools, assets, and evidence |
 
 ## Next priorities
 
+- Restructure the code into small modules with plain-value interfaces, following
+  the [restructure plan](docs/development/restructure.md). No features are removed.
 - Improve proof coverage for user-defined yielding methods and additional RBS
   forms, guided by reduced real-world regressions.
 - Consolidate repeated argument/type binding logic and make unexplained
   `Unknown` outcomes easier to investigate.
 - Refine dependency-driven invalidation so cross-file refresh stays correct
   without unnecessary work during editing.
-- Expand independent simulator expectations and native/editor acceptance before
+- Expand robustness coverage and native/editor acceptance before
   broader public promotion.
 
 These are directions, not delivery promises. Completed implementation plans

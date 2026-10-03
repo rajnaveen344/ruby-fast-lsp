@@ -1,14 +1,15 @@
 //! Namespace, constant, and constant hover queries.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
 use crate::core::{FullyQualifiedName, GraphNodeKind, RubyConstant, RubyType, TypeSubject};
 use crate::engine::queries::lookup::types::{ConstantHover, ConstantHoverKind};
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn namespace_node_kind(&self, namespace_fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        self.engine.latest_graph_node_kind(namespace_fqn)
+        self.latest_graph_node_kind(namespace_fqn)
     }
 
     pub fn namespace_exists(&self, namespace_fqn: &FullyQualifiedName) -> bool {
@@ -46,18 +47,18 @@ impl<'a> AnalysisQuery<'a> {
                 ))
             }
             RubyType::Array(_) => Some(FullyQualifiedName::namespace_with_kind(
-                vec![RubyConstant::new("Array").expect(
-                    "INVARIANT VIOLATED: built-in constant `Array` is invalid. \
-                     This is a bug because Ruby built-in constants must be valid Ruby constants. \
-                     Fix: correct the hard-coded built-in constant name.",
+                vec![RubyConstant::new("Array").expect_invariant(
+                    "built-in constant `Array` is invalid",
+                    "ruby built-in constants must be valid Ruby constants",
+                    "correct the hard-coded built-in constant name",
                 )],
                 crate::core::NamespaceKind::Instance,
             )),
             RubyType::Hash(_, _) => Some(FullyQualifiedName::namespace_with_kind(
-                vec![RubyConstant::new("Hash").expect(
-                    "INVARIANT VIOLATED: built-in constant `Hash` is invalid. \
-                     This is a bug because Ruby built-in constants must be valid Ruby constants. \
-                     Fix: correct the hard-coded built-in constant name.",
+                vec![RubyConstant::new("Hash").expect_invariant(
+                    "built-in constant `Hash` is invalid",
+                    "ruby built-in constants must be valid Ruby constants",
+                    "correct the hard-coded built-in constant name",
                 )],
                 crate::core::NamespaceKind::Instance,
             )),
@@ -126,11 +127,6 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn known_namespace_fqns(&self) -> HashSet<FullyQualifiedName> {
-        self.engine
-            .symbol_store()
-            .known_namespace_fqns()
-            .into_iter()
-            .filter_map(|id| self.engine.fqn_for_id(id).cloned())
-            .collect()
+        self.engine.decls.known_namespace_fqns(&self.engine.names)
     }
 }

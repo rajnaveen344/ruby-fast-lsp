@@ -631,7 +631,7 @@ fn append_only_expression_lookup_survives_unsorted_file_index() {
 }
 
 #[test]
-#[should_panic(expected = "INVARIANT VIOLATED: TextRange start_byte must be <= end_byte")]
+#[should_panic(expected = "invariant violated: TextRange start_byte must be <= end_byte")]
 fn invalid_range_panics() {
     let _ = TextRange::new(file(), 10, 9);
 }

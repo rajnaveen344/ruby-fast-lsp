@@ -1,6 +1,8 @@
 use ruby_prism::{DefNode, Node};
 
-use crate::core::{DirectYieldCall, ForwardedBlockCall, RubyMethod};
+use crate::core::callables::callable_signature::DirectYieldCall;
+use crate::core::callables::callable_signature::ForwardedBlockCall;
+use crate::core::RubyMethod;
 
 /// Recognize the bounded forwarding form whose method result is exactly one
 /// higher-order call on an ordinary parameter with the named block parameter.

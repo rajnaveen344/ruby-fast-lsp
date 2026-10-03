@@ -1,7 +1,7 @@
 //! Project-wide method rename tests.
 
 use crate::test::harness::FakeEditor;
-use tower_lsp::lsp_types::{Position, PrepareRenameResponse, Range};
+use tower_lsp::lsp_types::{NumberOrString, Position, PrepareRenameResponse, Range};
 
 #[tokio::test]
 async fn rename_instance_method_updates_definition_and_resolved_calls() {
@@ -373,4 +373,71 @@ async fn rename_rejects_operator_methods_and_writer_shape_changes() {
         .await
         .is_none());
     assert!(editor.rename_at("syntax.rb", 3, 8, "label").await.is_none());
+}
+
+#[tokio::test]
+async fn rename_and_absence_diagnostics_fail_closed_on_an_ancestor_with_unresolved_lookup_edge() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "user.rb",
+            "class Base\n  include MissingMixin\nend\n\nclass User < Base\n  def name = 'Naveen'\nend\nUser.new.name\nUser.new.nickname\n",
+        )
+        .await;
+
+    assert!(
+        editor.rename_at("user.rb", 5, 7, "label").await.is_none(),
+        "an unresolved edge anywhere on the ancestry leaves the rename collision proof incomplete"
+    );
+    let absence_claims = editor
+        .diagnostics("user.rb")
+        .await
+        .into_iter()
+        .filter(|diagnostic| {
+            diagnostic.code == Some(NumberOrString::String("unresolved-method".into()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        absence_claims.is_empty(),
+        "the same unknown lookup edge suppresses missing-method claims, got {absence_claims:?}"
+    );
+}
+
+/// Negative-proof-only barriers (a dynamic mixin hook, an open top-level
+/// owner) suppress absence claims but do not block rename, which follows
+/// positive lookup identity over the same static edges.
+#[tokio::test]
+async fn absence_only_barriers_suppress_claims_but_keep_rename_available() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "widget.rb",
+            "module Hooked\n  def self.included(base)\n    base.define_method(:extra) { 1 }\n  end\nend\n\nclass Widget\n  include Hooked\n  def greet = 'own'\nend\nWidget.new.greet\nWidget.new.extra\n",
+        )
+        .await;
+    editor.open("script.rb", "def helper = 1\nhelper\n").await;
+
+    let hooked_claims = editor
+        .diagnostics("widget.rb")
+        .await
+        .into_iter()
+        .filter(|diagnostic| {
+            diagnostic.code == Some(NumberOrString::String("unresolved-method".into()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        hooked_claims.is_empty(),
+        "an included hook may define methods, got {hooked_claims:?}"
+    );
+    assert!(
+        editor.rename_at("widget.rb", 8, 7, "hello").await.is_some(),
+        "the hook does not hide a static ancestor from rename collision checks"
+    );
+    assert!(
+        editor
+            .rename_at("script.rb", 0, 5, "assist")
+            .await
+            .is_some(),
+        "a top-level method keeps its rename"
+    );
 }

@@ -1,4 +1,5 @@
 use crate::core::{LiteralKey, RubyType, UnknownReason};
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One flow-local abstract identity for a mutable Hash value.
@@ -48,12 +49,16 @@ impl ArrayShapeAliases {
         index: i32,
     ) -> BTreeSet<ShapeIdentity> {
         let position = if index >= 0 {
-            usize::try_from(index).expect(
-                "INVARIANT VIOLATED: a nonnegative i32 Array index did not fit usize. This is a bug because every supported Rust target can represent u32-sized collection positions. Fix: keep positional indices bounded to Prism's i32 conversion.",
+            usize::try_from(index).expect_invariant(
+                "a nonnegative i32 Array index did not fit usize",
+                "every supported Rust target can represent u32-sized collection positions",
+                "keep positional indices bounded to Prism's i32 conversion",
             )
         } else {
-            let from_end = usize::try_from(index.unsigned_abs()).expect(
-                "INVARIANT VIOLATED: an i32 Array index magnitude did not fit usize. This is a bug because every supported Rust target can represent u32-sized collection positions. Fix: keep positional indices bounded to Prism's i32 conversion.",
+            let from_end = usize::try_from(index.unsigned_abs()).expect_invariant(
+                "an i32 Array index magnitude did not fit usize",
+                "every supported Rust target can represent u32-sized collection positions",
+                "keep positional indices bounded to Prism's i32 conversion",
             );
             let Some(position) = self.length.checked_sub(from_end) else {
                 return BTreeSet::new();

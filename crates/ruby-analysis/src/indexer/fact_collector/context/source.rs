@@ -1,19 +1,20 @@
 use crate::core::TextRange;
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::yard::parser::{CommentLineInfo, YardParser};
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_extension_api::SourceRange;
 
 impl FactCollector {
     pub fn text_range_from_offsets(&self, start: usize, end: usize) -> TextRange {
-        let start_byte = u32::try_from(start).expect(
-            "INVARIANT VIOLATED: diagnostic start offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        let start_byte = u32::try_from(start).expect_invariant(
+            "diagnostic start offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen TextRange offsets before indexing files larger than u32::MAX bytes",
         );
-        let end_byte = u32::try_from(end).expect(
-            "INVARIANT VIOLATED: diagnostic end offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        let end_byte = u32::try_from(end).expect_invariant(
+            "diagnostic end offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen TextRange offsets before indexing files larger than u32::MAX bytes",
         );
         TextRange::new(self.document.analysis_file_id(), start_byte, end_byte)
     }
@@ -138,9 +139,9 @@ pub(in crate::indexer::fact_collector) fn source_range(
 }
 
 pub(in crate::indexer::fact_collector) fn u32_offset(offset: usize) -> u32 {
-    u32::try_from(offset).expect(
-        "INVARIANT VIOLATED: source byte offset exceeded u32. \
-         This is a bug because analysis facts currently store u32 ranges. \
-         Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+    u32::try_from(offset).expect_invariant(
+        "source byte offset exceeded u32",
+        "analysis facts currently store u32 ranges",
+        "widen TextRange offsets before indexing files larger than u32::MAX bytes",
     )
 }

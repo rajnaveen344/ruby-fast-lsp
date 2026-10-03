@@ -1,12 +1,16 @@
 use super::classpath::{ArtifactKind, ClasspathArtifact, ProjectClasspath};
-use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightSnapshot};
+use crate::invariant::ExpectInvariant;
+use crate::utils::persistent_cache::{PersistentProduct, PersistentProductKind};
+use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightStat};
 use anyhow::{anyhow, Context, Result as AnyResult};
+use ruby_analysis::stats::StatsSnapshot;
 use ruby_fast_lsp_jvm_metadata::{
     parse_archive, ArchiveKind, ArchiveLimits, ArchiveMetadata, ClassFile,
     ARCHIVE_PRODUCT_SEMANTIC_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
 use std::mem::size_of;
@@ -106,7 +110,7 @@ impl JavaArtifactProductCache {
         self.inner.get_or_try_init(key, producer)
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
         self.inner.snapshot()
     }
 
@@ -162,12 +166,12 @@ impl JavaArtifactProduct {
         archive_limits: ArchiveLimits,
     ) -> Result<Self, JavaCatalogError> {
         let expected = JavaArtifactProductKey::new(artifact, key.jdk_feature, archive_limits);
-        assert_eq!(
-            key, &expected,
-            "INVARIANT VIOLATED: Java artifact product key does not describe the artifact and \
-             parser limits being built. This is a bug because persistent metadata would be \
-             published under the wrong semantic identity. Fix: derive the key from the exact \
-             artifact, JDK feature, and archive limits immediately before construction."
+        invariant_eq!(
+            key,
+            &expected,
+            what = "Java artifact product key does not match the artifact and limits",
+            why = "metadata would publish under the wrong identity",
+            fix = "derive the key from the artifact, JDK feature, and limits right before building",
         );
         let bytes = fs::read(&artifact.path).map_err(|error| JavaCatalogError::Read {
             path: artifact.path.clone(),
@@ -188,11 +192,12 @@ impl JavaArtifactProduct {
             path: artifact.path.clone(),
             message: format!("{error:?}"),
         })?;
-        assert_eq!(
-            archive.fingerprint_sha256, artifact.fingerprint_sha256,
-            "INVARIANT VIOLATED: archive parser content identity differs from the pre-parse \
-             SHA-256. This is a bug because both hashes cover the same immutable bytes. Fix: keep \
-             artifact and archive fingerprint algorithms identical."
+        invariant_eq!(
+            archive.fingerprint_sha256,
+            artifact.fingerprint_sha256,
+            what = "archive parser content identity differs from the pre-parse SHA-256",
+            why = "both hashes cover the same immutable bytes",
+            fix = "keep artifact and archive fingerprint algorithms identical",
         );
         let estimated_weight_bytes = estimate_product_weight(key, &archive);
         Ok(Self {
@@ -205,8 +210,22 @@ impl JavaArtifactProduct {
     pub fn estimated_weight_bytes(&self) -> u64 {
         self.estimated_weight_bytes
     }
+}
 
-    pub fn encode_persistent_payload(&self) -> AnyResult<Vec<u8>> {
+impl PersistentProduct for JavaArtifactProduct {
+    type Key = JavaArtifactProductKey;
+
+    const KIND: PersistentProductKind = PersistentProductKind::JavaArtifact;
+
+    fn key_cache_id(key: &JavaArtifactProductKey) -> Cow<'_, str> {
+        Cow::Borrowed(key.cache_id())
+    }
+
+    fn product_cache_id(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.cache_id())
+    }
+
+    fn encode(&self) -> AnyResult<Vec<u8>> {
         postcard::to_allocvec(&PersistentJavaArtifactProduct {
             schema: JAVA_ARTIFACT_PRODUCT_SCHEMA,
             cache_id: self.key.cache_id.clone(),
@@ -219,10 +238,7 @@ impl JavaArtifactProduct {
         .context("serializing persistent Java artifact metadata")
     }
 
-    pub fn decode_persistent_payload(
-        key: &JavaArtifactProductKey,
-        payload: &[u8],
-    ) -> AnyResult<Self> {
+    fn decode(key: &JavaArtifactProductKey, payload: &[u8]) -> AnyResult<Self> {
         let persisted: PersistentJavaArtifactProduct = postcard::from_bytes(payload)
             .context("deserializing persistent Java artifact metadata")?;
         if persisted.schema != JAVA_ARTIFACT_PRODUCT_SCHEMA {
@@ -268,8 +284,10 @@ fn estimate_product_weight(key: &JavaArtifactProductKey, archive: &ArchiveMetada
             .classes
             .capacity()
             .checked_mul(size_of::<ruby_fast_lsp_jvm_metadata::ArchiveClass>())
-            .expect(
-                "INVARIANT VIOLATED: Java archive class-vector weight overflowed usize. This is a bug because archive class counts are bounded. Fix: inspect archive metadata capacity accounting.",
+            .expect_invariant(
+                "Java archive class-vector weight overflowed usize",
+                "archive class counts are bounded",
+                "inspect archive metadata capacity accounting",
             ),
         "archive class vector",
     );
@@ -286,21 +304,28 @@ fn estimate_product_weight(key: &JavaArtifactProductKey, archive: &ArchiveMetada
         );
         add_product_weight(
             &mut bytes,
-            usize::try_from(archived.class.estimated_heap_bytes()).expect(
-                "INVARIANT VIOLATED: a ClassFile heap estimate does not fit usize. This is a bug because the parsed class exists in this process. Fix: inspect cross-architecture metadata weight conversion.",
+            usize::try_from(archived.class.estimated_heap_bytes()).expect_invariant(
+                "a ClassFile heap estimate does not fit usize",
+                "the parsed class exists in this process",
+                "inspect cross-architecture metadata weight conversion",
             ),
             "shared ClassFile metadata",
         );
     }
-    u64::try_from(bytes).expect(
-        "INVARIANT VIOLATED: Java artifact product weight does not fit u64. This is a bug because one product cannot exceed the process address space. Fix: inspect product weight arithmetic.",
+    u64::try_from(bytes).expect_invariant(
+        "Java artifact product weight does not fit u64",
+        "one product cannot exceed the process address space",
+        "inspect product weight arithmetic",
     )
 }
 
 fn add_product_weight(bytes: &mut usize, additional: usize, label: &'static str) {
     *bytes = bytes.checked_add(additional).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: Java artifact {label} weight overflowed usize. This is a bug because archive inputs and class counts are bounded. Fix: inspect product weight accounting."
+        unreachable_invariant!(
+            what = "Java artifact {label} weight overflowed usize",
+            why = "archive inputs and class counts are bounded",
+            fix = "inspect product weight accounting",
+            label = label,
         )
     });
 }
@@ -316,23 +341,27 @@ impl<'a> ProjectJavaCatalogBuilder<'a> {
     }
 
     pub fn push(&mut self, product: JavaArtifactProduct) -> Result<(), JavaCatalogError> {
-        let artifact = self.classpath.artifacts.get(self.next_artifact).expect(
-            "INVARIANT VIOLATED: Java catalog received more products than ordered classpath \
-                 artifacts. This is a bug because extra products have no defensible precedence. \
-                 Fix: produce exactly one product per classpath artifact in order.",
-        );
+        let artifact = self
+            .classpath
+            .artifacts
+            .get(self.next_artifact)
+            .expect_invariant(
+                "Java catalog received more products than ordered classpath artifacts",
+                "extra products have no defensible precedence",
+                "produce exactly one product per classpath artifact in order",
+            );
         add_artifact_product(artifact, product, &mut self.classes, &mut self.duplicates)?;
         self.next_artifact += 1;
         Ok(())
     }
 
     pub fn finish(mut self) -> ProjectJavaCatalog {
-        assert_eq!(
+        invariant_eq!(
             self.next_artifact,
             self.classpath.artifacts.len(),
-            "INVARIANT VIOLATED: Java catalog completed before every ordered classpath artifact \
-             supplied one product. This is a bug because missing products silently change Java \
-             lookup semantics. Fix: resolve and push one immutable product for every artifact."
+            what = "Java catalog completed before every ordered classpath artifact supplied one product",
+            why = "missing products silently change Java lookup semantics",
+            fix = "resolve and push one immutable product for every artifact",
         );
         self.duplicates.sort_by(|left, right| {
             left.name
@@ -388,13 +417,12 @@ pub fn build_project_java_catalog_from_products(
     classpath: &ProjectClasspath,
     products: Vec<JavaArtifactProduct>,
 ) -> Result<ProjectJavaCatalog, JavaCatalogError> {
-    assert_eq!(
+    invariant_eq!(
         classpath.artifacts.len(),
         products.len(),
-        "INVARIANT VIOLATED: Java artifact product count differs from the ordered classpath \
-         artifact count. This is a bug because missing or extra products would change Java \
-         classpath precedence. Fix: resolve exactly one immutable product for every ordered \
-         classpath artifact."
+        what = "Java artifact product count differs from the ordered classpath artifact count",
+        why = "missing or extra products would change Java classpath precedence",
+        fix = "resolve exactly one immutable product for every ordered classpath artifact",
     );
     let mut builder = ProjectJavaCatalogBuilder::new(classpath);
     for product in products {
@@ -409,17 +437,19 @@ fn add_artifact_product(
     classes: &mut BTreeMap<String, JavaClassDeclaration>,
     duplicates: &mut Vec<DuplicateJavaClass>,
 ) -> Result<(), JavaCatalogError> {
-    assert_eq!(
-        product.key.artifact_fingerprint_sha256, artifact.fingerprint_sha256,
-        "INVARIANT VIOLATED: Java artifact product is bound to a different content identity. \
-         This is a bug because cached class metadata must never be substituted across artifacts. \
-         Fix: validate the exact artifact key before composing the project catalog."
+    invariant_eq!(
+        product.key.artifact_fingerprint_sha256,
+        artifact.fingerprint_sha256,
+        what = "Java artifact product is bound to a different content identity",
+        why = "cached class metadata must never be substituted across artifacts",
+        fix = "validate the exact artifact key before composing the project catalog",
     );
-    assert_eq!(
-        product.key.artifact_kind, artifact.kind,
-        "INVARIANT VIOLATED: Java artifact product kind differs from the consumer classpath kind. \
-         This is a bug because JAR and JMOD entry policies are not interchangeable. Fix: include \
-         and validate artifact kind in the persistent product identity."
+    invariant_eq!(
+        product.key.artifact_kind,
+        artifact.kind,
+        what = "Java artifact product kind differs from the consumer classpath kind",
+        why = "JAR and JMOD entry policies are not interchangeable",
+        fix = "include and validate artifact kind in the persistent product identity",
     );
     for archived in product.archive.classes {
         let name = archived.class.name.clone();
@@ -460,10 +490,10 @@ fn artifact_kind_tag(kind: ArtifactKind) -> u8 {
 fn hash_field(identity: &mut Sha256, value: &[u8]) {
     identity.update(
         u64::try_from(value.len())
-            .expect(
-                "INVARIANT VIOLATED: Java artifact identity field length exceeded u64. This is a \
-                 bug because one process cannot hold such a field. Fix: reject oversized \
-                 classpath identity input before hashing.",
+            .expect_invariant(
+                "Java artifact identity field length exceeded u64",
+                "one process cannot hold such a field",
+                "reject oversized classpath identity input before hashing",
             )
             .to_le_bytes(),
     );
@@ -488,10 +518,10 @@ fn archive_limits_fingerprint(limits: ArchiveLimits) -> String {
     ] {
         identity.update(
             u64::try_from(value)
-                .expect(
-                    "INVARIANT VIOLATED: Java archive limit exceeded u64. This is a bug because \
-                     persistent product identities must be architecture-independent. Fix: keep \
-                     bounded archive limits representable as u64.",
+                .expect_invariant(
+                    "Java archive limit exceeded u64",
+                    "persistent product identities must be architecture-independent",
+                    "keep bounded archive limits representable as u64",
                 )
                 .to_le_bytes(),
         );
@@ -666,9 +696,7 @@ mod tests {
         let first_key = JavaArtifactProductKey::new(&first, 17, limits);
         let product = JavaArtifactProduct::build(&first, &first_key, limits)
             .expect("producer artifact product must build");
-        let payload = product
-            .encode_persistent_payload()
-            .expect("artifact product must encode");
+        let payload = product.encode().expect("artifact product must encode");
 
         let second = artifact(
             fixture.path().join("consumer.jar"),
@@ -681,7 +709,7 @@ mod tests {
             second_key.cache_id(),
             "artifact product identity must be independent of the consumer path and origin"
         );
-        let decoded = JavaArtifactProduct::decode_persistent_payload(&second_key, &payload)
+        let decoded = JavaArtifactProduct::decode(&second_key, &payload)
             .expect("consumer must decode the immutable artifact product");
         let catalog = build_project_java_catalog_from_products(
             &classpath(fixture.path().to_path_buf(), vec![second.clone()]),
@@ -771,9 +799,9 @@ mod tests {
                 .expect("bounded Java artifact product must build");
         }
 
-        assert_eq!(cache.snapshot().entries, 1);
-        assert_eq!(cache.snapshot().producers, 2);
-        assert_eq!(cache.snapshot().evictions, 1);
+        assert_eq!(cache.snapshot().get(SingleFlightStat::Entries), 1);
+        assert_eq!(cache.snapshot().get(SingleFlightStat::Producers), 2);
+        assert_eq!(cache.snapshot().get(SingleFlightStat::Evictions), 1);
         assert!(cache.retained_weight_bytes() > 0);
         assert!(cache.retained_weight_bytes() <= 1024 * 1024);
 
@@ -787,8 +815,14 @@ mod tests {
             })
             .expect("an overweight product must still serve its current consumer");
         assert!(product.estimated_weight_bytes() > 1);
-        assert_eq!(overweight_cache.snapshot().entries, 0);
-        assert_eq!(overweight_cache.snapshot().evictions, 1);
+        assert_eq!(
+            overweight_cache.snapshot().get(SingleFlightStat::Entries),
+            0
+        );
+        assert_eq!(
+            overweight_cache.snapshot().get(SingleFlightStat::Evictions),
+            1
+        );
         assert_eq!(overweight_cache.retained_weight_bytes(), 0);
     }
 }

@@ -18,11 +18,11 @@ pub struct TextRange {
 
 impl TextRange {
     pub fn new(file_id: SourceFileId, start_byte: u32, end_byte: u32) -> Self {
-        assert!(
+        invariant!(
             start_byte <= end_byte,
-            "INVARIANT VIOLATED: TextRange start_byte must be <= end_byte. \
-             This is a bug because byte ranges must be normalized before storage. \
-             Fix: construct TextRange with sorted byte offsets."
+            what = "TextRange start_byte must be <= end_byte",
+            why = "byte ranges must be normalized before storage",
+            fix = "construct TextRange with sorted byte offsets",
         );
         Self {
             file_id,

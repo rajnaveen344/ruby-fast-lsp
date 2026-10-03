@@ -1,7 +1,13 @@
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use ruby_fast_lsp::environment::extensions::{ExtensionStatusParams, ExtensionStatusReport};
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use tower_lsp::jsonrpc::ErrorCode;
 use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
@@ -19,7 +25,7 @@ const GOTO_DEFINITION_RETRIGGER_BACKOFF: std::time::Duration = std::time::Durati
 const INDEXING_COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub struct FakeEditor {
-    server: RubyLanguageServer,
+    server: Server,
     buffers: HashMap<String, (String, i32)>,
 }
 
@@ -31,14 +37,18 @@ impl FakeEditor {
     pub async fn new_with_initialization_options(
         initialization_options: Option<serde_json::Value>,
     ) -> Self {
-        let server = RubyLanguageServer::default();
+        let server = Server::default();
         server
             .initialize(InitializeParams {
                 initialization_options,
                 ..InitializeParams::default()
             })
             .await
-            .expect("INVARIANT VIOLATED: FakeEditor failed to initialize RubyLanguageServer. This is a bug because tests require a valid LSP initialization. Fix: keep server initialization valid for default params.");
+            .expect_invariant(
+                "FakeEditor failed to initialize Server",
+                "tests require a valid LSP initialization",
+                "keep server initialization valid for default params",
+            );
         server.initialized(InitializedParams {}).await;
 
         Self {
@@ -70,9 +80,11 @@ impl FakeEditor {
         I: IntoIterator<Item = P>,
         P: AsRef<std::path::Path>,
     {
-        let server = RubyLanguageServer::default();
-        let root_uri = Url::from_directory_path(workspace_root.as_ref()).expect(
-            "INVARIANT VIOLATED: black-box workspace root is not a valid file URI. This is a test setup bug because project-context tests require a real filesystem root. Fix: create the workspace with tempfile.",
+        let server = Server::default();
+        let root_uri = Url::from_directory_path(workspace_root.as_ref()).expect_invariant(
+            "black-box workspace root is not a valid file URI",
+            "project-context tests require a real filesystem root",
+            "create the workspace with tempfile",
         );
         let extension_packages = package_paths
             .into_iter()
@@ -89,7 +101,11 @@ impl FakeEditor {
                 ..InitializeParams::default()
             })
             .await
-            .expect("INVARIANT VIOLATED: project-aware FakeEditor failed to initialize RubyLanguageServer. This is a test harness bug because the supplied workspace and extension package are valid. Fix: inspect initialization routing.");
+            .expect_invariant(
+                "project-aware FakeEditor failed to initialize Server",
+                "the supplied workspace and extension package are valid",
+                "inspect initialization routing",
+            );
         server.initialized(InitializedParams {}).await;
 
         Self {
@@ -99,12 +115,12 @@ impl FakeEditor {
     }
 
     pub async fn open(&mut self, filename: &str, content: &str) {
-        assert!(
+        invariant!(
             !self.buffers.contains_key(filename),
-            "INVARIANT VIOLATED: file `{}` is already open. \
-             This is a bug because FakeEditor open must model LSP didOpen exactly once. \
-             Fix: call set() for existing buffers.",
-            filename
+            what = "file `{}` is already open",
+            why = "FakeEditor open must model LSP didOpen exactly once",
+            fix = "call set() for existing buffers",
+            filename,
         );
 
         let uri = filename_to_uri(filename);
@@ -125,11 +141,11 @@ impl FakeEditor {
 
     pub async fn set(&mut self, filename: &str, content: &str) {
         let (_, version) = self.buffers.get(filename).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: file `{}` is not open. \
-                 This is a bug because FakeEditor set must model didChange after didOpen. \
-                 Fix: call open() before set().",
-                filename
+            unreachable_invariant!(
+                what = "file `{}` is not open",
+                why = "FakeEditor set must model didChange after didOpen",
+                fix = "call open() before set()",
+                filename,
             )
         });
         let new_version = *version + 1;
@@ -164,14 +180,18 @@ impl FakeEditor {
                 partial_result_params: PartialResultParams::default(),
             })
             .await
-            .expect("INVARIANT VIOLATED: document_symbol request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.");
+            .expect_invariant(
+                "document_symbol request failed",
+                "FakeEditor expects in-process LSP calls to return JSON-RPC success",
+                "inspect request handler error path",
+            );
 
         match response {
             Some(DocumentSymbolResponse::Nested(symbols)) => symbols,
-            Some(DocumentSymbolResponse::Flat(_)) => panic!(
-                "INVARIANT VIOLATED: document_symbol returned flat symbols. \
-                 This is a bug because Ruby Fast LSP currently returns nested document symbols. \
-                 Fix: update FakeEditor if flat response becomes supported."
+            Some(DocumentSymbolResponse::Flat(_)) => unreachable_invariant!(
+                what = "document_symbol returned flat symbols",
+                why = "ruby Fast LSP currently returns nested document symbols",
+                fix = "update FakeEditor if flat response becomes supported",
             ),
             None => Vec::new(),
         }
@@ -187,7 +207,11 @@ impl FakeEditor {
                 partial_result_params: PartialResultParams::default(),
             })
             .await
-            .expect("INVARIANT VIOLATED: code_lens request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
+            .expect_invariant(
+                "code_lens request failed",
+                "FakeEditor expects in-process LSP calls to return JSON-RPC success",
+                "inspect request handler error path",
+            )
             .unwrap_or_default()
     }
 
@@ -206,9 +230,12 @@ impl FakeEditor {
                 let remaining = deadline
                     .checked_duration_since(tokio::time::Instant::now())
                     .unwrap_or_else(|| {
-                        panic!(
-                            "INVARIANT VIOLATED: goto_definition exceeded the bounded {:?} retrigger window after {retriggers} retriggers. This is a bug because a valid indexing generation must reach a target or terminal absence. Fix: inspect the stuck project phase and demand lifecycle.",
-                            GOTO_DEFINITION_RETRIGGER_TIMEOUT
+                        unreachable_invariant!(
+                            what = "goto_definition exceeded the {:?} retrigger window after {retriggers} retriggers",
+                            why = "indexing must reach a target or terminal absence",
+                            fix = "inspect the stuck project phase and demand lifecycle",
+                            GOTO_DEFINITION_RETRIGGER_TIMEOUT,
+                            retriggers = retriggers,
                         )
                     });
                 let result = tokio::time::timeout(
@@ -224,9 +251,12 @@ impl FakeEditor {
                 )
                 .await
                 .unwrap_or_else(|_| {
-                    panic!(
-                        "INVARIANT VIOLATED: goto_definition exceeded the bounded {:?} retrigger window after {retriggers} retriggers. This is a bug because a valid indexing generation must reach a target or terminal absence. Fix: inspect the stuck project phase and demand lifecycle.",
-                        GOTO_DEFINITION_RETRIGGER_TIMEOUT
+                    unreachable_invariant!(
+                        what = "goto_definition exceeded the {:?} retrigger window after {retriggers} retriggers",
+                        why = "indexing must reach a target or terminal absence",
+                        fix = "inspect the stuck project phase and demand lifecycle",
+                        GOTO_DEFINITION_RETRIGGER_TIMEOUT,
+                        retriggers = retriggers,
                     )
                 });
                 match result {
@@ -250,8 +280,13 @@ impl FakeEditor {
                             .iter()
                             .map(|workspace| workspace.indexing_status.snapshot())
                             .collect::<Vec<_>>();
-                        panic!(
-                            "INVARIANT VIOLATED: goto_definition request failed after {retriggers} retriggers: {error:?}; indexing snapshots: {indexing_snapshots:#?}. This is a bug because FakeEditor accepts only the server's exact bounded retrigger contract during indexing. Fix: inspect the request error and indexing failure, or make the fixture reach a terminal stage."
+                        unreachable_invariant!(
+                            what = "goto_definition failed after {retriggers} retriggers: {error:?}; indexing: {indexing_snapshots:#?}",
+                            why = "FakeEditor accepts only the bounded retrigger contract",
+                            fix = "inspect the request error or make the fixture reach a terminal stage",
+                            retriggers = retriggers,
+                            error = error,
+                            indexing_snapshots = indexing_snapshots,
                         )
                     }
                 }
@@ -261,8 +296,10 @@ impl FakeEditor {
         match response {
             Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
             Some(GotoDefinitionResponse::Array(locations)) => locations,
-            Some(GotoDefinitionResponse::Link(_)) => panic!(
-                "INVARIANT VIOLATED: goto_definition returned location links. This is a bug because Ruby Fast LSP currently returns locations. Fix: update the black-box harness when the server advertises location-link responses."
+            Some(GotoDefinitionResponse::Link(_)) => unreachable_invariant!(
+                what = "goto_definition returned location links",
+                why = "ruby Fast LSP currently returns locations",
+                fix = "update the black-box harness when the server advertises location-link responses",
             ),
             None => Vec::new(),
         }
@@ -280,7 +317,11 @@ impl FakeEditor {
                 work_done_progress_params: WorkDoneProgressParams::default(),
             })
             .await
-            .expect("INVARIANT VIOLATED: hover request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
+            .expect_invariant(
+                "hover request failed",
+                "FakeEditor expects in-process LSP calls to return JSON-RPC success",
+                "inspect request handler error path",
+            )
     }
 
     pub async fn completion_after_dot(
@@ -306,7 +347,11 @@ impl FakeEditor {
                 }),
             })
             .await
-            .expect("INVARIANT VIOLATED: completion request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.");
+            .expect_invariant(
+                "completion request failed",
+                "FakeEditor expects in-process LSP calls to return JSON-RPC success",
+                "inspect request handler error path",
+            );
         match response {
             Some(CompletionResponse::Array(items)) => items,
             Some(CompletionResponse::List(list)) => list.items,
@@ -330,7 +375,11 @@ impl FakeEditor {
                 },
             })
             .await
-            .expect("INVARIANT VIOLATED: references request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
+            .expect_invariant(
+                "references request failed",
+                "FakeEditor expects in-process LSP calls to return JSON-RPC success",
+                "inspect request handler error path",
+            )
             .unwrap_or_default()
     }
 
@@ -338,7 +387,11 @@ impl FakeEditor {
         self.server
             .handle_extension_status(ExtensionStatusParams::default())
             .await
-            .expect("INVARIANT VIOLATED: extension status request failed. This is a bug because FakeEditor expects in-process LSP custom requests to return JSON-RPC success. Fix: inspect extension status handler error path.")
+            .expect_invariant(
+                "extension status request failed",
+                "FakeEditor expects in-process LSP custom requests to return JSON-RPC success",
+                "inspect extension status handler error path",
+            )
             .extensions
     }
 
@@ -348,11 +401,14 @@ impl FakeEditor {
             if self.server.is_indexing_complete() {
                 return;
             }
-            assert!(
+            invariant!(
                 tokio::time::Instant::now() < deadline,
-                "INVARIANT VIOLATED: FakeEditor workspace indexing did not complete within {:?}; snapshot: {:#?}. This is a bug because black-box cold-index tests require a terminal project generation. Fix: inspect the indexing phase or failure before asserting semantic results.",
+                what =
+                    "FakeEditor workspace indexing did not complete within {:?}; snapshot: {:#?}",
+                why = "black-box cold-index tests require a terminal project generation",
+                fix = "inspect the indexing phase or failure before asserting semantic results",
                 INDEXING_COMPLETION_TIMEOUT,
-                self.server.indexing_status_snapshot()
+                self.server.indexing_status_snapshot(),
             );
             tokio::time::sleep(GOTO_DEFINITION_RETRIGGER_BACKOFF).await;
         }
@@ -364,13 +420,13 @@ impl FakeEditor {
     }
 
     fn assert_open(&self, filename: &str, operation: &str) {
-        assert!(
+        invariant!(
             self.buffers.contains_key(filename),
-            "INVARIANT VIOLATED: cannot {} unopened file `{}`. \
-             This is a bug because FakeEditor operations require didOpen state. \
-             Fix: call open() before querying.",
+            what = "cannot {} unopened file `{}`",
+            why = "FakeEditor operations require didOpen state",
+            fix = "call open() before querying",
             operation,
-            filename
+            filename,
         );
     }
 }
@@ -386,8 +442,11 @@ pub fn filename_to_uri(filename: &str) -> Url {
     } else {
         root.join(path.strip_prefix("/").unwrap_or(path))
     };
-    Url::from_file_path(path)
-        .expect("INVARIANT VIOLATED: FakeEditor built invalid file URI. This is a bug because test filenames must map to native file:// URIs. Fix: preserve an absolute native path in filename_to_uri.")
+    Url::from_file_path(path).expect_invariant(
+        "FakeEditor built invalid file URI",
+        "test filenames must map to native file:// URIs",
+        "preserve an absolute native path in filename_to_uri",
+    )
 }
 
 #[test]

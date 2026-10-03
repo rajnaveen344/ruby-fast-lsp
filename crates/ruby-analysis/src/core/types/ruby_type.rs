@@ -1,5 +1,6 @@
 use crate::core::names::fully_qualified_name::FullyQualifiedName;
 use crate::core::types::shape_type::{LiteralValue, ShapeType, MAX_SHAPE_UNION_VARIANTS};
+use crate::invariant::ExpectInvariant;
 use std::fmt::{self, Display, Formatter};
 
 /// Represents Ruby types in the type inference system
@@ -339,47 +340,6 @@ impl RubyType {
         self.is_subtype_of(other) || other.is_subtype_of(self)
     }
 
-    /// Get the most specific common supertype of two types
-    pub fn common_supertype(&self, other: &RubyType) -> RubyType {
-        if self.is_subtype_of(other) {
-            other.clone()
-        } else if other.is_subtype_of(self) {
-            self.clone()
-        } else {
-            // Create union of both types
-            RubyType::union([self.clone(), other.clone()])
-        }
-    }
-
-    /// Check if this is a primitive type
-    pub fn is_primitive(&self) -> bool {
-        match self {
-            RubyType::Literal(_) => true,
-            RubyType::Class(fqn) => {
-                let name = fqn.to_string();
-                matches!(
-                    name.as_str(),
-                    "NilClass"
-                        | "TrueClass"
-                        | "FalseClass"
-                        | "Integer"
-                        | "Float"
-                        | "String"
-                        | "Symbol"
-                )
-            }
-            _ => false,
-        }
-    }
-
-    /// Check if this is a collection type
-    pub fn is_collection(&self) -> bool {
-        matches!(
-            self,
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_)
-        )
-    }
-
     /// Check if this type is nilable (can be nil)
     pub fn is_nilable(&self) -> bool {
         match self {
@@ -389,12 +349,19 @@ impl RubyType {
         }
     }
 
-    /// Make this type nilable by creating a union with Nil
-    pub fn make_nilable(self) -> RubyType {
-        if self.is_nilable() {
-            self
-        } else {
-            RubyType::optional(self)
+    /// Split the receiver of a safe-navigation (`&.`) call.
+    ///
+    /// `&.` sends no message to nil. `None` means the receiver is only nil, so
+    /// nothing is dispatched and the call yields nil. Otherwise this returns
+    /// the receiver that is dispatched and whether a nil branch skips dispatch
+    /// and contributes nil to the call result.
+    pub fn safe_navigation_dispatch(self) -> Option<(RubyType, bool)> {
+        if !self.is_nilable() {
+            return Some((self, false));
+        }
+        match self.remove_nil() {
+            RubyType::Unknown => None,
+            receiver => Some((receiver, true)),
         }
     }
 
@@ -462,19 +429,19 @@ impl RubyType {
     pub fn widen_literals(&self) -> RubyType {
         match self {
             RubyType::Literal(value) => value.widened_type(),
-            RubyType::Array(types) => {
-                RubyType::Array(Self::canonical_union_members(types.iter().map(Self::widen_literals)))
-            }
+            RubyType::Array(types) => RubyType::Array(Self::canonical_union_members(
+                types.iter().map(Self::widen_literals),
+            )),
             RubyType::Hash(keys, values) => RubyType::Hash(
                 Self::canonical_union_members(keys.iter().map(Self::widen_literals)),
                 Self::canonical_union_members(values.iter().map(Self::widen_literals)),
             ),
             RubyType::Shape(shape) => RubyType::Shape(Box::new(
-                shape
-                    .try_map_types(Self::widen_literals)
-                    .expect(
-                        "INVARIANT VIOLATED: widening proven shape literals produced an invalid shape. This is a bug because widening removes precision and cannot add Unknown, duplicate keys, or depth. Fix: keep ShapeType construction and RubyType::widen_literals aligned.",
-                    ),
+                shape.try_map_types(Self::widen_literals).expect_invariant(
+                    "widening proven shape literals produced an invalid shape",
+                    "widening removes precision and cannot add Unknown, duplicate keys, or depth",
+                    "keep ShapeType construction and RubyType::widen_literals aligned",
+                ),
             )),
             RubyType::Union(types) => RubyType::union(types.iter().map(Self::widen_literals)),
             RubyType::Class(_)
@@ -488,11 +455,12 @@ impl RubyType {
     /// Create a class type from a name
     pub fn class(name: &str) -> Self {
         RubyType::Class(FullyQualifiedName::try_from(name).unwrap_or_else(|error| {
-            panic!(
-                "INVARIANT VIOLATED: RubyType::class received invalid Ruby name `{name}`: \
-                 {error}. This is a bug because replacing an invalid type identity with Object \
-                 would publish a wrong concrete type. Fix: validate source names at the domain \
-                 boundary and construct RubyType only from a valid FullyQualifiedName."
+            unreachable_invariant!(
+                what = "RubyType::class received invalid Ruby name `{name}`: {error}",
+                why = "falling back to Object would publish a wrong concrete type",
+                fix = "validate names at the domain boundary; build RubyType from a FullyQualifiedName",
+                name = name,
+                error = error,
             )
         }))
     }
@@ -552,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "INVARIANT VIOLATED: RubyType::class received invalid Ruby name")]
+    #[should_panic(expected = "invariant violated: RubyType::class received invalid Ruby name")]
     fn invalid_class_name_does_not_fall_back_to_object() {
         let _ = RubyType::class("not::a::valid::constant");
     }
@@ -646,42 +614,19 @@ mod tests {
     }
 
     #[test]
-    fn test_nilable_operations() {
-        assert!(!RubyType::integer().is_nilable());
-        assert!(RubyType::nil_class().is_nilable());
-
-        let nilable_int = RubyType::integer().make_nilable();
-        assert!(nilable_int.is_nilable());
-
-        let non_nil = nilable_int.remove_nil();
-        assert!(!non_nil.is_nilable());
-        assert_eq!(non_nil, RubyType::integer());
+    fn remove_nil_keeps_the_non_nil_member() {
+        assert_eq!(
+            RubyType::optional(RubyType::integer()).remove_nil(),
+            RubyType::integer()
+        );
     }
 
     #[test]
-    fn test_primitive_and_collection_checks() {
-        assert!(RubyType::integer().is_primitive());
-        assert!(RubyType::string().is_primitive());
-        assert!(!RubyType::array_of(RubyType::integer()).is_primitive());
-
-        assert!(RubyType::array_of(RubyType::integer()).is_collection());
-        assert!(RubyType::hash_of(RubyType::string(), RubyType::integer()).is_collection());
-        assert!(!RubyType::integer().is_collection());
-    }
-
-    #[test]
-    fn test_common_supertype() {
-        let int_str_union = RubyType::integer().common_supertype(&RubyType::string());
-        match int_str_union {
-            RubyType::Union(types) => {
-                assert!(types.contains(&RubyType::integer()));
-                assert!(types.contains(&RubyType::string()));
-            }
-            _ => panic!("Expected union type"),
-        }
-
-        let int_unknown = RubyType::integer().union_with(&RubyType::Unknown);
-        assert_eq!(int_unknown, RubyType::Unknown);
+    fn union_with_unknown_stays_unknown() {
+        assert_eq!(
+            RubyType::integer().union_with(&RubyType::Unknown),
+            RubyType::Unknown
+        );
     }
 
     #[test]

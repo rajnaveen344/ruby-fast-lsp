@@ -53,11 +53,11 @@ async fn external_linter_runs_on_open_and_save_but_not_did_change() {
     with_process_clock(async {
         let (_temp, command) = fake_linter();
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             linter: LinterKind::Standard,
             linter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
 
         editor.open("sample.rb", "puts \"hello\"\n").await;
         assert!(has_linter_diagnostic(
@@ -84,11 +84,11 @@ async fn dependency_open_retains_current_linter_output_without_rerunning_it() {
     with_process_clock(async {
         let (temp, command) = fake_linter();
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             linter: LinterKind::Standard,
             linter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("sample.rb", "name = VALUE\n").await;
         assert!(has_linter_diagnostic(
             &editor.published_diagnostics("sample.rb")
@@ -122,13 +122,10 @@ async fn dependency_open_retains_current_linter_output_without_rerunning_it() {
         ));
         assert_eq!(invocation_count(), 3);
         editor.close("sample.rb").await;
-        let mut retained_after_close = Vec::new();
-        editor.server().append_current_external_linter_diagnostics(
-            &crate::test::harness::fixture_uri("/sample.rb"),
-            &mut retained_after_close,
-        );
         assert!(
-            retained_after_close.is_empty(),
+            !editor
+                .server()
+                .has_retained_linter_diagnostics(&crate::test::harness::fixture_uri("/sample.rb")),
             "closing a document must release retained linter output"
         );
     })
@@ -160,16 +157,16 @@ async fn cold_coordinator_diagnostics_preserve_current_linter_output() {
         let mut editor = FakeEditor::with_cache_root(temp.path().join("cache")).await;
         let server = editor.server().clone();
         server.set_discovered_runtimes_for_tests(Vec::new());
-        *server.config.lock() = RubyFastLspConfig {
+        server.replace_configuration(RubyFastLspConfig {
             linter: LinterKind::Standard,
             linter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
         let workspace = server.add_workspace(root_uri.clone());
         editor.open(filename, source).await;
         let initial = editor.diagnostics(filename).await;
         assert!(has_linter_diagnostic(&initial));
-        crate::lsp::capabilities::indexing::init_workspace_for_run(
+        crate::lsp::lifecycle::indexing::init_workspace_for_run(
             &server,
             root_uri,
             workspace.begin_indexing_run(),
@@ -208,11 +205,11 @@ async fn dependency_refresh_preserves_current_syntax_and_linter_output() {
         let filename = path.to_str().unwrap().trim_start_matches('/');
         let mut editor = FakeEditor::new().await;
         let server = editor.server().clone();
-        *server.config.lock() = RubyFastLspConfig {
+        server.replace_configuration(RubyFastLspConfig {
             linter: LinterKind::Standard,
             linter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
         let workspace = server.add_workspace(root_uri);
         editor
             .open(filename, "require 'feature'\nreturn\n1\n")
@@ -232,7 +229,7 @@ async fn dependency_refresh_preserves_current_syntax_and_linter_output() {
                 diagnostic.code != Some(NumberOrString::String("unresolved-require".into()))
             })
             .collect::<Vec<_>>();
-        workspace.set_dependency_require_paths(vec![library]);
+        workspace.handle().set_dependency_require_paths(vec![library]);
         server
             .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
             .await;
@@ -268,11 +265,11 @@ async fn linter_failure_preserves_semantic_diagnostics() {
         fs::set_permissions(&executable, permissions).unwrap();
 
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             linter: LinterKind::RuboCop,
             linter_command: vec![executable.to_string_lossy().to_string()],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("broken.rb", "MissingConstant\n").await;
 
         let diagnostics = editor.published_diagnostics("broken.rb");
@@ -310,11 +307,11 @@ exit 1
         fs::set_permissions(&executable, permissions).unwrap();
 
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             linter: LinterKind::RuboCop,
             linter_command: vec![executable.to_string_lossy().to_string()],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("fix.rb", "puts \"hello\"\n").await;
         let diagnostics = editor.published_diagnostics("fix.rb");
         let actions = editor.code_actions("fix.rb", diagnostics).await;
@@ -345,11 +342,11 @@ async fn noncorrectable_linter_diagnostic_does_not_offer_a_quick_fix() {
     with_process_clock(async {
         let (_temp, command) = fake_linter();
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             linter: LinterKind::Standard,
             linter_command: vec![command],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("sample.rb", "puts \"hello\"\n").await;
         let mut diagnostics = editor.published_diagnostics("sample.rb");
         let linter = diagnostics
@@ -394,11 +391,11 @@ exit 1
         fs::set_permissions(&executable, permissions).unwrap();
 
         let mut editor = FakeEditor::new().await;
-        *editor.server().config.lock() = RubyFastLspConfig {
+        editor.server().replace_configuration(RubyFastLspConfig {
             linter: LinterKind::RuboCop,
             linter_command: vec![executable.to_string_lossy().to_string()],
             ..RubyFastLspConfig::default()
-        };
+        });
         editor.open("fix.rb", "puts \"hello\"\n").await;
         let diagnostics = editor.published_diagnostics("fix.rb");
 

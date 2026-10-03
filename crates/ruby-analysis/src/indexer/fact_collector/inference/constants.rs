@@ -9,7 +9,7 @@ use ruby_prism::*;
 pub(in crate::indexer::fact_collector) struct ConstantEvidence {
     pub(in crate::indexer::fact_collector) equations: Vec<ConstantTypeEquation>,
     pub(in crate::indexer::fact_collector) callable_bodies:
-        Vec<crate::core::ConstantCallableBodyFact>,
+        Vec<crate::core::callables::callable_body::ConstantCallableBodyFact>,
 }
 
 impl FactCollector {
@@ -23,8 +23,9 @@ impl FactCollector {
             return Some(namespace);
         }
         let lexical_context = self.scope_tracker.get_ns_stack();
-        let engine = self.semantics.engine.read();
-        if let Some(resolved) = crate::engine::AnalysisQuery::new(&engine)
+        if let Some(resolved) = self
+            .semantics
+            .project
             .resolve_constant_in_context(&reference.parts, &lexical_context)
         {
             return Some(resolved);
@@ -104,7 +105,7 @@ impl FactCollector {
         let namespace_fqn = FullyQualifiedName::namespace(parts.clone());
         if let Some(kind) = self
             .facts
-            .direct
+            .analysis
             .graph_nodes
             .iter()
             .filter(|fact| fact.fqn == namespace_fqn)
@@ -123,11 +124,9 @@ impl FactCollector {
             });
         }
 
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
-        query
-            .constant_value_type(&constant_fqn)
-            .or_else(|| query.constant_reference_type(&parts))
+        self.semantics
+            .project
+            .constant_value_or_reference_type(&constant_fqn, &parts)
             .or_else(|| Some(RubyType::ClassReference(constant_fqn)))
     }
 
@@ -137,7 +136,7 @@ impl FactCollector {
     ) -> Option<RubyType> {
         let direct = self
             .facts
-            .direct
+            .analysis
             .types
             .iter()
             .filter(|fact| match &fact.subject {
@@ -162,7 +161,7 @@ impl FactCollector {
         let subject = TypeSubject::Constant(constant_fqn.clone());
         let stored = self
             .facts
-            .types
+            .flow_types
             .latest_non_unknown_type_with_range(&subject);
 
         match (direct, stored) {
@@ -183,6 +182,29 @@ impl FactCollector {
                 }
             }
         }
+    }
+
+    /// Whether this file assigns `constant_fqn` a value, including a value
+    /// whose type is not proven. Such a constant names an object rather than
+    /// a namespace, so it must not be reinterpreted as a class receiver.
+    pub(in crate::indexer::fact_collector) fn direct_constant_has_value(
+        &self,
+        constant_fqn: &FullyQualifiedName,
+    ) -> bool {
+        self.facts
+            .analysis
+            .types
+            .iter()
+            .any(|fact| match &fact.subject {
+                TypeSubject::Constant(fqn) => fqn == constant_fqn,
+                TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => false,
+            })
     }
 
     pub(in crate::indexer::fact_collector) fn const_get_target_parts(
@@ -238,8 +260,9 @@ impl FactCollector {
         } else {
             self.scope_tracker.get_ns_stack()
         };
-        let engine = self.semantics.engine.read();
-        if let Some(fqn) = crate::engine::AnalysisQuery::new(&engine)
+        if let Some(fqn) = self
+            .semantics
+            .project
             .resolve_constant_in_context(&receiver_ref.parts, &context)
         {
             return Some(fqn.namespace_parts());

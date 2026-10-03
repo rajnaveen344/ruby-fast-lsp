@@ -1,9 +1,10 @@
 //! Ruby lookup precedence ranks definitions; source order only breaks ties.
 
-use crate::lsp::query::EngineQuery;
+use crate::features::cursor::{method, EngineQuery};
+use crate::server::ProjectHandle;
 use crate::test::harness::FakeEditor;
+use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{NamespaceKind, RubyConstant, RubyMethod};
-use ruby_analysis::indexer::MethodReceiver;
 use tower_lsp::lsp_types::{Location, Position};
 
 fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
@@ -17,6 +18,21 @@ fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
             )
         })
         .collect()
+}
+
+/// Implicit-self `label` definitions from inside `Feature`, without a document.
+fn feature_label_definitions(engine: ProjectHandle) -> Option<Vec<Location>> {
+    EngineQuery::with_project(engine).with_view(|cursor| {
+        method::definitions(
+            cursor,
+            &MethodReceiver::None,
+            &RubyMethod::new("label").unwrap(),
+            &[RubyConstant::new("Feature").unwrap()],
+            NamespaceKind::Instance,
+            Position::new(0, 0),
+            None,
+        )
+    })
 }
 
 fn files(locations: Vec<Location>) -> Vec<String> {
@@ -104,19 +120,9 @@ async fn semantic_definition_order_prefers_overrides_and_tracks_edits() {
         );
         let engine = editor
             .server()
-            .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
+            .project_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         assert_eq!(
-            files(
-                EngineQuery::with_engine(engine)
-                    .find_method_definitions(
-                        &MethodReceiver::None,
-                        &RubyMethod::new("label").unwrap(),
-                        &[RubyConstant::new("Feature").unwrap()],
-                        NamespaceKind::Instance,
-                        Position::new(0, 0),
-                    )
-                    .unwrap()
-            ),
+            files(feature_label_definitions(engine).unwrap()),
             ["/z_child.rb", "/a_parent.rb"],
             "fallback navigation must preserve the same semantic order"
         );
@@ -303,6 +309,42 @@ async fn definition_order_covers_reopened_constants_and_yard_types() {
 }
 
 #[tokio::test]
+async fn definition_order_covers_modules_reopened_in_several_files() {
+    let files = [
+        (
+            "a_store.rb",
+            "module Store
+  class First; end
+end
+",
+        ),
+        (
+            "z_store.rb",
+            "module Store
+  class Second; end
+end
+",
+        ),
+    ];
+    let expected = vec![
+        ("/a_store.rb".to_owned(), 0, 0),
+        ("/z_store.rb".to_owned(), 0, 0),
+    ];
+    for order in [[0, 1], [1, 0]] {
+        let mut editor = FakeEditor::new().await;
+        for index in order {
+            editor.open(files[index].0, files[index].1).await;
+        }
+        editor.open("use.rb", "Store\n").await;
+        assert_eq!(
+            destinations(editor.goto_def_at("use.rb", 0, 2).await),
+            expected,
+            "every file that reopens a module declares it, whatever the open order"
+        );
+    }
+}
+
+#[tokio::test]
 async fn definition_order_covers_method_lookup_without_document_facts() {
     let mut editor = FakeEditor::new().await;
     editor.open("feature.rb", "module Feature\nend\n").await;
@@ -321,15 +363,8 @@ async fn definition_order_covers_method_lookup_without_document_facts() {
 
     let engine = editor
         .server()
-        .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
-    let locations = EngineQuery::with_engine(engine)
-        .find_method_definitions(
-            &MethodReceiver::None,
-            &RubyMethod::new("label").unwrap(),
-            &[RubyConstant::new("Feature").unwrap()],
-            NamespaceKind::Instance,
-            Position::new(0, 0),
-        )
+        .project_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
+    let locations = feature_label_definitions(engine)
         .expect("known module receivers must retain their definition targets");
     assert_eq!(
         destinations(locations),

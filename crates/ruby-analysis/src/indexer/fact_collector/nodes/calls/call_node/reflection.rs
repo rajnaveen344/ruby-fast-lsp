@@ -15,7 +15,8 @@ impl FactCollector {
             return;
         };
         self.facts
-            .references
+            .analysis
+            .reference_candidates
             .push(ReferenceCandidate::constant(range, parts, Vec::new()));
     }
 
@@ -100,32 +101,36 @@ impl FactCollector {
             _ => return,
         };
 
-        self.facts.references.push(ReferenceCandidate::method(
-            range,
-            crate::core::MethodReferenceCandidate {
-                owner,
-                owner_kind,
-                method,
-                is_super: false,
-                access: if node.name().as_slice() == b"instance_method" {
-                    MethodReferenceAccess::InstanceMethodReflection
-                } else {
-                    MethodReferenceAccess::Normal
+        self.facts
+            .analysis
+            .reference_candidates
+            .push(ReferenceCandidate::method(
+                range,
+                crate::core::MethodReferenceCandidate {
+                    owner,
+                    owner_kind,
+                    method,
+                    is_super: false,
+                    access: if node.name().as_slice() == b"instance_method" {
+                        MethodReferenceAccess::InstanceMethodReflection
+                    } else {
+                        MethodReferenceAccess::Normal
+                    },
+                    caller: self.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
+                    preferred_definition_range: None,
+                    diagnostics: crate::core::MethodReferenceDiagnostics {
+                        diagnostic_range: range,
+                        receiver_label: None,
+                        receiver_expression_range: None,
+                        receiver_type: None,
+                        diagnose_unresolved: false,
+                        allow_unindexed_owner: false,
+                        safe_navigation: false,
+                        signature: None,
+                    },
                 },
-                caller: self.scope_tracker.current_method_fqn().cloned(),
-                call_expression_range: None,
-                preferred_definition_range: None,
-                diagnostics: crate::core::MethodReferenceDiagnostics {
-                    diagnostic_range: range,
-                    receiver_label: None,
-                    receiver_expression_range: None,
-                    receiver_type: None,
-                    diagnose_unresolved: false,
-                    allow_unindexed_owner: false,
-                    signature: None,
-                },
-            },
-        ));
+            ));
     }
 }
 

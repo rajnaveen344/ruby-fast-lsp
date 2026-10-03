@@ -53,7 +53,7 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Diagnostic, InitializeParams, Url};
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// A stateful editor simulation for testing LSP lifecycle scenarios.
 ///
@@ -61,7 +61,7 @@ use crate::server::RubyLanguageServer;
 /// exercise the exact same code paths as a real editor. Tracks open files
 /// with their content and version numbers for assertion verification.
 pub struct FakeEditor {
-    server: RubyLanguageServer,
+    server: Server,
     client_messages: super::client_messages::ClientMessages,
     /// Tracks open files: filename -> (clean_content, version)
     buffers: HashMap<String, (String, i32)>,
@@ -71,7 +71,8 @@ impl FakeEditor {
     /// Create a new FakeEditor with a fresh, initialized server.
     pub async fn new() -> Self {
         Self::with_cache_root(
-            crate::utils::ruby_fast_lsp_user_cache_root().expect("resolve editor cache root"),
+            crate::utils::cache::ruby_fast_lsp_user_cache_root()
+                .expect("resolve editor cache root"),
         )
         .await
     }
@@ -79,8 +80,7 @@ impl FakeEditor {
     pub async fn with_cache_root(root: std::path::PathBuf) -> Self {
         use tower::{Service, ServiceExt};
         let (mut service, socket) = tower_lsp::LspService::new(|client| {
-            RubyLanguageServer::with_cache_root(Some(client), root)
-                .expect("construct editor server")
+            Server::with_cache_root(Some(client), root).expect("construct editor server")
         });
         let client_messages = super::client_messages::ClientMessages::listen(socket);
         let initialized = service
@@ -113,7 +113,7 @@ impl FakeEditor {
     /// Choose the production resource policy before starting or sharing work.
     pub fn set_indexing_resource_policy(
         &mut self,
-        policy: crate::indexer::scheduling::resources::IndexingResourcePolicy,
+        policy: crate::utils::admission::IndexingResourcePolicy,
     ) {
         assert!(
             self.buffers.is_empty() && self.workspace_count() == 0,
@@ -155,7 +155,7 @@ impl FakeEditor {
     }
 
     /// Get a reference to the underlying server.
-    pub fn server(&self) -> &RubyLanguageServer {
+    pub fn server(&self) -> &Server {
         &self.server
     }
 
@@ -173,11 +173,13 @@ impl FakeEditor {
 
     /// Assert a file is open, panicking with a clear message if not.
     fn assert_open(&self, filename: &str, method: &str) {
-        assert!(
+        invariant!(
             self.buffers.contains_key(filename),
-            "INVARIANT VIOLATED: File '{}' is not open. Call open() before {}().",
+            what = "file '{}' is not open",
+            why = "FakeEditor requests need an open buffer",
+            fix = "call open() before {}()",
             filename,
-            method
+            method,
         );
     }
 
@@ -209,8 +211,12 @@ impl FakeEditor {
 /// as an empty result that could satisfy a negative assertion.
 fn observe_response<T>(method: &str, response: tower_lsp::jsonrpc::Result<T>) -> T {
     response.unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: FakeEditor request `{method}` failed: {error:?}. This is a bug because a failed request cannot satisfy an observation. Fix: repair the request or explicitly test its error result through the server API."
+        unreachable_invariant!(
+            what = "FakeEditor request `{method}` failed: {error:?}",
+            why = "a failed request cannot satisfy an observation",
+            fix = "repair the request or explicitly test its error result through the server API",
+            method = method,
+            error = error,
         )
     })
 }

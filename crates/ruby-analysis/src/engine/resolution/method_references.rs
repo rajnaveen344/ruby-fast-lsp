@@ -1,5 +1,6 @@
 //! Resolution of method references and their navigation targets.
 
+use crate::invariant::ExpectInvariant;
 use std::sync::Arc;
 
 use super::chain_methods::{
@@ -19,10 +20,11 @@ use super::{
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, SourceKind, TextRange,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::lookup::{LookupUnknown, MethodAnswer};
+use crate::engine::queries::View;
 use crate::engine::state::EffectiveMethodFactMatch;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn resolve_method_reference(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -74,7 +76,7 @@ impl<'a> AnalysisQuery<'a> {
             Vec::new(),
             crate::core::NamespaceKind::Instance,
         );
-        let EffectiveMethodFactMatch::Unique(fact) = self
+        let EffectiveMethodFactMatch::Found(fact) = self
             .engine
             .effective_method_fact_matching_owner_name(&root, method)
         else {
@@ -110,7 +112,7 @@ impl<'a> AnalysisQuery<'a> {
         dispatch_to_includers: bool,
     ) -> MethodLookupResult {
         if !namespace_target_exists(self.engine, namespace_fqn) {
-            return MethodLookupResult::Missing;
+            return MethodLookupResult::Unknown(LookupUnknown::Receiver);
         }
 
         if dispatch_to_includers {
@@ -122,14 +124,19 @@ impl<'a> AnalysisQuery<'a> {
             if !includers.is_empty() {
                 let mut facts = Vec::new();
                 let mut incomplete = false;
+                let mut unknown = None;
                 for includer in includers.iter() {
                     match self.resolve_method_reference_with_chain_cache(
                         includer,
                         method,
                         chain_cache,
                     ) {
-                        MethodLookupResult::Unique(fact) => facts.push(fact),
+                        MethodLookupResult::Found(fact) => facts.push(fact),
                         MethodLookupResult::Missing => incomplete = true,
+                        MethodLookupResult::Unknown(reason) => {
+                            incomplete = true;
+                            unknown.get_or_insert(reason);
+                        }
                         MethodLookupResult::Ambiguous { .. } => {
                             return MethodLookupResult::Ambiguous {
                                 owner: namespace_fqn.clone(),
@@ -141,8 +148,8 @@ impl<'a> AnalysisQuery<'a> {
                 facts.sort_by_key(|fact| (fact.owner.clone(), fact.range));
                 facts.dedup();
                 return match facts.as_slice() {
-                    [] => MethodLookupResult::Missing,
-                    [fact] if !incomplete => MethodLookupResult::Unique(fact.clone()),
+                    [] => absent(unknown),
+                    [fact] if !incomplete => MethodLookupResult::Found(fact.clone()),
                     [_] | [_, _, ..] => MethodLookupResult::Ambiguous {
                         owner: namespace_fqn.clone(),
                         method: *method,
@@ -168,7 +175,7 @@ impl<'a> AnalysisQuery<'a> {
                 .effective_method_fact_matching_owner_id(owner_id, method)
             {
                 EffectiveMethodFactMatch::Missing => continue,
-                EffectiveMethodFactMatch::Unique(fact) => {
+                EffectiveMethodFactMatch::Found(fact) => {
                     if non_core_fact_requires_ancestry_proof(
                         self.engine,
                         namespace_fqn,
@@ -180,20 +187,10 @@ impl<'a> AnalysisQuery<'a> {
                             method: *method,
                         };
                     }
-                    return MethodLookupResult::Unique(Arc::new(fact));
+                    return MethodLookupResult::Found(Arc::new(fact));
                 }
-                EffectiveMethodFactMatch::Ambiguous => {
-                    return MethodLookupResult::Ambiguous {
-                        owner: self
-                            .engine
-                            .names
-                            .fqn(owner_id)
-                            .expect(
-                                "INVARIANT VIOLATED: cached method-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
-                            )
-                            .clone(),
-                        method: *method,
-                    };
+                EffectiveMethodFactMatch::Ambiguous { owner, method } => {
+                    return MethodLookupResult::Ambiguous { owner, method };
                 }
             }
         }
@@ -208,7 +205,7 @@ impl<'a> AnalysisQuery<'a> {
             namespace_fqn,
             chain_cache,
         ) {
-            return MethodLookupResult::Missing;
+            return MethodLookupResult::Unknown(LookupUnknown::IncompleteChain);
         }
 
         // Class and module objects share one language-defined fallback through
@@ -217,8 +214,10 @@ impl<'a> AnalysisQuery<'a> {
         // same metaclass chain to every cached owner multiplied transient work
         // on large projects without adding proof.
         if let Some(metaclass) = metaclass_namespace_for_object(self.engine, namespace_fqn) {
-            let metaclass_id = self.engine.names.fqn_id(&metaclass).expect(
-                "INVARIANT VIOLATED: proven metaclass namespace is absent from the name registry. This is a bug because metaclass fallback requires an indexed graph node. Fix: intern graph node FQNs before method resolution.",
+            let metaclass_id = self.engine.names.fqn_id(&metaclass).expect_invariant(
+                "proven metaclass namespace is absent from the name registry",
+                "metaclass fallback requires an indexed graph node",
+                "intern graph node FQNs before method resolution",
             );
             let cache_key = (metaclass_id, *method);
             let fallback = if let Some(cached) = chain_cache.metaclass_methods.get(&cache_key) {
@@ -233,7 +232,7 @@ impl<'a> AnalysisQuery<'a> {
                         .effective_method_fact_matching_owner_id(owner_id, method)
                     {
                         EffectiveMethodFactMatch::Missing => continue,
-                        EffectiveMethodFactMatch::Unique(fact) => {
+                        EffectiveMethodFactMatch::Found(fact) => {
                             if non_core_fact_requires_ancestry_proof(
                                 self.engine,
                                 namespace_fqn,
@@ -246,37 +245,30 @@ impl<'a> AnalysisQuery<'a> {
                                 };
                                 break;
                             }
-                            result = MethodLookupResult::Unique(Arc::new(fact));
+                            result = MethodLookupResult::Found(Arc::new(fact));
                             break;
                         }
-                        EffectiveMethodFactMatch::Ambiguous => {
-                            result = MethodLookupResult::Ambiguous {
-                                owner: self
-                                    .engine
-                                    .names
-                                    .fqn(owner_id)
-                                    .expect(
-                                        "INVARIANT VIOLATED: cached metaclass-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
-                                    )
-                                    .clone(),
-                                method: *method,
-                            };
+                        EffectiveMethodFactMatch::Ambiguous { owner, method } => {
+                            result = MethodLookupResult::Ambiguous { owner, method };
                             break;
                         }
                     }
                 }
-                assert!(
+                invariant!(
                     chain_cache
                         .metaclass_methods
                         .insert(cache_key, result.clone())
                         .is_none(),
-                    "INVARIANT VIOLATED: metaclass fallback cache replaced an entry after a confirmed miss. This is a bug because metaclass identity and method names are immutable during one resolve pass. Fix: keep fallback lookup and insertion in one resolution step."
+                    what = "metaclass fallback cache replaced an entry after a confirmed miss",
+                    why =
+                        "metaclass identity and method names are immutable during one resolve pass",
+                    fix = "keep fallback lookup and insertion in one resolution step",
                 );
                 result
             };
             match fallback {
-                MethodLookupResult::Missing => {}
-                MethodLookupResult::Unique(_) | MethodLookupResult::Ambiguous { .. } => {
+                MethodLookupResult::Missing | MethodLookupResult::Unknown(_) => {}
+                MethodLookupResult::Found(_) | MethodLookupResult::Ambiguous { .. } => {
                     return fallback;
                 }
             }
@@ -284,12 +276,16 @@ impl<'a> AnalysisQuery<'a> {
 
         let mut application_facts = Vec::new();
         let mut application_ambiguous = false;
+        let mut application_unknown = None;
         for application in execution_context_application_targets(self.engine, namespace_fqn) {
             match self.resolve_method_reference_with_chain_cache(&application, method, chain_cache)
             {
-                MethodLookupResult::Unique(fact) => application_facts.push(fact),
+                MethodLookupResult::Found(fact) => application_facts.push(fact),
                 MethodLookupResult::Ambiguous { .. } => application_ambiguous = true,
                 MethodLookupResult::Missing => {}
+                MethodLookupResult::Unknown(reason) => {
+                    application_unknown.get_or_insert(reason);
+                }
             }
         }
         application_facts.sort_by_key(|fact| {
@@ -308,7 +304,7 @@ impl<'a> AnalysisQuery<'a> {
             };
         }
         if let Some(fact) = application_facts.pop() {
-            return MethodLookupResult::Unique(fact);
+            return MethodLookupResult::Found(fact);
         }
 
         if unproven_universal_method_exists(self.engine, &universal_roots, method, chain_cache) {
@@ -326,15 +322,20 @@ impl<'a> AnalysisQuery<'a> {
             );
             if matches!(
                 &fallback,
-                MethodLookupResult::Unique(fact)
+                MethodLookupResult::Found(fact)
                     if default_basic_object_method_missing_fact(self.engine, fact)
             ) {
-                return MethodLookupResult::Missing;
+                return absent(application_unknown);
             }
-            return fallback;
+            return match fallback {
+                MethodLookupResult::Missing => absent(application_unknown),
+                MethodLookupResult::Found(_)
+                | MethodLookupResult::Ambiguous { .. }
+                | MethodLookupResult::Unknown(_) => fallback,
+            };
         }
 
-        MethodLookupResult::Missing
+        absent(application_unknown)
     }
 
     pub(crate) fn resolve_super_method_reference(
@@ -350,11 +351,10 @@ impl<'a> AnalysisQuery<'a> {
             .effective_method_fact_matching_owner_name(&callee.owner, method)
         {
             EffectiveMethodFactMatch::Missing => MethodLookupResult::Missing,
-            EffectiveMethodFactMatch::Unique(fact) => MethodLookupResult::Unique(Arc::new(fact)),
-            EffectiveMethodFactMatch::Ambiguous => MethodLookupResult::Ambiguous {
-                owner: callee.owner,
-                method: *method,
-            },
+            EffectiveMethodFactMatch::Found(fact) => MethodLookupResult::Found(Arc::new(fact)),
+            EffectiveMethodFactMatch::Ambiguous { owner, method } => {
+                MethodLookupResult::Ambiguous { owner, method }
+            }
         }
     }
 
@@ -417,7 +417,6 @@ impl<'a> AnalysisQuery<'a> {
         for ancestor_chain in &lookup_chains {
             for ancestor in ancestor_chain {
                 let has_method_fact = !self
-                    .engine
                     .method_facts_matching_owner_name(ancestor, method)
                     .is_empty();
                 if ancestor != namespace_fqn
@@ -433,7 +432,7 @@ impl<'a> AnalysisQuery<'a> {
                 }
             }
         }
-        for override_fact in self.engine.all_method_visibility_overrides() {
+        for override_fact in self.all_method_visibility_overrides() {
             if override_fact.method != *method {
                 continue;
             }
@@ -464,8 +463,17 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
+/// No reference was selected: proven missing unless an edge consulted on the
+/// way was unknown.
+fn absent(unknown: Option<LookupUnknown>) -> MethodLookupResult {
+    match unknown {
+        Some(reason) => MethodAnswer::Unknown(reason),
+        None => MethodAnswer::Missing,
+    }
+}
+
 fn non_core_fact_requires_ancestry_proof(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     requested_owner: &FullyQualifiedName,
     fact: &MethodFact,
     crossed_universal_root: bool,
@@ -475,10 +483,13 @@ fn non_core_fact_requires_ancestry_proof(
     }
 
     let source_kind = engine
+        .view()
         .file(fact.range.file_id)
         .unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: method fact `{}` references missing source file {}. This is a bug because every fact must remain owned by a registered file. Fix: remove facts before unregistering their source.",
+            unreachable_invariant!(
+                what = "method fact `{}` references missing source file {}",
+                why = "every fact must remain owned by a registered file",
+                fix = "remove facts before unregistering their source",
                 fact.fqn,
                 fact.range.file_id.0,
             )

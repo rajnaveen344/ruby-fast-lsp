@@ -1,7 +1,7 @@
 //! Diagnostic parity between `check` output and LSP published diagnostics.
 
 use super::support::{assert_diagnostic_parity, find_cli_diagnostic, find_lsp_diagnostic};
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::lsp::check::CheckSession;
 use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::NumberOrString;
@@ -35,7 +35,7 @@ async fn local_semantic_diagnostic_matches_lsp_projection() {
         .expect("LSP must return the proven wrong-arity diagnostic");
 
     assert_eq!(check_diagnostic.message, lsp_diagnostic.message);
-    assert_eq!(
+    invariant_eq!(
         (
             check_diagnostic.range.start.line,
             check_diagnostic.range.start.column,
@@ -48,9 +48,9 @@ async fn local_semantic_diagnostic_matches_lsp_projection() {
             lsp_diagnostic.range.end.line + 1,
             lsp_diagnostic.range.end.character + 1,
         ),
-        "INVARIANT VIOLATED: CLI and LSP projected different ranges for one engine-owned \
-         diagnostic. This is a bug because adapters may change indexing conventions but not \
-         semantic locations. Fix: keep check range conversion aligned with LSP UTF-16 positions."
+        what = "CLI and LSP projected different ranges for one engine-owned diagnostic",
+        why = "adapters may change indexing conventions but not semantic locations",
+        fix = "keep check range conversion aligned with LSP UTF-16 positions",
     );
 }
 

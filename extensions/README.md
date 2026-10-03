@@ -14,18 +14,16 @@ flowchart TD
     Filter -- yes --> HostCtx[Host builds CallContext]
 
     HostCtx --> ExtApi[crates/extension-api\nABI structs + Extension trait]
-    ExtApi --> RSpecRust[crates/extension-rspec\nnative Rust extension]
     ExtApi --> RSpecRuby[extensions/rspec-ruby\nRuby source]
     RSpecRuby --> Mruby[mruby Wasm module\nrspec-ruby.wasm]
     Mruby --> WasmHost[crates/extension-wasm-host\nJSON over Wasm memory ABI]
-    RSpecRust --> Patches[IndexPatch list]
-    WasmHost --> Patches
+    WasmHost --> Patches[IndexPatch list]
 
     Patches --> Validate[Core validates patch\nnamespaces, method names, ABI version]
     Validate --> Apply[Core applies to analysis facts]
-    Apply --> Engine[AnalysisEngine]
+    Apply --> Engine[Project]
 
-    Engine --> Query[AnalysisQuery]
+    Engine --> Query[View]
     Query --> LspFeatures[LSP features\ngoto, refs, hover, completion,\ndiagnostics]
 ```
 
@@ -35,7 +33,7 @@ sequenceDiagram
     participant H as Extension Host
     participant A as crates/extension-api
     participant R as Extension
-    participant I as AnalysisEngine
+    participant I as Project
 
     V->>H: process_call_node(CallNode)
     H->>R: indexed_call_names()
@@ -52,11 +50,11 @@ sequenceDiagram
 
 ## Current Layout
 
-- `crates/extension-api`: shared ABI/data model for native extensions now and Wasm/WIT later.
+- `crates/extension-api`: shared ABI/data model for Wasm guests and the host.
 - `crates/extension-wasm-host`: Wasm loader using JSON over linear memory for `CallContext -> IndexPatch[]`.
-- `crates/extension-rspec`: native Rust extension used as the in-process fallback/reference implementation.
 - `extensions/mruby-sdk`: tiny Ruby DSL for authoring patch-based extensions.
-- `extensions/rspec-ruby`: Ruby-authored RSpec extension package compiled to mruby Wasm.
+- `extensions/rspec-ruby`: Ruby-authored RSpec extension package compiled to
+  mruby Wasm; the only RSpec implementation.
 - `extensions/rails-ruby`: Rust-authored Rails adapter compiled to Wasm while
   retaining its stable package ID.
 - `extensions/sinatra-rust`, `extensions/minitest-ruby`, and
@@ -103,14 +101,20 @@ and `projectExtensionsEnabled: true` (the default). VS Code maps this to its
 workspace trust/Restricted Mode state and restarts the server when trust is
 granted. Other clients must opt in explicitly; omitting trust is fail-closed.
 
-Precedence is deterministic: editor/configured packages and directories win,
-then project-local packages, then environment/development paths. Explicit
-packages win over directory discovery within a source, and filesystem path is
-the final tie-break. A lower-priority valid package may load only when every
-higher-priority package with the same ID fails validation.
+An installed server also loads the packages in an `extensions/` directory
+beside its executable or beside its `bin/` directory. The npm platform
+packages ship `rspec-ruby` there. These bundled packages are defaults.
 
-Wasm extensions handle matching calls first; built-in native extensions are
-fallback.
+Precedence is deterministic: editor/configured packages and directories win,
+then project-local packages, then environment/development paths, then bundled
+packages. Explicit packages win over directory discovery within a source, and
+filesystem path is the final tie-break. A lower-priority valid package may load
+only when every higher-priority package with the same ID fails validation; a
+package whose ID is already loaded is skipped before its Wasm is compiled.
+
+Every framework, RSpec included, is a Wasm package; the host has no built-in
+framework fallback. Without a loaded package, framework calls index as
+ordinary Ruby.
 
 Package shape:
 
@@ -203,8 +207,8 @@ ruby-fast-lsp/extensions/status
 Validate a package before wiring it through an editor:
 
 ```bash
-cargo run --bin extension validate extensions/rspec-ruby
-cargo run --bin extension smoke extensions/rspec-ruby
+cargo run -p devtools --bin extension validate extensions/rspec-ruby
+cargo run -p devtools --bin extension smoke extensions/rspec-ruby
 ```
 
 ## Wasm ABI V1
@@ -324,7 +328,7 @@ declarations, and exact semantic targets. The domain contract expresses:
 The host must validate the context before entering the block. The fact
 collector pushes it for the block traversal and pops it on every exit path.
 Accepted declarations, mixins, references, and graph edges still become
-ordinary per-file facts and enter the engine only through `replace_facts`.
+ordinary per-file facts and enter the engine only through `update`.
 Extensions do not perform method lookup or mutate scope trackers directly.
 
 Source-scoped owner identity is stable for the same extension, source file, and
@@ -552,8 +556,9 @@ Current registry slice:
 
 - `ExtensionRegistry` owns loaded Wasm extension slots.
 - Discovery precedence is deterministic: initialization-option sources override
-  environment sources, explicit package paths override directory discovery
-  within the same source, and filesystem path breaks remaining ties.
+  project-local, then environment, then bundled sources; explicit package paths
+  override directory discovery within the same source, and filesystem path
+  breaks remaining ties.
 - Extension identity is unique. After the highest-priority valid package for an
   `id` loads, lower-priority duplicates are rejected before they can dispatch
   events or contribute semantic patches.

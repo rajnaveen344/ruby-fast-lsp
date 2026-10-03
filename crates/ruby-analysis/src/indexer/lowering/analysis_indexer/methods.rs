@@ -6,6 +6,7 @@ use crate::core::{
     MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, SymbolFact, SymbolKind,
     TextRange, TypeFact, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
 
 use super::syntax::{
@@ -13,7 +14,8 @@ use super::syntax::{
     delegate_methods_and_receiver, forwardable_delegates_and_receiver, method_name_and_range,
     symbol_name_and_range,
 };
-use super::{AnalysisIndexer, ScopeKind};
+use super::AnalysisIndexer;
+use crate::indexer::documents::scope_rules::implicit_singleton_namespace;
 
 impl AnalysisIndexer {
     fn push_method_fact(
@@ -38,9 +40,9 @@ impl AnalysisIndexer {
         self.facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
-        self.facts
-            .methods
-            .push(MethodFact::new(fqn, owner, range).with_visibility(self.current_visibility()));
+        self.facts.methods.push(
+            MethodFact::new(fqn, owner, range).with_visibility(self.scope.current_visibility()),
+        );
     }
 
     fn push_method_fact_with_params(
@@ -58,7 +60,7 @@ impl AnalysisIndexer {
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.facts.methods.push(
             MethodFact::with_param_facts(fqn, owner, range, params)
-                .with_visibility(self.current_visibility()),
+                .with_visibility(self.scope.current_visibility()),
         );
     }
 
@@ -72,10 +74,7 @@ impl AnalysisIndexer {
             return;
         };
 
-        let owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => crate::core::NamespaceKind::Instance,
-            ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
-        };
+        let owner_kind = self.owner_kind();
 
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = attr_name_and_range(&arg, self.file_id) else {
@@ -84,14 +83,14 @@ impl AnalysisIndexer {
 
             if reader {
                 if let Ok(method) = RubyMethod::new(&name) {
-                    self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
+                    self.push_method_fact(self.owner_namespace(), owner_kind, method, range);
                 }
             }
 
             if writer {
                 if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
                     self.push_method_fact_with_params(
-                        self.namespace_stack.clone(),
+                        self.owner_namespace(),
                         owner_kind,
                         method,
                         range,
@@ -110,7 +109,7 @@ impl AnalysisIndexer {
         let namespace = node
             .receiver()
             .and_then(|receiver| self.resolve_constant_receiver_namespace(&receiver))
-            .unwrap_or_else(|| self.namespace_stack.clone());
+            .unwrap_or_else(|| self.owner_namespace());
 
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = attr_name_and_range(&arg, self.file_id) else {
@@ -154,15 +153,11 @@ impl AnalysisIndexer {
 
     pub(super) fn push_module_function_facts(&mut self, node: &CallNode<'_>) {
         let Some(arguments) = node.arguments() else {
-            if let Some(mode) = self.module_function_mode_stack.last_mut() {
-                *mode = true;
-            }
+            self.scope.enable_module_function_mode();
             return;
         };
         if arguments.arguments().iter().next().is_none() {
-            if let Some(mode) = self.module_function_mode_stack.last_mut() {
-                *mode = true;
-            }
+            self.scope.enable_module_function_mode();
             return;
         };
 
@@ -173,9 +168,9 @@ impl AnalysisIndexer {
             let Ok(method) = RubyMethod::new(&name) else {
                 continue;
             };
-            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
+            let fqn = FullyQualifiedName::method(self.owner_namespace(), method);
             let instance_owner = FullyQualifiedName::namespace_with_kind(
-                self.namespace_stack.clone(),
+                self.owner_namespace(),
                 crate::core::NamespaceKind::Instance,
             );
             let range = self
@@ -186,12 +181,15 @@ impl AnalysisIndexer {
                 .map(|fact| fact.range)
                 .unwrap_or(fallback_range);
             let owner = FullyQualifiedName::namespace_with_kind(
-                self.namespace_stack.clone(),
+                self.owner_namespace(),
                 crate::core::NamespaceKind::Singleton,
             );
-            self.facts.methods.push(
-                MethodFact::new(fqn, owner, range).with_visibility(self.current_visibility()),
-            );
+            // Ruby copies the method as a public singleton method and makes
+            // the instance method private.
+            self.facts
+                .methods
+                .push(MethodFact::new(fqn, owner, range).with_visibility(MethodVisibility::Public));
+            self.set_method_visibility(method, MethodVisibility::Private, fallback_range);
         }
     }
 
@@ -201,11 +199,11 @@ impl AnalysisIndexer {
         visibility: MethodVisibility,
     ) {
         let Some(arguments) = node.arguments() else {
-            self.set_current_visibility(visibility);
+            self.scope.set_current_visibility(visibility);
             return;
         };
         if arguments.arguments().iter().next().is_none() {
-            self.set_current_visibility(visibility);
+            self.scope.set_current_visibility(visibility);
             return;
         }
 
@@ -226,13 +224,8 @@ impl AnalysisIndexer {
         visibility: MethodVisibility,
         range: TextRange,
     ) {
-        let owner = FullyQualifiedName::namespace_with_kind(
-            self.namespace_stack.clone(),
-            match self.current_scope_kind() {
-                ScopeKind::Instance => NamespaceKind::Instance,
-                ScopeKind::Singleton => NamespaceKind::Singleton,
-            },
-        );
+        let owner =
+            FullyQualifiedName::namespace_with_kind(self.owner_namespace(), self.owner_kind());
         self.facts
             .method_visibility_overrides
             .push(MethodVisibilityOverrideFact::new(
@@ -262,25 +255,22 @@ impl AnalysisIndexer {
             return;
         };
 
-        let owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => crate::core::NamespaceKind::Instance,
-            ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
-        };
+        let owner_kind = self.owner_kind();
         let range = self.range(&node.location());
         self.push_method_fact_without_parameter_shape(
-            self.namespace_stack.clone(),
+            self.owner_namespace(),
             owner_kind,
             new_method,
             range,
         );
 
-        let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
+        let old_fqn = FullyQualifiedName::method(self.owner_namespace(), old_method);
         let new_fqn = FullyQualifiedName::method(
-            self.namespace_stack.clone(),
-            RubyMethod::new(&new_name).expect(
-                "INVARIANT VIOLATED: alias_method new method became invalid after validation. \
-                 This is a bug because the same string was already accepted. \
-                 Fix: keep alias_method validation single-sourced.",
+            self.owner_namespace(),
+            RubyMethod::new(&new_name).expect_invariant(
+                "alias_method new method became invalid after validation",
+                "the same string was already accepted",
+                "keep alias_method validation single-sourced",
             ),
         );
         if let Some(old_type) = self
@@ -299,6 +289,9 @@ impl AnalysisIndexer {
         }
     }
 
+    /// `define_method` and `define_singleton_method` are calls on `self`, so
+    /// they define only where `self` is a class or module object; the
+    /// collector applies the same rule.
     pub(super) fn push_define_method_fact(&mut self, node: &CallNode<'_>) {
         let Some((name, range)) = define_method_name_and_range(node, self.file_id, 0) else {
             return;
@@ -306,34 +299,22 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        if self.namespace_stack.is_empty() {
+        let Some(namespace) = implicit_singleton_namespace(&self.scope) else {
             return;
-        }
-        let owner_kind = if self.eval_context_active() {
-            crate::core::NamespaceKind::Instance
-        } else if self.current_scope_kind() == ScopeKind::Singleton {
-            crate::core::NamespaceKind::Singleton
-        } else if let Some((_method, method_kind)) = self.method_context_stack.last() {
-            if *method_kind == NamespaceKind::Instance {
-                return;
-            }
-            crate::core::NamespaceKind::Instance
-        } else {
-            crate::core::NamespaceKind::Instance
         };
-        self.push_method_fact_without_parameter_shape(
-            self.namespace_stack.clone(),
-            owner_kind,
-            method,
-            range,
-        );
+        let owner_kind = if !self.scope.execution_context_active() && self.scope.in_singleton() {
+            NamespaceKind::Singleton
+        } else {
+            NamespaceKind::Instance
+        };
+        self.push_method_fact_without_parameter_shape(namespace, owner_kind, method, range);
     }
 
     pub(super) fn push_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
-        if self.namespace_stack.is_empty() || !self.method_context_stack.is_empty() {
+        let Some(namespace) = implicit_singleton_namespace(&self.scope) else {
             return;
-        }
-        self.push_define_singleton_method_for_namespace(node, self.namespace_stack.clone());
+        };
+        self.push_define_singleton_method_for_namespace(node, namespace);
     }
 
     pub(super) fn push_receiver_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
@@ -412,10 +393,7 @@ impl AnalysisIndexer {
         else {
             return;
         };
-        let owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => crate::core::NamespaceKind::Instance,
-            ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
-        };
+        let owner_kind = self.owner_kind();
         let range = self.range(&node.location());
         let Ok(receiver_method) = RubyMethod::new(&receiver_method) else {
             return;
@@ -424,15 +402,14 @@ impl AnalysisIndexer {
             let Ok(method) = RubyMethod::new(&method_name) else {
                 continue;
             };
-            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
-            let owner =
-                FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
+            let fqn = FullyQualifiedName::method(self.owner_namespace(), method);
+            let owner = FullyQualifiedName::namespace_with_kind(self.owner_namespace(), owner_kind);
             self.facts
                 .symbols
                 .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
             self.facts.methods.push(
                 MethodFact::with_delegate_receiver(fqn, owner, range, receiver_method)
-                    .with_visibility(self.current_visibility()),
+                    .with_visibility(self.scope.current_visibility()),
             );
         }
     }
@@ -443,10 +420,7 @@ impl AnalysisIndexer {
         else {
             return;
         };
-        let owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => crate::core::NamespaceKind::Instance,
-            ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
-        };
+        let owner_kind = self.owner_kind();
         let range = self.range(&node.location());
         let Ok(receiver_method) = RubyMethod::new(&receiver_method) else {
             return;
@@ -455,15 +429,14 @@ impl AnalysisIndexer {
             let Ok(method) = RubyMethod::new(&defined_name) else {
                 continue;
             };
-            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
-            let owner =
-                FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
+            let fqn = FullyQualifiedName::method(self.owner_namespace(), method);
+            let owner = FullyQualifiedName::namespace_with_kind(self.owner_namespace(), owner_kind);
             self.facts
                 .symbols
                 .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
             self.facts.methods.push(
                 MethodFact::with_delegate_receiver(fqn, owner, range, receiver_method)
-                    .with_visibility(self.current_visibility()),
+                    .with_visibility(self.scope.current_visibility()),
             );
         }
     }

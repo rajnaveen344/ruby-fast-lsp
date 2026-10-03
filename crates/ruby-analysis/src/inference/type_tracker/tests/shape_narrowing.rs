@@ -52,20 +52,26 @@ end"#;
     let reads = tracker.take_local_read_types();
     let read_type_at = |needle: &str| {
         let start_offset = source.find(needle).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: discriminator test needle `{needle}` is absent. This is a bug because the fixture and assertion must identify the same branch read. Fix: keep the needle synchronized with the source."
-                )
-            });
+            unreachable_invariant!(
+                what = "discriminator test needle `{needle}` is absent",
+                why = "the fixture and assertion must identify the same branch read",
+                fix = "keep the needle synchronized with the source",
+                needle = needle,
+            )
+        });
         reads
-                .iter()
-                .find(|read| read.start_offset == start_offset)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: discriminator branch read at {start_offset} was not retained. This is a bug because flow evidence is enabled after an if join. Fix: record the exact local receiver read on every reachable branch."
-                    )
-                })
-                .ruby_type
-                .clone()
+            .iter()
+            .find(|read| read.start_offset == start_offset)
+            .unwrap_or_else(|| {
+                unreachable_invariant!(
+                    what = "discriminator branch read at {start_offset} was not retained",
+                    why = "flow evidence is enabled after an if join",
+                    fix = "record the exact local receiver read on every reachable branch",
+                    start_offset = start_offset,
+                )
+            })
+            .ruby_type
+            .clone()
     };
 
     assert_eq!(

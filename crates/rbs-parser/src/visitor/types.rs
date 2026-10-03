@@ -95,9 +95,11 @@ impl<'a> Visitor<'a> {
                 for child in node.named_children(&mut cursor) {
                     match child.kind() {
                         "record_key" => {
-                            assert!(
+                            invariant!(
                                 pending_key.is_none(),
-                                "INVARIANT VIOLATED: an RBS record exposed two keys without an intervening value. This is a parser-shape bug because the grammar emits paired key/value fields. Fix: keep the visitor synchronized with tree-sitter-rbs record_type."
+                                what = "an RBS record exposed two keys without an intervening value",
+                                why = "the grammar emits paired key/value fields",
+                                fix = "keep the visitor synchronized with tree-sitter-rbs record_type",
                             );
                             pending_key = Some((
                                 self.node_text(&child).to_string(),

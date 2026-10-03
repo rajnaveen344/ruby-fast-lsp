@@ -27,10 +27,13 @@ async fn concurrent_waiters_share_exactly_one_producer() {
     assert_eq!(producer_calls.load(Ordering::SeqCst), 1);
     assert_eq!(cache.len(), 1);
     let stats = cache.snapshot();
-    assert_eq!(stats.lookups, 16);
-    assert_eq!(stats.misses, 1);
-    assert_eq!(stats.producers, 1);
-    assert_eq!(stats.hits + stats.joined_flights, 15);
+    assert_eq!(stats.get(SingleFlightStat::Lookups), 16);
+    assert_eq!(stats.get(SingleFlightStat::Misses), 1);
+    assert_eq!(stats.get(SingleFlightStat::Producers), 1);
+    assert_eq!(
+        stats.get(SingleFlightStat::Hits) + stats.get(SingleFlightStat::JoinedFlights),
+        15
+    );
 }
 
 #[tokio::test]
@@ -63,10 +66,10 @@ async fn failed_flight_wakes_waiters_and_later_generation_retries() {
         .unwrap();
     assert_eq!(*recovered, 7);
     let stats = cache.snapshot();
-    assert_eq!(stats.lookups, 9);
-    assert_eq!(stats.misses, 2);
-    assert_eq!(stats.producers, 2);
-    assert_eq!(stats.failures, 1);
+    assert_eq!(stats.get(SingleFlightStat::Lookups), 9);
+    assert_eq!(stats.get(SingleFlightStat::Misses), 2);
+    assert_eq!(stats.get(SingleFlightStat::Producers), 2);
+    assert_eq!(stats.get(SingleFlightStat::Failures), 1);
 }
 
 #[tokio::test]
@@ -86,7 +89,7 @@ async fn bounded_cache_evicts_oldest_completed_values_by_weight() {
     assert_eq!(cache.retained_weight(), 6);
     assert!(!cache.contains_key(&"a".to_string()));
     assert!(cache.contains_key(&"b".to_string()));
-    assert_eq!(cache.snapshot().evictions, 1);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Evictions), 1);
 }
 
 #[tokio::test]
@@ -232,7 +235,7 @@ async fn cancelling_initiating_waiter_does_not_cancel_shared_producer() {
         })
     };
 
-    while cache.snapshot().joined_flights == 0 {
+    while cache.snapshot().get(SingleFlightStat::JoinedFlights) == 0 {
         tokio::task::yield_now().await;
     }
     first_waiter.abort();
@@ -246,7 +249,7 @@ async fn cancelling_initiating_waiter_does_not_cancel_shared_producer() {
         .unwrap();
     assert_eq!(*result, 42);
     assert_eq!(producer_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(cache.snapshot().producers, 1);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Producers), 1);
 }
 
 #[test]
@@ -284,7 +287,7 @@ fn blocking_bounded_cache_coalesces_and_retains_exact_products() {
                 .unwrap()
         })
     };
-    while cache.snapshot().joined_flights == 0 {
+    while cache.snapshot().get(SingleFlightStat::JoinedFlights) == 0 {
         std::thread::yield_now();
     }
     release_tx.send(()).unwrap();
@@ -302,9 +305,9 @@ fn blocking_bounded_cache_coalesces_and_retains_exact_products() {
     assert_eq!(*retained, 42);
     assert_eq!(producer_calls.load(Ordering::SeqCst), 1);
     assert_eq!(cache.retained_weight(), 1);
-    assert_eq!(cache.snapshot().producers, 1);
-    assert_eq!(cache.snapshot().joined_flights, 1);
-    assert_eq!(cache.snapshot().hits, 1);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Producers), 1);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::JoinedFlights), 1);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Hits), 1);
 }
 
 #[test]
@@ -331,9 +334,9 @@ fn blocking_bounded_cache_retries_failed_products_and_evicts_by_weight() {
     assert!(cache.contains_key(&"newer".to_string()));
     assert_eq!(cache.retained_weight(), 3);
     let snapshot = cache.snapshot();
-    assert_eq!(snapshot.failures, 1);
-    assert_eq!(snapshot.producers, 3);
-    assert_eq!(snapshot.evictions, 1);
+    assert_eq!(snapshot.get(SingleFlightStat::Failures), 1);
+    assert_eq!(snapshot.get(SingleFlightStat::Producers), 3);
+    assert_eq!(snapshot.get(SingleFlightStat::Evictions), 1);
 }
 
 #[test]
@@ -356,7 +359,7 @@ fn blocking_bounded_cache_wakes_waiters_and_retries_after_producer_panic() {
         let cache = cache.clone();
         std::thread::spawn(move || cache.get_or_try_init("panic".to_string(), || Ok(99)))
     };
-    while cache.snapshot().joined_flights == 0 {
+    while cache.snapshot().get(SingleFlightStat::JoinedFlights) == 0 {
         std::thread::yield_now();
     }
     release_tx.send(()).unwrap();
@@ -364,12 +367,12 @@ fn blocking_bounded_cache_wakes_waiters_and_retries_after_producer_panic() {
     assert!(producer.join().is_err());
     assert!(waiter.join().is_err());
     assert!(cache.is_empty());
-    assert_eq!(cache.snapshot().failures, 1);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Failures), 1);
     assert_eq!(
         *cache
             .get_or_try_init("panic".to_string(), || Ok(42))
             .unwrap(),
         42
     );
-    assert_eq!(cache.snapshot().producers, 2);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Producers), 2);
 }

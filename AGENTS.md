@@ -13,7 +13,7 @@ counts to this guide.
 | Understand the product and priorities | [README](README.md)                                                                                                                        |
 | Find user and developer documentation | [Documentation index](docs/README.md)                                                                                                      |
 | Place code or change state ownership  | [Architecture](src/ARCHITECTURE.md), [analysis library](crates/ruby-analysis/README.md), [server owners](docs/development/server-state.md) |
-| Add or debug a test                   | [Test guide](src/test/README.md), [simulation guide](docs/development/simulation.md)                                                       |
+| Add or debug a test                   | [Test guide](src/test/README.md)                                                                                                           |
 | Change inference                      | [Inference proof model](crates/ruby-analysis/src/inference/mod.rs), [feature contracts](docs/README.md#feature-contracts)                  |
 | Measure or release                    | [Performance workflow](docs/development/performance.md), [release checklist](docs/development/release.md)                                  |
 
@@ -32,26 +32,31 @@ over old status reports. Update the nearest guide when its contract changes.
 | `ruby-analysis::inference`          | Type derivation, local flow, signature substitution, bounded equation solving                 |
 | `crates/extension-*`, `extensions/` | Extension contracts, hosts, and framework-specific fact producers                             |
 | `editors/`                          | Editor UX, distribution packaging, installed-artifact validation                              |
+| `crates/devtools`                   | Profilers, benchmarks, AST dump, and extension validation; never shipped                      |
 
-Keep reusable analysis independent of LSP types. `src/lsp/query/` adapts cursor and
-document context to `AnalysisQuery`/`TypeQuery` and converts domain ranges to
+Keep reusable analysis independent of LSP types. `src/features/` adapts cursor and
+document context to `View` and converts domain ranges to
 protocol responses. Do not duplicate MRO, identity, ranking, or missing-method
 policy in feature adapters. Engine resolution may coordinate inference solvers;
-inference may consult engine queries. Engine ownership of solved state remains
+inference and the indexer read project state only through
+`inference::semantics::Semantics` and never name the engine (an architecture
+test enforces core <- inference <- indexer <- engine). Engine ownership of solved state remains
 singular. Expose domain operations and views, never mutable stores or arena IDs.
 
 ## Correctness contracts
 
-- Use production `assert!`/`expect`/`panic!` for broken internal invariants, never
-  `debug_assert!`. Messages must identify the broken invariant, why it is a bug,
-  and how to fix it. Enumerate impossible variants instead of hiding them in a
-  wildcard panic arm. Represent invalid states in the type system where possible.
+- Check broken internal invariants in production with `invariant!`,
+  `invariant_eq!`/`invariant_ne!`, `unreachable_invariant!`, or `.expect_invariant`
+  (`crates/ruby-analysis/src/invariant.rs`), never `debug_assert!`; each takes
+  what broke, why it is a bug, and the fix. Enumerate impossible variants
+  instead of hiding them in a wildcard panic arm. Represent invalid states in
+  the type system where possible.
 - Missing evidence in user code is an expected analysis outcome: retain explicit
   `Unknown` reasons. Malformed source, unsupported Ruby, unavailable runtimes, and
   external tool failures must not be treated as corrupt internal state. Never
   replace uncertainty with a guessed concrete type or silently hide a failure.
 - Use recursive Prism traversal. Verify unfamiliar nodes with
-  `cargo run --bin ast -- --loc '<neutral Ruby snippet>'`. Prism ranges use bytes;
+  `cargo run -p devtools --bin ast -- --loc '<neutral Ruby snippet>'`. Prism ranges use bytes;
   LSP positions are zero-based UTF-16. Preserve original source coordinates,
   including ERB projections and non-BMP characters.
 - Register and replace file-owned facts through the engine lifecycle; resolve
@@ -120,7 +125,7 @@ scripts, and historical measurements. Generated logs and profiles belong under
    paths, business terminology, or code into fixtures or documentation.
 2. Fix the owning layer. Use `check()` for static feature cases, `FakeEditor` for
    edit/reindex behavior, and the external harness or CLI test for process-level
-   contracts. See the test guide for actual boundaries and simulation authoring.
+   contracts. See the test guide for actual harness boundaries.
 3. Run the focused test, then relevant broader checks. Do not ignore a failing
    test, replace a semantic assertion with a weak subset check, or extend a
    wall-clock timeout to hide flaky scheduling. Subprocess tests use the harness
@@ -130,8 +135,7 @@ scripts, and historical measurements. Generated logs and profiles belong under
    measurements for changes to hot paths, inference bounds, scheduling, or caches;
    documentation and presentation-only edits do not require a performance campaign.
 5. Report what changed, the checks actually run, and any remaining limitation.
-   A regression test does not automatically expand generated simulator coverage.
-   Keep standard, simulation, native package, and real-editor evidence distinct.
+   Keep standard, robustness, native package, and real-editor evidence distinct.
 
 Common commands (run from the repository root):
 
@@ -140,7 +144,7 @@ cargo test --locked --workspace
 cargo fmt --all -- --check
 python3 -B support/structure/check.py
 node editors/scripts/release_checks.js correctness
-node editors/scripts/release_checks.js simulation
+node editors/scripts/release_checks.js performance
 ./editors/vscode/create_vsix.sh --current-platform-only
 ```
 

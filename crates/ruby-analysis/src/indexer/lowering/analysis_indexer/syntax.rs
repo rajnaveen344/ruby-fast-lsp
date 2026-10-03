@@ -5,9 +5,10 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeKind, MethodParamFact, MethodParamKind, RubyConstant,
     SourceFileId, TextRange,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{AliasMethodNode, CallNode, ConstantPathNode, DefNode, Node};
 
-use crate::indexer::constant_path_is_absolute;
+use crate::indexer::{collect_namespaces, constant_path_is_absolute};
 
 pub(super) fn constant_parts(node: &Node<'_>) -> Option<Vec<RubyConstant>> {
     if let Some(read) = node.as_constant_read_node() {
@@ -209,7 +210,7 @@ pub(super) fn constant_parts_and_absolute(node: &Node<'_>) -> Option<(Vec<RubyCo
 
 pub(super) fn constant_path_parts(path: &ConstantPathNode<'_>) -> Option<Vec<RubyConstant>> {
     let mut parts = Vec::new();
-    collect_constant_path_parts(path, &mut parts);
+    collect_namespaces(path, &mut parts);
     (!parts.is_empty()).then_some(parts)
 }
 
@@ -309,25 +310,6 @@ pub(super) fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
     params
 }
 
-fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<RubyConstant>) {
-    if let Some(parent) = path.parent() {
-        if let Some(parent_path) = parent.as_constant_path_node() {
-            collect_constant_path_parts(&parent_path, parts);
-        } else if let Some(parent_read) = parent.as_constant_read_node() {
-            let name = String::from_utf8_lossy(parent_read.name().as_slice()).to_string();
-            if let Ok(constant) = RubyConstant::new(&name) {
-                parts.push(constant);
-            }
-        }
-    }
-    if let Some(name) = path.name() {
-        let name = String::from_utf8_lossy(name.as_slice()).to_string();
-        if let Ok(constant) = RubyConstant::new(&name) {
-            parts.push(constant);
-        }
-    }
-}
-
 pub(super) fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> TextRange {
     TextRange::new(
         file_id,
@@ -342,10 +324,10 @@ pub(super) fn terminal_name_range(
     name: &[u8],
 ) -> TextRange {
     let end = path.end_offset();
-    let start = end.checked_sub(name.len()).expect(
-        "INVARIANT VIOLATED: constant name is longer than its Prism path location. \
-         This is a bug because the terminal name must be contained in the constant path. \
-         Fix: inspect Prism constant path locations before deriving declaration ranges.",
+    let start = end.checked_sub(name.len()).expect_invariant(
+        "constant name is longer than its Prism path location",
+        "the terminal name must be contained in the constant path",
+        "inspect Prism constant path locations before deriving declaration ranges",
     );
     TextRange::new(file_id, u32_offset(start), u32_offset(end))
 }
@@ -359,9 +341,9 @@ pub(super) fn class_implicitly_inherits_object(fqn: &FullyQualifiedName) -> bool
 }
 
 pub(super) fn u32_offset(offset: usize) -> u32 {
-    u32::try_from(offset).expect(
-        "INVARIANT VIOLATED: source byte offset exceeded u32. \
-         This is a bug because analysis facts currently store u32 ranges. \
-         Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+    u32::try_from(offset).expect_invariant(
+        "source byte offset exceeded u32",
+        "analysis facts currently store u32 ranges",
+        "widen TextRange offsets before indexing files larger than u32::MAX bytes",
     )
 }

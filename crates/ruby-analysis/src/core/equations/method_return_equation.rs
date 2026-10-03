@@ -54,12 +54,11 @@ impl MethodReturnEquation {
     }
 
     pub(crate) fn proven(method: FullyQualifiedName, ruby_type: RubyType) -> Self {
-        assert!(
+        invariant!(
             !RubyType::union_members_contain_unknown(&ruby_type),
-            "INVARIANT VIOLATED: a proven method-return equation contains Unknown (exactly or \
-             inside a union member). This is a bug because Unknown cannot be a concrete equation \
-             base and union members absorb Unknown. Fix: construct an unknown equation with its \
-             precise reason."
+            what = "a proven method-return equation contains Unknown (exactly or inside a union member)",
+            why = "unknown cannot be a concrete equation base and union members absorb Unknown",
+            fix = "construct an unknown equation with its precise reason",
         );
         Self::new(method, MethodReturnBase::Proven(ruby_type), BTreeSet::new())
     }

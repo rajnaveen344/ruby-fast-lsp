@@ -7,6 +7,7 @@ use crate::inference::type_tracker::flow::shapes::narrowing::{
     hash_pattern_requirements, literal_value,
 };
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,8 +155,10 @@ impl TypeTracker {
                 .flat_map(|literals| {
                     literals
                         .as_ref()
-                        .expect(
-                            "INVARIANT VIOLATED: complete case discriminator lost a literal condition set. This is a bug because completeness was checked immediately before flattening. Fix: retain the checked sets unchanged.",
+                        .expect_invariant(
+                            "complete case discriminator lost a literal condition set",
+                            "completeness was checked immediately before flattening",
+                            "retain the checked sets unchanged",
                         )
                         .iter()
                         .cloned()
@@ -263,8 +266,10 @@ impl TypeTracker {
         for (index, in_node) in in_nodes.iter().enumerate() {
             self.environment = env_before.clone();
             let reaches = if patterns_supported {
-                let predicate = predicate.as_ref().expect(
-                    "INVARIANT VIOLATED: supported Hash pattern case lost its predicate. This is a bug because patterns_supported requires one. Fix: retain the checked predicate for branch narrowing.",
+                let predicate = predicate.as_ref().expect_invariant(
+                    "supported Hash pattern case lost its predicate",
+                    "patterns_supported requires one",
+                    "retain the checked predicate for branch narrowing",
                 );
                 let mut reaches = true;
                 for prior in &in_nodes[..index] {
@@ -273,15 +278,19 @@ impl TypeTracker {
                     }
                     reaches = self
                         .narrow_shape_hash_pattern(predicate, &prior.pattern(), false)
-                        .expect(
-                            "INVARIANT VIOLATED: previously supported Hash pattern became unsupported. This is a bug because the immutable pattern was validated before branch traversal. Fix: use one shared pattern recognizer for validation and narrowing.",
+                        .expect_invariant(
+                            "previously supported Hash pattern became unsupported",
+                            "the immutable pattern was validated before branch traversal",
+                            "use one shared pattern recognizer for validation and narrowing",
                         );
                 }
                 if reaches {
                     reaches = self
                         .narrow_shape_hash_pattern(predicate, &in_node.pattern(), true)
-                        .expect(
-                            "INVARIANT VIOLATED: supported Hash pattern became unsupported before its branch. This is a bug because the immutable pattern was validated before traversal. Fix: use one shared pattern recognizer for validation and narrowing.",
+                        .expect_invariant(
+                            "supported Hash pattern became unsupported before its branch",
+                            "the immutable pattern was validated before traversal",
+                            "use one shared pattern recognizer for validation and narrowing",
                         );
                 }
                 reaches
@@ -317,8 +326,10 @@ impl TypeTracker {
             self.environment = env_before.clone();
             let mut else_reaches = true;
             if patterns_supported {
-                let predicate = predicate.as_ref().expect(
-                    "INVARIANT VIOLATED: supported Hash pattern else path lost its predicate. This is a bug because patterns_supported requires one. Fix: retain the checked predicate for unmatched narrowing.",
+                let predicate = predicate.as_ref().expect_invariant(
+                    "supported Hash pattern else path lost its predicate",
+                    "patterns_supported requires one",
+                    "retain the checked predicate for unmatched narrowing",
                 );
                 for in_node in &in_nodes {
                     if !else_reaches {
@@ -326,8 +337,10 @@ impl TypeTracker {
                     }
                     else_reaches = self
                         .narrow_shape_hash_pattern(predicate, &in_node.pattern(), false)
-                        .expect(
-                            "INVARIANT VIOLATED: supported Hash pattern became unsupported on the else path. This is a bug because the immutable pattern was validated before traversal. Fix: use one shared pattern recognizer for validation and narrowing.",
+                        .expect_invariant(
+                            "supported Hash pattern became unsupported on the else path",
+                            "the immutable pattern was validated before traversal",
+                            "use one shared pattern recognizer for validation and narrowing",
                         );
                 }
             }
@@ -497,9 +510,11 @@ pub(in crate::inference::type_tracker) fn ruby_truthiness(ruby_type: &RubyType) 
     match ruby_type {
         RubyType::Unknown => Truthiness::Conditional,
         RubyType::Union(members) => {
-            assert!(
+            invariant!(
                 members.len() >= 2,
-                "INVARIANT VIOLATED: RubyType::Union contains fewer than two members. This is a bug because RubyType::union must collapse empty and singleton inputs. Fix: construct unions only through the canonical RubyType helpers."
+                what = "RubyType::Union contains fewer than two members",
+                why = "RubyType::union must collapse empty and singleton inputs",
+                fix = "construct unions only through the canonical RubyType helpers",
             );
             let has_falsy = members.iter().any(is_falsy_type);
             let has_truthy = members.iter().any(|member| !is_falsy_type(member));
@@ -507,8 +522,10 @@ pub(in crate::inference::type_tracker) fn ruby_truthiness(ruby_type: &RubyType) 
                 (true, false) => Truthiness::AlwaysTruthy,
                 (false, true) => Truthiness::AlwaysFalsy,
                 (true, true) => Truthiness::Conditional,
-                (false, false) => panic!(
-                    "INVARIANT VIOLATED: a nonempty RubyType::Union has no truthy or falsy members. This is a bug because every concrete Ruby value has one truthiness class. Fix: update truthiness classification when adding a RubyType variant."
+                (false, false) => unreachable_invariant!(
+                    what = "a nonempty RubyType::Union has no truthy or falsy members",
+                    why = "every concrete Ruby value has one truthiness class",
+                    fix = "update truthiness classification when adding a RubyType variant",
                 ),
             }
         }
@@ -533,7 +550,11 @@ pub(in crate::inference::type_tracker) fn is_falsy_type(ruby_type: &RubyType) ->
         && matches!(
             parts
                 .first()
-                .expect("INVARIANT VIOLATED: a one-part FQN lost its first part while classifying Ruby truthiness. This is a bug because the immutable slice was checked immediately before access. Fix: keep the length check and access in one expression.")
+                .expect_invariant(
+                    "a one-part FQN lost its first part while classifying Ruby truthiness",
+                    "the immutable slice was checked immediately before access",
+                    "keep the length check and access in one expression",
+                )
                 .as_str(),
             "FalseClass" | "NilClass"
         )
@@ -549,8 +570,10 @@ pub(in crate::inference::type_tracker) fn short_circuit_result_type(
     }
 
     let RubyType::Union(left_members) = left_type else {
-        panic!(
-            "INVARIANT VIOLATED: conditional short-circuit evaluation received a non-union concrete left type. This is a bug because one concrete Ruby class is always truthy or always falsy. Fix: keep ruby_truthiness and short-circuit projection exhaustive over the same RubyType variants."
+        unreachable_invariant!(
+            what = "short-circuit evaluation received a non-union concrete left type",
+            why = "a concrete Ruby class is always truthy or always falsy",
+            fix = "keep ruby_truthiness and short-circuit projection exhaustive together",
         );
     };
     let mut result_members = left_members
@@ -560,9 +583,11 @@ pub(in crate::inference::type_tracker) fn short_circuit_result_type(
             ShortCircuitOperator::Or => !is_falsy_type(member),
         })
         .collect::<Vec<_>>();
-    assert!(
+    invariant!(
         !result_members.is_empty(),
-        "INVARIANT VIOLATED: conditional short-circuit evaluation has no left-side result member. This is a bug because Conditional requires both an executing and a short-circuiting path. Fix: keep truthiness classification and member projection symmetric."
+        what = "conditional short-circuit evaluation has no left-side result member",
+        why = "conditional requires both an executing and a short-circuiting path",
+        fix = "keep truthiness classification and member projection symmetric",
     );
     result_members.push(right_type);
     RubyType::union(result_members)

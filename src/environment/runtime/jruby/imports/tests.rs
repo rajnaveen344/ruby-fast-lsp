@@ -1,13 +1,12 @@
 use super::super::java_catalog::JavaClassDeclaration;
 use super::navigation::supplemental_implementation_location;
-use super::static_scan::SEMANTIC_PREFILTER_PARSE_COUNT;
 use super::*;
 use parking_lot::RwLock;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, ReferenceCandidateKind, RubyConstant, RubyType,
     SourceFileId, SourceKind, SymbolKind, TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{AnalysisEngine, SourceFileInput};
+use ruby_analysis::engine::{Project, SourceFileInput};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_jvm_metadata::{
@@ -89,7 +88,7 @@ fn collect_with_catalog(source: &str, catalog: Arc<ProjectJavaCatalog>) -> FactC
 fn collect_with_provider(source: &str, provider: Arc<JrubyImportProvider>) -> FactCollector {
     let path = crate::test::harness::fixture_path("/workspace/admin/imports.rb");
     let uri = Url::from_file_path(&path).expect("fixture path must be a file URI");
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path,
         content: source.to_string(),
@@ -112,11 +111,11 @@ fn imports_dotted_java_class_into_current_lexical_namespace() {
     let alias =
         FullyQualifiedName::try_from("Admin::String").expect("fixture alias FQN must be valid");
     assert!(collector
-        .direct_facts()
+        .analysis()
         .symbols
         .iter()
         .any(|fact| fact.fqn == alias && fact.kind == SymbolKind::Constant));
-    assert!(collector.direct_facts().types.iter().any(|fact| {
+    assert!(collector.analysis().types.iter().any(|fact| {
         fact.subject == TypeSubject::Constant(alias.clone())
             && fact.ruby_type
                 == RubyType::ClassReference(
@@ -140,7 +139,7 @@ fn infers_instances_constructed_from_a_canonical_dotted_java_proxy() {
     let collector = collect("INSTANCE = java.lang.String.new\n", &["java/lang/String"]);
     let instance =
         FullyQualifiedName::try_from("INSTANCE").expect("fixture constant must be valid");
-    assert!(collector.direct_facts().types.iter().any(|fact| {
+    assert!(collector.analysis().types.iter().any(|fact| {
         fact.subject == TypeSubject::Constant(instance.clone())
             && fact.ruby_type
                 == RubyType::Class(FullyQualifiedName::try_from("Java::JavaLang::String").unwrap())
@@ -166,7 +165,7 @@ fn generated_signature_source_preserves_its_java_proxy_class_declaration() {
             .collect::<Vec<_>>(),
     );
     assert!(collector
-        .direct_facts()
+        .analysis()
         .symbols
         .iter()
         .any(|fact| fact.fqn == proxy && fact.kind == SymbolKind::Class));
@@ -216,13 +215,13 @@ fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
         ruby_analysis::core::RubyMethod::new("simple_add").unwrap(),
     );
     let method = collector
-        .direct_facts()
+        .analysis()
         .methods
         .iter()
         .find(|fact| fact.fqn == alias)
         .expect("java_alias must define the alias on the Java proxy");
     assert_eq!(method.params, vec!["index", "value"]);
-    assert!(collector.direct_facts().types.iter().any(|fact| {
+    assert!(collector.analysis().types.iter().any(|fact| {
         fact.subject == TypeSubject::MethodReturn(alias.clone())
             && fact.ruby_type == RubyType::boolean()
             && fact.provenance == TypeProvenance::Runtime
@@ -305,7 +304,7 @@ fn java_send_selects_an_exact_overload_projects_its_return_and_references_its_na
     );
     let result =
         FullyQualifiedName::try_from("RESULT").expect("fixture result constant must be valid");
-    assert!(collector.direct_facts().types.iter().any(|fact| {
+    assert!(collector.analysis().types.iter().any(|fact| {
         fact.subject == TypeSubject::Constant(result.clone())
             && fact.ruby_type
                 == RubyType::Class(FullyQualifiedName::try_from("Java::JavaLang::Object").unwrap())
@@ -451,7 +450,7 @@ fn java_method_distinguishes_bound_static_and_unbound_instance_handles() {
         let constant = FullyQualifiedName::try_from(constant).unwrap();
         let expected = RubyType::Class(FullyQualifiedName::try_from(expected).unwrap());
         assert!(
-            collector.direct_facts().types.iter().any(|fact| {
+            collector.analysis().types.iter().any(|fact| {
                 fact.subject == TypeSubject::Constant(constant.clone())
                     && fact.ruby_type == expected
                     && fact.provenance == TypeProvenance::Runtime
@@ -495,7 +494,7 @@ fn to_java_projects_explicit_object_primitive_and_array_targets() {
     ] {
         let constant = FullyQualifiedName::try_from(constant).unwrap();
         assert!(
-            collector.direct_facts().types.iter().any(|fact| {
+            collector.analysis().types.iter().any(|fact| {
                 fact.subject == TypeSubject::Constant(constant.clone())
                     && fact.ruby_type == expected
                     && fact.provenance == TypeProvenance::Runtime
@@ -532,7 +531,7 @@ fn java_interfaces_connect_to_ruby_classes_through_include_and_java_implements()
     );
     for source in ["Worker", "IncludedWorker"] {
         let source = FullyQualifiedName::namespace(vec![RubyConstant::new(source).unwrap()]);
-        assert!(collector.direct_facts().graph_edges.iter().any(|edge| {
+        assert!(collector.analysis().graph_edges.iter().any(|edge| {
             edge.source == source
                 && edge.target == target
                 && edge.kind == ruby_analysis::core::GraphEdgeKind::Include
@@ -576,16 +575,16 @@ fn supports_string_array_and_nested_java_class_imports() {
         &["java/lang/String", "java/util/Map$Entry"],
     );
     assert!(collector
-        .direct_facts()
+        .analysis()
         .symbols
         .iter()
         .any(|fact| fact.fqn == FullyQualifiedName::try_from("String").unwrap()));
     assert!(collector
-        .direct_facts()
+        .analysis()
         .symbols
         .iter()
         .any(|fact| fact.fqn == FullyQualifiedName::try_from("Entry").unwrap()));
-    assert!(collector.direct_facts().types.iter().any(|fact| {
+    assert!(collector.analysis().types.iter().any(|fact| {
         fact.ruby_type
             == RubyType::ClassReference(
                 FullyQualifiedName::try_from("Java::JavaUtil::Map::Entry").unwrap(),
@@ -604,11 +603,11 @@ fn evaluates_bounded_java_import_alias_blocks_without_executing_ruby() {
     let alias =
         FullyQualifiedName::try_from("Types::JString").expect("fixture alias must be valid");
     assert!(collector
-        .direct_facts()
+        .analysis()
         .symbols
         .iter()
         .any(|fact| fact.fqn == alias && fact.kind == SymbolKind::Constant));
-    assert!(collector.direct_facts().types.iter().any(|fact| {
+    assert!(collector.analysis().types.iter().any(|fact| {
         fact.subject == TypeSubject::Constant(alias.clone())
             && fact.ruby_type
                 == RubyType::ClassReference(
@@ -634,7 +633,7 @@ fn reports_missing_project_class_and_dynamic_alias_block() {
         codes,
         vec!["unresolved-java-import", "unsupported-jruby-import-alias"]
     );
-    assert!(collector.direct_facts().symbols.is_empty());
+    assert!(collector.analysis().symbols.is_empty());
 }
 
 #[test]
@@ -653,7 +652,7 @@ fn include_package_and_import_package_add_bounded_lazy_constant_types() {
         ("Util::Map", "Java::JavaUtil::Map"),
         ("Util::String", "Java::JavaLang::String"),
     ] {
-        assert!(collector.direct_facts().types.iter().any(|fact| {
+        assert!(collector.analysis().types.iter().any(|fact| {
             fact.subject == TypeSubject::Constant(FullyQualifiedName::try_from(alias).unwrap())
                 && fact.ruby_type
                     == RubyType::ClassReference(FullyQualifiedName::try_from(proxy).unwrap())
@@ -661,64 +660,13 @@ fn include_package_and_import_package_add_bounded_lazy_constant_types() {
     }
     assert!(
         collector
-            .direct_facts()
+            .analysis()
             .symbols
             .iter()
             .all(|fact| fact.kind != SymbolKind::Constant),
         "include_package constants are runtime const_missing results, not source declarations"
     );
     assert!(collector.diagnostics().is_empty());
-}
-
-#[test]
-fn preflight_import_scan_uses_the_same_static_forms_and_ignores_dynamic_aliases() {
-    assert_eq!(
-        static_java_import_names(
-            "java_import 'java.util.Map$Entry'\n\
-                 import ['java.lang.String', dynamic_name]\n\
-                 java_import(java.lang.Thread) { |_package, name| \"J#{name}\" }\n"
-        ),
-        vec![
-            "java.lang.String".to_string(),
-            "java.lang.Thread".to_string(),
-            "java.util.Map$Entry".to_string(),
-        ]
-    );
-    assert_eq!(
-        static_java_dependencies(
-            "include_package 'java.util'\nimport 'java.lang'\nimport 'java.time.Instant'\n"
-        ),
-        vec![
-            StaticJavaDependency::Class("java.time.Instant".to_string()),
-            StaticJavaDependency::Package("java.lang".to_string()),
-            StaticJavaDependency::Package("java.util".to_string()),
-        ]
-    );
-}
-
-#[test]
-fn preflight_proxy_scan_finds_dotted_and_canonical_java_proxy_forms() {
-    let references = static_java_proxy_references(
-        "DOTTED = java.lang.String.new\n\
-             CANONICAL = Java::JavaUtil::Map::Entry\n",
-    );
-    assert!(references.contains(&"java.lang.String".to_string()));
-    assert!(references.contains(&"Java::JavaUtil::Map::Entry".to_string()));
-}
-
-#[test]
-fn gem_semantic_prefilter_parses_each_source_once() {
-    SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.set(0));
-
-    assert!(!source_semantics_depend_on_jruby_catalog(
-        "class PlainRuby\n  def value\n    42\n  end\nend\n"
-    ));
-
-    let parse_count = SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.get());
-    assert_eq!(
-        parse_count, 1,
-        "the gem cache-key prefilter must derive all JRuby semantic evidence from one Prism parse"
-    );
 }
 
 #[test]
@@ -760,7 +708,7 @@ fn package_preflight_materializes_signatures_but_only_referenced_implementations
 fn call_host_probe_attributes_seed_and_import_handlers() {
     reset_jruby_call_host_probe();
     let before = jruby_call_host_probe_snapshot();
-    assert_eq!(before.entries, 0);
+    assert_eq!(before.get(CallHostStat::Entries), 0);
 
     let provider = Arc::new(JrubyImportProvider::new(catalog(&["java/lang/String"])));
     let _ = collect_with_provider(
@@ -771,23 +719,25 @@ fn call_host_probe_attributes_seed_and_import_handlers() {
     );
     let after = jruby_call_host_probe_snapshot();
     assert!(
-        after.entries >= 2,
+        after.get(CallHostStat::Entries) >= 2,
         "java_import and String.new must enter the call host: {after:?}"
     );
     assert!(
-        after.seed_ns > 0 && after.import_ns > 0 && after.java_ctor_ns > 0,
+        after.get(CallHostStat::Seed) > 0
+            && after.get(CallHostStat::Import) > 0
+            && after.get(CallHostStat::JavaCtor) > 0,
         "probe must record seed, import, and constructor handler hits: {after:?}"
     );
     assert!(
-        after.seed_catalog_hits >= 1,
+        after.get(CallHostStat::SeedCatalogHits) >= 1,
         "java.lang.String must count as a seed catalog hit: {after:?}"
     );
     assert!(
-        after.java_ctor_inferred >= 1,
+        after.get(CallHostStat::JavaCtorInferred) >= 1,
         "String.new on a Java proxy must count as an inferred constructor: {after:?}"
     );
     assert!(
-        after.total_handler_ns() > 0,
+        jruby_call_host_handler_hits(&after) > 0,
         "handler hits must sum to a positive total: {after:?}"
     );
 }
@@ -800,7 +750,7 @@ fn ordinary_ruby_calls_do_not_seed_java_proxy_types() {
     );
     assert!(
         collector
-            .direct_facts()
+            .analysis()
             .types
             .iter()
             .all(|fact| match &fact.ruby_type {
@@ -817,7 +767,7 @@ fn ordinary_ruby_calls_do_not_seed_java_proxy_types() {
                 | RubyType::Unknown => true,
             }),
         "ordinary Ruby call chains must not receive JRuby proxy expression types: {:?}",
-        collector.direct_facts().types
+        collector.analysis().types
     );
 }
 

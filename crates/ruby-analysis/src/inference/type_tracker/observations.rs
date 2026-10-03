@@ -2,6 +2,7 @@
 
 use crate::core::{ConstantTypeDependency, RubyType, UnknownReason};
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Default)]
@@ -40,7 +41,8 @@ impl TypeTracker {
         self.environment.max_live_shape_aliases
     }
 
-    /// Get variable types map (for storing in RubyDocument)
+    /// Variable snapshots by offset, for tests that inspect flow state.
+    #[cfg(test)]
     pub fn into_var_types(self) -> BTreeMap<usize, HashMap<String, RubyType>> {
         self.observations.snapshots
     }
@@ -59,8 +61,10 @@ impl TypeTracker {
             if deduplicated.last().is_some_and(|previous| {
                 previous.start_offset == read.start_offset && previous.end_offset == read.end_offset
             }) {
-                *deduplicated.last_mut().expect(
-                    "INVARIANT VIOLATED: the final local-read entry disappeared after it was checked. This is a bug because no mutation occurs between the check and replacement. Fix: keep repeated-read collapse atomic.",
+                *deduplicated.last_mut().expect_invariant(
+                    "the final local-read entry disappeared after it was checked",
+                    "no mutation occurs between the check and replacement",
+                    "keep repeated-read collapse atomic",
                 ) = read;
             } else {
                 deduplicated.push(read);
@@ -81,6 +85,7 @@ impl TypeTracker {
 }
 
 /// Read the latest variable snapshot at or before an offset.
+#[cfg(test)]
 pub fn get_var_type_at(
     var_types: &BTreeMap<usize, HashMap<String, RubyType>>,
     offset: usize,

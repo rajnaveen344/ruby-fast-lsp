@@ -9,6 +9,7 @@ use crate::inference::type_tracker::flow::shapes::values::{
     shape_with_contained_transitions, type_is_shape_only,
 };
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,22 +18,29 @@ impl TypeTracker {
         &mut self,
         ruby_type: RubyType,
     ) -> ShapeIdentity {
-        assert!(
+        invariant!(
             type_is_shape_only(&ruby_type),
-            "INVARIANT VIOLATED: attempted to allocate a Hash identity for non-shape type `{ruby_type}`. This is a bug because only complete shape-producing expressions participate in alias tracking. Fix: guard allocation with type_is_shape_only."
+            what = "attempted to allocate a Hash identity for non-shape type `{ruby_type}`",
+            why = "only complete shape-producing expressions participate in alias tracking",
+            fix = "guard allocation with type_is_shape_only",
+            ruby_type = ruby_type,
         );
         let identity = ShapeIdentity(self.next_shape_identity);
-        self.next_shape_identity = self.next_shape_identity.checked_add(1).expect(
-            "INVARIANT VIOLATED: one flow traversal allocated more than u32::MAX abstract Hash identities. This is a bug because source size and fixed shape bounds make that impossible in a valid analysis pass. Fix: investigate repeated allocation or widen ShapeIdentity.",
+        self.next_shape_identity = self.next_shape_identity.checked_add(1).expect_invariant(
+            "one flow traversal allocated more than u32::MAX abstract Hash identities",
+            "source size and fixed shape bounds make that impossible in a valid analysis pass",
+            "investigate repeated allocation or widen ShapeIdentity",
         );
         let previous = self
             .environment
             .shape_states
             .insert(identity, ShapeIdentityState::Proven(ruby_type));
-        assert!(
+        invariant!(
             previous.is_none(),
-            "INVARIANT VIOLATED: flow-local Hash identity {:?} was allocated twice. This is a bug because the allocator must be monotonic across cloned branch environments. Fix: keep next_shape_identity on TypeTracker rather than FlowEnvironment.",
-            identity
+            what = "flow-local Hash identity {:?} was allocated twice",
+            why = "the allocator must be monotonic across cloned branch environments",
+            fix = "keep next_shape_identity on TypeTracker rather than FlowEnvironment",
+            identity,
         );
         identity
     }
@@ -73,8 +81,10 @@ impl TypeTracker {
                             };
                         }
                         if matches!(method_name, b"[]" | b"at" | b"fetch") {
-                            let arguments = call.arguments().expect(
-                                "INVARIANT VIOLATED: checked Array read arguments disappeared before use. This is a bug because Prism nodes are immutable. Fix: destructure call.arguments once.",
+                            let arguments = call.arguments().expect_invariant(
+                                "checked Array read arguments disappeared before use",
+                                "prism nodes are immutable",
+                                "destructure call.arguments once",
                             );
                             let mut arguments = arguments.arguments().iter();
                             let Some(argument) = arguments.next() else {
@@ -197,17 +207,24 @@ impl TypeTracker {
                     children.insert(child);
                     continue;
                 }
-                let child_type = match self.environment.shape_states.get(parent).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: nested keyed read references absent parent identity {:?}. This is a bug because a local shape binding and its state must be installed atomically. Fix: preserve both through assignment and branch joins.",
-                        parent
+                let child_type =
+                    match self
+                        .environment
+                        .shape_states
+                        .get(parent)
+                        .unwrap_or_else(|| {
+                            unreachable_invariant!(
+                        what = "nested keyed read references absent parent identity {:?}",
+                        why = "a local shape binding and its state must be installed atomically",
+                        fix = "preserve both through assignment and branch joins",
+                        parent,
                     )
-                }) {
-                    ShapeIdentityState::Proven(parent_type) => {
-                        precise_contained_shape_field(parent_type, &key)
-                    }
-                    ShapeIdentityState::Invalidated(_) => None,
-                };
+                        }) {
+                        ShapeIdentityState::Proven(parent_type) => {
+                            precise_contained_shape_field(parent_type, &key)
+                        }
+                        ShapeIdentityState::Invalidated(_) => None,
+                    };
                 let Some(child_type) = child_type else {
                     self.environment.invalidate_identities(
                         &root_parents,
@@ -516,12 +533,18 @@ impl TypeTracker {
         &mut self,
         parent: ShapeIdentity,
     ) -> Result<(), UnknownReason> {
-        let parent_type = match self.environment.shape_states.get(&parent).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: child materialization references absent parent identity {:?}. This is a bug because only allocated shape identities can own child fields. Fix: allocate the parent before materializing containment.",
-                parent
-            )
-        }) {
+        let parent_type = match self
+            .environment
+            .shape_states
+            .get(&parent)
+            .unwrap_or_else(|| {
+                unreachable_invariant!(
+                    what = "child materialization references absent parent identity {:?}",
+                    why = "only allocated shape identities can own child fields",
+                    fix = "allocate the parent before materializing containment",
+                    parent,
+                )
+            }) {
             ShapeIdentityState::Proven(ruby_type) => ruby_type.clone(),
             ShapeIdentityState::Invalidated(reason) => return Err(*reason),
         };
@@ -626,9 +649,11 @@ impl TypeTracker {
         let mut alternatives = Vec::new();
         for identity in identities {
             match self.environment.shape_states.get(identity).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: call receiver references absent shape identity {:?}. This is a bug because receiver bindings and identity states must be cloned and joined together. Fix: merge the complete FlowEnvironment.",
-                    identity
+                unreachable_invariant!(
+                    what = "call receiver references absent shape identity {:?}",
+                    why = "receiver bindings and identity states must be cloned and joined together",
+                    fix = "merge the complete FlowEnvironment",
+                    identity,
                 )
             }) {
                 ShapeIdentityState::Proven(ruby_type) => {
@@ -650,12 +675,18 @@ impl TypeTracker {
     ) -> Result<RubyType, UnknownReason> {
         let mut transitions = BTreeMap::new();
         for identity in identities {
-            let current = match self.environment.shape_states.get(identity).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: shape transform references absent identity {:?}. This is a bug because mutations may target only live aliases. Fix: preserve identity states through branch cloning and joins.",
-                    identity
-                )
-            }) {
+            let current = match self
+                .environment
+                .shape_states
+                .get(identity)
+                .unwrap_or_else(|| {
+                    unreachable_invariant!(
+                        what = "shape transform references absent identity {:?}",
+                        why = "mutations may target only live aliases",
+                        fix = "preserve identity states through branch cloning and joins",
+                        identity,
+                    )
+                }) {
                 ShapeIdentityState::Proven(ruby_type) => ruby_type.clone(),
                 ShapeIdentityState::Invalidated(reason) => return Err(*reason),
             };
@@ -716,9 +747,11 @@ impl TypeTracker {
             let mut changed_parents = BTreeMap::new();
             for (parent, links) in links_by_parent {
                 let parent_type = match self.environment.shape_states.get(&parent).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: containment propagation references absent parent identity {:?}. This is a bug because an edge and both endpoint states must be cloned and joined atomically. Fix: preserve shape_containments with shape_states.",
-                        parent
+                    unreachable_invariant!(
+                        what = "containment propagation references absent parent identity {:?}",
+                        why = "an edge and both endpoint states must be cloned and joined atomically",
+                        fix = "preserve shape_containments with shape_states",
+                        parent,
                     )
                 }) {
                     ShapeIdentityState::Proven(ruby_type) => ruby_type.clone(),
@@ -729,9 +762,11 @@ impl TypeTracker {
                     let mut after = before.clone();
                     for link in &links {
                         let child_transitions = changed.get(&link.child).unwrap_or_else(|| {
-                            panic!(
-                                "INVARIANT VIOLATED: containment worklist lost child transition {:?}. This is a bug because links_by_parent was derived from the same changed map. Fix: keep one immutable worklist generation.",
-                                link.child
+                            unreachable_invariant!(
+                                what = "containment worklist lost child transition {:?}",
+                                why = "links_by_parent was derived from the same changed map",
+                                fix = "keep one immutable worklist generation",
+                                link.child,
                             )
                         });
                         after =
@@ -786,17 +821,24 @@ impl TypeTracker {
             return Err(UnknownReason::MutableShapeInvalidated);
         }
         for parent in parents {
-            let parent_field = match self.environment.shape_states.get(parent).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: shape field assignment references absent parent identity {:?}. This is a bug because receiver bindings and states must be installed atomically. Fix: preserve both through mutation.",
-                    parent
-                )
-            }) {
-                ShapeIdentityState::Proven(parent_type) => {
-                    precise_contained_shape_field(parent_type, key)
-                }
-                ShapeIdentityState::Invalidated(_) => None,
-            };
+            let parent_field =
+                match self
+                    .environment
+                    .shape_states
+                    .get(parent)
+                    .unwrap_or_else(|| {
+                        unreachable_invariant!(
+                            what = "shape field assignment references absent parent identity {:?}",
+                            why = "receiver bindings and states must be installed atomically",
+                            fix = "preserve both through mutation",
+                            parent,
+                        )
+                    }) {
+                    ShapeIdentityState::Proven(parent_type) => {
+                        precise_contained_shape_field(parent_type, key)
+                    }
+                    ShapeIdentityState::Invalidated(_) => None,
+                };
             if parent_field.as_ref() != Some(value_type) {
                 return Err(UnknownReason::MutableShapeInvalidated);
             }

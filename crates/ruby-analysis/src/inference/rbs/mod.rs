@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use rbs_parser::Loader;
 
-pub use catalog::{get_rbs_class_methods, rbs_class_method_exists, RbsMethodInfo};
+pub use catalog::{get_rbs_class_methods, rbs_class_method_exists};
 pub use conversion::rbs_type_to_ruby_type;
 pub(crate) use prepare_cache::prepare_higher_order_call_with_fallbacks;
 pub use signatures::{
@@ -41,18 +41,6 @@ static RBS_LOADER: Lazy<RwLock<Loader>> = Lazy::new(|| {
 pub fn has_rbs_class(class_name: &str) -> bool {
     let loader = RBS_LOADER.read();
     loader.get_class(class_name).is_some()
-}
-
-/// Get the number of loaded RBS declarations
-pub fn rbs_declaration_count() -> usize {
-    let loader = RBS_LOADER.read();
-    loader.declaration_count()
-}
-
-/// Get the number of loaded RBS methods
-pub fn rbs_method_count() -> usize {
-    let loader = RBS_LOADER.read();
-    loader.method_count()
 }
 
 #[cfg(test)]

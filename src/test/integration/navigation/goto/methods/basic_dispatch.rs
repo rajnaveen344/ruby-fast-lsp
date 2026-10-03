@@ -124,3 +124,146 @@ Foo.new$0
     )
     .await;
 }
+
+#[tokio::test]
+async fn goto_method_on_instance_variable_receiver() {
+    check(
+        r#"
+class Gateway
+  <def>def refund
+    "refunded"
+  end</def>
+end
+
+class Invoice
+  def charge
+    @gateway = Gateway.new
+    @gateway.refund$0
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_method_on_array_element_block_parameter() {
+    check(
+        r#"
+class Gateway
+  <def>def capture
+    "captured"
+  end</def>
+end
+
+[Gateway.new].each do |gateway|
+  gateway.capture$0
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_method_on_yielded_block_parameter() {
+    check(
+        r#"
+class Gateway
+  <def>def capture
+    "captured"
+  end</def>
+end
+
+def with_gateway
+  yield Gateway.new
+end
+
+with_gateway do |gateway|
+  gateway.capture$0
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_method_through_documented_return_chain() {
+    check(
+        r#"
+class Gateway
+  <def>def capture
+    "captured"
+  end</def>
+end
+
+class Account
+  # @return [Gateway]
+  def gateway
+    Gateway.new
+  end
+end
+
+account = Account.new
+account.gateway.capture$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_singleton_method_defined_with_own_constant_receiver() {
+    check(
+        r#"
+class Registry
+  <def>def Registry.lookup
+    "found"
+  end</def>
+end
+
+Registry.lookup$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_singleton_method_defined_with_qualified_constant_receiver() {
+    check(
+        r#"
+module Catalog
+  class Registry
+  end
+end
+
+class Loader
+  <def>def (Catalog::Registry).lookup
+    "found"
+  end</def>
+end
+
+Catalog::Registry.lookup$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn singleton_method_with_qualified_constant_receiver_does_not_join_enclosing_class() {
+    check(
+        r#"
+module Catalog
+  class Registry
+  end
+end
+
+class Loader
+  def (Catalog::Registry).lookup
+    "found"
+  end
+end
+
+Loader.lookup$0<def none>
+"#,
+    )
+    .await;
+}

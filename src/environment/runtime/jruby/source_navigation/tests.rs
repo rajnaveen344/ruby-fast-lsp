@@ -1,6 +1,6 @@
 use super::*;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use ruby_analysis::engine::{Project, ResolveMode, SourceFileInput};
 use ruby_fast_lsp_jvm_metadata::{
     locate_java_source_declarations, parse_class, ClassLimits, JavaSourceLimits,
 };
@@ -138,12 +138,12 @@ fn archive_resolution_streams_only_the_selected_entry() {
     .expect("selected source entry must resolve");
 
     assert_eq!(resolved.0, source);
-    assert!(
-            bytes_read.load(Ordering::Relaxed) < 1024 * 1024,
-            "INVARIANT VIOLATED: resolving one Java source entry read the complete source archive. \
-             This is a performance bug because classpath discovery already verified the archive identity. \
-             Fix: keep ZipArchive backed by a seekable file and read only the selected entry."
-        );
+    invariant!(
+        bytes_read.load(Ordering::Relaxed) < 1024 * 1024,
+        what = "resolving one Java source entry read the complete source archive",
+        why = "classpath discovery already verified the archive identity",
+        fix = "keep ZipArchive backed by a seekable file and read only the selected entry",
+    );
 }
 
 #[test]
@@ -244,11 +244,11 @@ fn reuses_one_parsed_archive_for_repeated_source_resolution() {
         .get()
         .expect("second source resolution must retain the archive");
 
-    assert!(
+    invariant!(
         std::ptr::eq(first_archive, second_archive),
-        "INVARIANT VIOLATED: repeated Java source resolution replaced the parsed archive. \
-             This is a performance bug because every replacement reparses the immutable central \
-             directory. Fix: retain one verified ZipArchive per prepared source root."
+        what = "repeated Java source resolution replaced the parsed archive",
+        why = "every replacement reparses the immutable central directory",
+        fix = "retain one verified ZipArchive per prepared source root",
     );
 }
 
@@ -331,13 +331,13 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
     let location = locate_java_source_declarations(&class, source, JavaSourceLimits::default())
         .expect("checked source must parse")
         .expect("checked source must match the class");
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/external/fixtures/RichFixture.java"),
         content: source.to_string(),
         kind: SourceKind::External,
     });
-    engine.replace_facts(
+    engine.update(
         file_id,
         java_source_navigation_facts(&class, &location, file_id),
         ResolveMode::Immediate,
@@ -349,7 +349,7 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
             .collect::<Vec<_>>(),
         RubyMethod::new("combine").unwrap(),
     );
-    let methods = engine.query().methods_for_fqn(&combine);
+    let methods = engine.view().method_facts_for(&combine);
     assert_eq!(methods.len(), 1);
     assert_eq!(
         &source[usize::try_from(methods[0].name_range.start_byte).unwrap()
@@ -364,11 +364,11 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
             .collect::<Vec<_>>(),
     );
     assert_eq!(
-        engine.symbol_facts_for(&proxy).len(),
+        engine.view().symbol_facts_for(&proxy).len(),
         1,
         "Java implementation class declarations must use the canonical constant identity"
     );
-    assert!(engine.query().diagnostic_facts_in_file(file_id).is_empty());
+    assert!(engine.view().diagnostic_facts_in_file(file_id).is_empty());
 }
 
 #[test]

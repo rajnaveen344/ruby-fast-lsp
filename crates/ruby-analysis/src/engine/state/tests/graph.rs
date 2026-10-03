@@ -4,15 +4,15 @@ use super::*;
 
 #[test]
 fn graph_update_retries_unresolved_edges_when_target_arrives() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let user_file = register_project_file(&mut engine, "user.rb", "class User; include Auth; end");
     let auth_file = register_project_file(&mut engine, "auth.rb", "module Auth; end");
 
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         user_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -30,11 +30,11 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
         },
         ResolveMode::Immediate,
     );
-    assert_eq!(engine.unresolved_graph_edges().len(), 1);
+    assert_eq!(engine.view().unresolved_graph_edges().len(), 1);
 
-    engine.replace_facts(
+    engine.update(
         auth_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 auth.clone(),
                 GraphNodeKind::Module,
@@ -45,16 +45,127 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
     assert!(engine
+        .view()
         .graph_edges_from(&user)
         .iter()
         .any(|edge| edge.target == auth && edge.kind == GraphEdgeKind::Include));
 }
 
 #[test]
+fn retried_edges_return_to_unresolved_when_their_target_disappears() {
+    let mut engine = Project::new();
+    let child_file = register_project_file(
+        &mut engine,
+        "child.rb",
+        "class Child < Parent; include Mixin; end",
+    );
+    let parent_file = register_project_file(
+        &mut engine,
+        "parent.rb",
+        "class Parent; end\nmodule Mixin; end",
+    );
+
+    let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+    let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
+    let mixin = FullyQualifiedName::namespace(vec![RubyConstant::new("Mixin").unwrap()]);
+    let child_singleton = child.to_singleton_namespace().unwrap();
+    let parent_singleton = parent.to_singleton_namespace().unwrap();
+    engine.update(
+        child_file,
+        FileAnalysis {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(child_file, 0, 40),
+                ),
+                GraphNodeFact::new(
+                    child_singleton.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(child_file, 0, 40),
+                ),
+            ],
+            unresolved_graph_edges: vec![
+                UnresolvedGraphEdgeFact::new(
+                    child.clone(),
+                    vec![RubyConstant::new("Parent").unwrap()],
+                    false,
+                    child.clone(),
+                    GraphEdgeKind::Superclass,
+                    TextRange::new(child_file, 14, 20),
+                ),
+                UnresolvedGraphEdgeFact::new(
+                    child.clone(),
+                    vec![RubyConstant::new("Mixin").unwrap()],
+                    false,
+                    child.clone(),
+                    GraphEdgeKind::Include,
+                    TextRange::new(child_file, 22, 35),
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    let parent_facts = FileAnalysis {
+        graph_nodes: vec![
+            GraphNodeFact::new(
+                parent.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(parent_file, 0, 17),
+            ),
+            GraphNodeFact::new(
+                parent_singleton.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(parent_file, 0, 17),
+            ),
+            GraphNodeFact::new(
+                mixin.clone(),
+                GraphNodeKind::Module,
+                TextRange::new(parent_file, 18, 35),
+            ),
+        ],
+        ..Default::default()
+    };
+    engine.update(parent_file, parent_facts.clone(), ResolveMode::Immediate);
+    assert!(engine.view().unresolved_graph_edges().is_empty());
+
+    engine.update(parent_file, FileAnalysis::default(), ResolveMode::Immediate);
+
+    assert_eq!(
+        engine.view().unresolved_graph_edges().len(),
+        2,
+        "edges resolved into a replaced file must be retried as unresolved lookups"
+    );
+    assert!(!engine.view().graph_edges_from(&child).iter().any(|edge| {
+        (edge.kind == GraphEdgeKind::Superclass && edge.target == parent)
+            || (edge.kind == GraphEdgeKind::Include && edge.target == mixin)
+    }));
+    assert!(!engine
+        .view()
+        .graph_edges_from(&child_singleton)
+        .iter()
+        .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton));
+
+    engine.update(parent_file, parent_facts, ResolveMode::Immediate);
+    assert!(engine.view().unresolved_graph_edges().is_empty());
+    assert!(engine
+        .view()
+        .graph_edges_from(&child)
+        .iter()
+        .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent));
+    assert!(engine
+        .view()
+        .graph_edges_from(&child_singleton)
+        .iter()
+        .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton));
+}
+
+#[test]
 fn delayed_class_superclass_materializes_singleton_inheritance() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let child_file = register_project_file(&mut engine, "child.rb", "class Child < Parent; end");
     let parent_file = register_project_file(&mut engine, "parent.rb", "class Parent; end");
 
@@ -62,9 +173,9 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child_singleton = child.to_singleton_namespace().unwrap();
     let parent_singleton = parent.to_singleton_namespace().unwrap();
-    engine.replace_facts(
+    engine.update(
         child_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     child.clone(),
@@ -89,11 +200,11 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
         },
         ResolveMode::Immediate,
     );
-    assert_eq!(engine.unresolved_graph_edges().len(), 1);
+    assert_eq!(engine.view().unresolved_graph_edges().len(), 1);
 
-    engine.replace_facts(
+    engine.update(
         parent_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -111,8 +222,9 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine.view().unresolved_graph_edges().is_empty());
     assert!(engine
+        .view()
         .graph_edges_from(&child_singleton)
         .iter()
         .any(|edge| { edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton }));
@@ -120,15 +232,15 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
 
 #[test]
 fn explicit_superclass_outranks_reopened_implicit_object_fact() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "child.rb", "class Child; end");
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let object = FullyQualifiedName::namespace(vec![RubyConstant::new("Object").unwrap()]);
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let range = TextRange::new(file_id, 0, 16);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 child.clone(),
                 GraphNodeKind::Class,
@@ -149,9 +261,10 @@ fn explicit_superclass_outranks_reopened_implicit_object_fact() {
         ResolveMode::Immediate,
     );
 
-    assert!(!engine.superclass_is_ambiguous(&child));
+    assert!(!engine.view().superclass_is_ambiguous(&child));
     assert_eq!(
         engine
+            .view()
             .proven_superclass_edge(&child)
             .map(|edge| edge.target),
         Some(parent)
@@ -160,7 +273,7 @@ fn explicit_superclass_outranks_reopened_implicit_object_fact() {
 
 #[test]
 fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let class_file = register_project_file(
         &mut engine,
         "pending.rb",
@@ -177,9 +290,9 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
     let pending_singleton = pending.to_singleton_namespace().unwrap();
     let optional_singleton = optional.to_singleton_namespace().unwrap();
     let standard_singleton = standard.to_singleton_namespace().unwrap();
-    engine.replace_facts(
+    engine.update(
         class_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     pending.clone(),
@@ -218,11 +331,11 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
         },
         ResolveMode::Immediate,
     );
-    assert!(engine.proven_superclass_edge(&pending).is_none());
+    assert!(engine.view().proven_superclass_edge(&pending).is_none());
 
-    engine.replace_facts(
+    engine.update(
         target_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     optional.clone(),
@@ -245,15 +358,18 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
         ResolveMode::Immediate,
     );
 
-    assert!(engine.superclass_is_ambiguous(&pending));
-    assert!(engine.superclass_is_ambiguous(&pending_singleton));
-    assert!(engine.proven_superclass_edge(&pending).is_none());
-    assert!(engine.proven_superclass_edge(&pending_singleton).is_none());
+    assert!(engine.view().superclass_is_ambiguous(&pending));
+    assert!(engine.view().superclass_is_ambiguous(&pending_singleton));
+    assert!(engine.view().proven_superclass_edge(&pending).is_none());
+    assert!(engine
+        .view()
+        .proven_superclass_edge(&pending_singleton)
+        .is_none());
 }
 
 #[test]
 fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -262,9 +378,9 @@ fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
     let early = FullyQualifiedName::namespace(vec![RubyConstant::new("Early").unwrap()]);
     let late = FullyQualifiedName::namespace(vec![RubyConstant::new("Late").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     early.clone(),
@@ -313,13 +429,13 @@ fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
 
 #[test]
 fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/edge.rb", "class Parent\nend\n");
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 parent.clone(),
                 GraphNodeKind::Class,
@@ -341,29 +457,26 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
         vec![missing.clone()],
         "an edge-only namespace has no proven Object/Kernel ancestry and must not gain top-level method lookup"
     );
-    assert!(engine.has_graph_node(&parent));
+    assert!(engine.view().has_graph_node(&parent));
     assert!(
-        !engine.has_graph_node(&missing),
+        !engine.view().has_graph_node(&missing),
         "edge-only interned endpoints must not count as declared namespaces"
     );
     assert_eq!(
-        engine.latest_graph_node_kind(&parent),
+        engine.view().latest_graph_node_kind(&parent),
         Some(GraphNodeKind::Class)
     );
-    assert_eq!(engine.latest_graph_node_kind(&missing), None);
+    assert_eq!(engine.view().latest_graph_node_kind(&missing), None);
     assert_eq!(
-        AnalysisQuery::new(&engine).namespace_node_kind(&parent),
+        View::new(&engine).namespace_node_kind(&parent),
         Some(GraphNodeKind::Class)
     );
-    assert_eq!(
-        AnalysisQuery::new(&engine).namespace_node_kind(&missing),
-        None
-    );
+    assert_eq!(View::new(&engine).namespace_node_kind(&missing), None);
 }
 
 #[test]
 fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let project_file = register_project_file(
         &mut engine,
         "spec/mock_support.rb",
@@ -386,9 +499,9 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
     );
     let project_range = TextRange::new(project_file, 0, 45);
     let stub_range = TextRange::new(stub_file, 0, 34);
-    engine.replace_facts(
+    engine.update(
         project_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(client_instance.clone(), GraphNodeKind::Class, project_range),
                 GraphNodeFact::new(client.clone(), GraphNodeKind::Class, project_range),
@@ -447,9 +560,9 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         stub_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 object.clone(),
                 GraphNodeKind::Class,
@@ -470,41 +583,46 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
 
     assert!(matches!(
         engine
-            .query()
+            .view()
             .resolve_method_reference(&client, &RubyMethod::new("stub").unwrap()),
         crate::engine::resolution::MethodLookupResult::Ambiguous { .. }
     ));
     assert!(matches!(
         engine
-            .query()
+            .view()
             .resolve_method_reference(&client, &RubyMethod::new("to_s").unwrap()),
-        crate::engine::resolution::MethodLookupResult::Unique(_)
+        crate::engine::resolution::MethodLookupResult::Found(_)
     ));
-    match engine.query().resolve_method_reference(
+    match engine.view().resolve_method_reference(
         &client_instance,
         &RubyMethod::new("object_mixin_method").unwrap(),
     ) {
         crate::engine::resolution::MethodLookupResult::Ambiguous { .. } => {}
-        crate::engine::resolution::MethodLookupResult::Unique(fact) => panic!(
-            "INVARIANT VIOLATED: an Object-only project mixin resolved concretely for unrelated Client through `{}`. This is a bug because workspace indexing does not prove that monkeypatch was loaded in Client's runtime. Fix: stop non-core ancestry proof at universal open roots.",
+        crate::engine::resolution::MethodLookupResult::Found(fact) => unreachable_invariant!(
+            what = "an Object-only project mixin resolved concretely for unrelated Client through `{}`",
+            why = "workspace indexing does not prove that monkeypatch was loaded in Client's runtime",
+            fix = "stop non-core ancestry proof at universal open roots",
             fact.owner,
         ),
-        crate::engine::resolution::MethodLookupResult::Missing => panic!(
-            "INVARIANT VIOLATED: an unproven Object-only project mixin became definitely missing. This is a bug because the method may exist if the monkeypatch is loaded at runtime. Fix: preserve the lookup as ambiguous Unknown rather than emitting a false missing-method diagnostic."
+        crate::engine::resolution::MethodLookupResult::Missing
+        | crate::engine::resolution::MethodLookupResult::Unknown(_) => unreachable_invariant!(
+            what = "an unproven Object-only project mixin became definitely missing",
+            why = "the method may exist if the monkeypatch loads at runtime",
+            fix = "keep the lookup ambiguous Unknown; emit no missing-method diagnostic",
         ),
     }
     assert!(matches!(
-        engine.query().resolve_method_reference(
+        engine.view().resolve_method_reference(
             &client_instance,
             &RubyMethod::new("direct_mixin_method").unwrap()
         ),
-        crate::engine::resolution::MethodLookupResult::Unique(_)
+        crate::engine::resolution::MethodLookupResult::Found(_)
     ));
 }
 
 #[test]
 fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "spec/user_spec.rb",
@@ -526,9 +644,9 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
     let helper = RubyMethod::new("helper").expect("test method must be valid");
     let helper_fqn = FullyQualifiedName::method(parent.namespace_parts(), helper);
     let helper_range = TextRange::new(file_id, 1, 7);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 parent.clone(),
                 SymbolKind::Class,
@@ -563,23 +681,23 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
         ResolveMode::Immediate,
     );
 
-    let query = engine.query();
+    let query = engine.view();
     assert_eq!(
-        query
-            .resolve_method_callees(&parent, &helper)
+        ask_any(&query, &parent, &helper, MethodWant::Callees)
+            .into_callees()
             .expect("parent helper must resolve")[0]
             .definition_ranges,
         vec![helper_range]
     );
     assert_eq!(
-        query
-            .resolve_method_callees(&child, &helper)
+        ask_any(&query, &child, &helper, MethodWant::Callees)
+            .into_callees()
             .expect("nested generated owner must inherit its parent helper")[0]
             .definition_ranges,
         vec![helper_range]
     );
-    let sibling_callees = query
-        .resolve_method_callees(&sibling, &helper)
+    let sibling_callees = ask_any(&query, &sibling, &helper, MethodWant::Callees)
+        .into_callees()
         .expect("known sibling owner must produce a conservative receiver-only result");
     assert_eq!(sibling_callees.len(), 1);
     assert_eq!(sibling_callees[0].owner, sibling);
@@ -595,20 +713,22 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
         .constant_rename_target(&parent.namespace_parts(), &[])
         .is_none());
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
-    assert!(engine
-        .query()
-        .resolve_method_callees(&parent, &helper)
-        .is_none());
-    assert!(engine
-        .query()
-        .resolve_method_callees(&child, &helper)
-        .is_none());
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    assert!(
+        ask_any(&engine.view(), &parent, &helper, MethodWant::Callees)
+            .into_callees()
+            .is_none()
+    );
+    assert!(
+        ask_any(&engine.view(), &child, &helper, MethodWant::Callees)
+            .into_callees()
+            .is_none()
+    );
 }
 
 #[test]
 fn execution_context_applications_resolve_independently_and_replace_per_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let template_file = register_project_file(
         &mut engine,
         "spec/support/shared_examples.rb",
@@ -634,9 +754,9 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     let shared_range = TextRange::new(template_file, 0, 13);
     let first_range = TextRange::new(applications_file, 0, 15);
     let second_range = TextRange::new(applications_file, 16, 31);
-    engine.replace_facts(
+    engine.update(
         template_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 template.clone(),
                 GraphNodeKind::Class,
@@ -707,7 +827,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
                 TypeProvenance::Extension,
             ));
         }
-        FileFacts {
+        FileAnalysis {
             graph_nodes: nodes,
             graph_edges: edges,
             methods,
@@ -715,26 +835,26 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
             ..Default::default()
         }
     };
-    engine.replace_facts(
+    engine.update(
         applications_file,
         application_facts(true),
         ResolveMode::Immediate,
     );
 
-    let query = engine.query();
-    let shared_callees = query
-        .resolve_method_callees(&template, &shared)
+    let query = engine.view();
+    let shared_callees = ask_any(&query, &template, &shared, MethodWant::Callees)
+        .into_callees()
         .expect("template-local helper must resolve");
     assert_eq!(shared_callees.len(), 1);
     assert_eq!(shared_callees[0].definition_ranges, vec![shared_range]);
-    let application_callees = query
-        .resolve_method_callees(&template, &consumer)
+    let application_callees = ask_any(&query, &template, &consumer, MethodWant::Callees)
+        .into_callees()
         .expect("application helpers must resolve through the template");
     assert_eq!(application_callees.len(), 2);
     assert_eq!(application_callees[0].definition_ranges, vec![first_range]);
     assert_eq!(application_callees[1].definition_ranges, vec![second_range]);
     assert_eq!(
-        query.method_return_type_for_receiver(&template, &consumer),
+        ask_any(&query, &template, &consumer, MethodWant::Return).into_return_type(),
         Some(RubyType::union(vec![
             RubyType::integer(),
             RubyType::string()
@@ -755,26 +875,24 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     ));
     drop(query);
 
-    engine.replace_facts(
+    engine.update(
         applications_file,
         application_facts(false),
         ResolveMode::Immediate,
     );
-    let one = engine
-        .query()
-        .resolve_method_callees(&template, &consumer)
+    let one = ask_any(&engine.view(), &template, &consumer, MethodWant::Callees)
+        .into_callees()
         .expect("remaining application helper must resolve");
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].definition_ranges, vec![first_range]);
 
-    engine.replace_facts(
+    engine.update(
         applications_file,
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
-    let removed = engine
-        .query()
-        .resolve_method_callees(&template, &consumer)
+    let removed = ask_any(&engine.view(), &template, &consumer, MethodWant::Callees)
+        .into_callees()
         .expect("known template must retain receiver-only fallback");
     assert_eq!(removed.len(), 1);
     assert_eq!(removed[0].resolution, MethodCalleeResolution::ReceiverOnly);
@@ -785,7 +903,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
 fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     use crate::core::{ExecutionContextFact, ExecutionScopeMode};
 
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "spec/nested_spec.rb",
@@ -815,9 +933,9 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
         local_scope: ExecutionScopeMode::Preserve,
         extension_id: "rspec-ruby".to_string(),
     };
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             execution_contexts: vec![outer.clone(), inner.clone()],
             ..Default::default()
         },
@@ -825,15 +943,15 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     );
 
     assert_eq!(
-        engine.query().execution_context_at(file_id, 30),
+        engine.view().execution_context_at(file_id, 30),
         Some(&inner)
     );
     assert_eq!(
-        engine.query().execution_context_at(file_id, 12),
+        engine.view().execution_context_at(file_id, 12),
         Some(&outer)
     );
-    assert_eq!(engine.query().execution_context_at(file_id, 5), None);
+    assert_eq!(engine.view().execution_context_at(file_id, 5), None);
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
-    assert_eq!(engine.query().execution_context_at(file_id, 30), None);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    assert_eq!(engine.view().execution_context_at(file_id, 30), None);
 }

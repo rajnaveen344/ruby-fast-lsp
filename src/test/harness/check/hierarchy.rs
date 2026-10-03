@@ -8,21 +8,17 @@ use tower_lsp::lsp_types::{
 };
 
 use super::position_params;
-use crate::lsp::capabilities::navigation::type_hierarchy;
-use crate::server::RubyLanguageServer;
+use crate::features::navigation::type_hierarchy;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 
 /// `<th supertypes="A,B" subtypes="C">`: each listed direction returns exactly those names.
-pub(super) async fn check_type_hierarchy(
-    server: &RubyLanguageServer,
-    cursor: &Location,
-    tag: &Tag,
-) {
+pub(super) async fn check_type_hierarchy(server: &Server, cursor: &Location, tag: &Tag) {
     assert!(
         tag.attr("supertypes").is_some() || tag.attr("subtypes").is_some(),
         "<th> needs `supertypes` or `subtypes`"
     );
-    let items = type_hierarchy::handle_prepare_type_hierarchy(
+    let items = type_hierarchy::handle_prepare(
         server,
         TypeHierarchyPrepareParams {
             text_document_position_params: position_params(&cursor.uri, cursor.range.start),
@@ -30,6 +26,7 @@ pub(super) async fn check_type_hierarchy(
         },
     )
     .await
+    .expect("prepare type hierarchy request failed")
     .unwrap_or_default();
     assert_eq!(
         items.len(),
@@ -49,6 +46,7 @@ pub(super) async fn check_type_hierarchy(
             },
         )
         .await
+        .expect("type hierarchy request failed")
         .unwrap_or_default();
         assert_names(
             "supertypes",
@@ -67,6 +65,7 @@ pub(super) async fn check_type_hierarchy(
             },
         )
         .await
+        .expect("type hierarchy request failed")
         .unwrap_or_default();
         assert_names(
             "subtypes",

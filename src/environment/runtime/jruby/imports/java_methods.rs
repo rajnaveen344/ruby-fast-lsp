@@ -1,23 +1,23 @@
 //! Java method selection for `java_alias`, `java_send`/`java_method`
 //! dispatch, and proxy constructors.
 
-use super::call_host::CALL_HOST_JAVA_CTOR_INFERRED;
+use super::call_host::{CallHostStat, CALL_HOST_STATS};
 use super::java_types::{display_java_signature, ruby_type_for_jvm};
-use super::syntax::static_symbol_or_string;
 use super::JrubyImportProvider;
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
     FullyQualifiedName, MethodParamFact, MethodParamKind, MethodReferenceAccess,
     MethodReferenceCandidate, MethodReferenceDiagnostics, NamespaceKind, ReferenceCandidate,
     RubyConstant, RubyMethod, RubyType, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::indexer::fact_collector::FactCollector;
+use ruby_fast_lsp_jruby_support::syntax::static_symbol_or_string;
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::{
     parse_method_descriptor, JvmType, MemberInfo, MethodDescriptor, Visibility,
 };
 use ruby_prism::{CallNode, Node};
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::Ordering;
 
 const MAX_JAVA_HIERARCHY_TYPES: usize = 4_096;
 
@@ -95,11 +95,15 @@ impl JrubyImportProvider {
             );
             return;
         }
-        let declaration = self.catalog.classes.get(&internal_names[0]).expect(
-            "INVARIANT VIOLATED: Java proxy reverse index points at a missing catalog class. \
-             This is a bug because both structures are built atomically from the same catalog. \
-             Fix: keep JrubyImportProvider::new reverse-index construction synchronized.",
-        );
+        let declaration = self
+            .catalog
+            .classes
+            .get(&internal_names[0])
+            .expect_invariant(
+                "Java proxy reverse index points at a missing catalog class",
+                "both structures are built atomically from the same catalog",
+                "keep JrubyImportProvider::new reverse-index construction synchronized",
+            );
         let matching = declaration
             .class
             .methods
@@ -303,19 +307,19 @@ impl JrubyImportProvider {
             return;
         }
         let selected = &candidates[0];
-        let owner = JavaClassName::parse(&selected.owner).expect(
-            "INVARIANT VIOLATED: selected Java method owner is not a valid internal class name. \
-             This is a bug because Java catalog construction validates every class identity. \
-             Fix: retain the canonical catalog key as the selected method owner.",
+        let owner = JavaClassName::parse(&selected.owner).expect_invariant(
+            "selected Java method owner is not a valid internal class name",
+            "java catalog construction validates every class identity",
+            "retain the canonical catalog key as the selected method owner",
         );
         let owner_parts = owner
             .ruby_namespace_parts()
             .into_iter()
             .map(|part| {
-                RubyConstant::new(&part).expect(
-                    "INVARIANT VIOLATED: validated Java method owner is not Ruby-constant-safe. \
-                     This is a bug because JavaClassName owns proxy validation. \
-                     Fix: keep Java method reference owner conversion single-sourced.",
+                RubyConstant::new(&part).expect_invariant(
+                    "validated Java method owner is not Ruby-constant-safe",
+                    "JavaClassName owns proxy validation",
+                    "keep Java method reference owner conversion single-sourced",
                 )
             })
             .collect::<Vec<_>>();
@@ -346,6 +350,7 @@ impl JrubyImportProvider {
                     receiver_type: None,
                     diagnose_unresolved: false,
                     allow_unindexed_owner: false,
+                    safe_navigation: false,
                     signature: None,
                 },
             },
@@ -354,16 +359,18 @@ impl JrubyImportProvider {
         let return_type = if dispatch_name == "java_send" {
             ruby_type_for_jvm(&selected.descriptor.returns)
         } else if receiver_kind == NamespaceKind::Singleton && !selected.method.is_static() {
-            RubyType::Class(FullyQualifiedName::try_from("UnboundMethod").expect(
-                "INVARIANT VIOLATED: built-in UnboundMethod FQN is invalid. \
-                     This is a bug because it is a static Ruby core constant. \
-                     Fix: keep built-in runtime type names valid Ruby constants.",
-            ))
+            RubyType::Class(
+                FullyQualifiedName::try_from("UnboundMethod").expect_invariant(
+                    "built-in UnboundMethod FQN is invalid",
+                    "it is a static Ruby core constant",
+                    "keep built-in runtime type names valid Ruby constants",
+                ),
+            )
         } else {
-            RubyType::Class(FullyQualifiedName::try_from("Method").expect(
-                "INVARIANT VIOLATED: built-in Method FQN is invalid. \
-                 This is a bug because it is a static Ruby core constant. \
-                 Fix: keep built-in runtime type names valid Ruby constants.",
+            RubyType::Class(FullyQualifiedName::try_from("Method").expect_invariant(
+                "built-in Method FQN is invalid",
+                "it is a static Ruby core constant",
+                "keep built-in runtime type names valid Ruby constants",
             ))
         };
         visitor.direct_push_expression_type(&node.as_node(), return_type, TypeProvenance::Runtime);
@@ -385,7 +392,7 @@ impl JrubyImportProvider {
         else {
             return;
         };
-        CALL_HOST_JAVA_CTOR_INFERRED.fetch_add(1, Ordering::Relaxed);
+        CALL_HOST_STATS.increment(CallHostStat::JavaCtorInferred);
         visitor.direct_push_expression_type(
             &node.as_node(),
             RubyType::Class(proxy),
@@ -497,10 +504,10 @@ impl JrubyImportProvider {
         name_range: TextRange,
         old_name_range: TextRange,
     ) {
-        let descriptor = parse_method_descriptor(&method.descriptor).expect(
-            "INVARIANT VIOLATED: catalog method descriptor failed after alias selection. \
-             This is a bug because selection parsed the same descriptor successfully. \
-             Fix: keep Java alias descriptor validation single-sourced.",
+        let descriptor = parse_method_descriptor(&method.descriptor).expect_invariant(
+            "catalog method descriptor failed after alias selection",
+            "selection parsed the same descriptor successfully",
+            "keep Java alias descriptor validation single-sourced",
         );
         let params = descriptor
             .parameters
@@ -560,6 +567,7 @@ impl JrubyImportProvider {
                     receiver_type: None,
                     diagnose_unresolved: false,
                     allow_unindexed_owner: false,
+                    safe_navigation: false,
                     signature: None,
                 },
             },
@@ -590,7 +598,7 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
         visitor.scope_tracker().get_ns_stack(),
     ));
     let direct = visitor
-        .direct_facts()
+        .analysis()
         .types
         .iter()
         .rev()
@@ -606,9 +614,7 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
     });
     let ruby_type = local.or_else(|| {
         visitor
-            .analysis_engine()
-            .read()
-            .type_facts_for(&subject)
+            .project_type_facts_for(&subject)
             .into_iter()
             .rev()
             .find(|fact| fact.provenance == TypeProvenance::Runtime)

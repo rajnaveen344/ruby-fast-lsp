@@ -5,15 +5,18 @@ use std::collections::HashMap;
 
 use log::debug;
 
-use super::helpers::{arity_mismatch, closest_keyword, MethodArity};
+use super::policy::{
+    arity_mismatch, closest_keyword, MethodArity, MISSING_KWARG, UNKNOWN_KWARG,
+    UNSUPPORTED_RUNTIME_API, WRONG_ARITY,
+};
 use crate::core::{
     DiagnosticFact, FullyQualifiedName, MethodAvailability, MethodCallSignatureCandidate,
     MethodFact, SourceFileId, TextRange,
 };
 use crate::engine::resolution::method_lookup_chain;
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn push_unavailable_method_diagnostic(
         &self,
         fact: &MethodFact,
@@ -27,10 +30,8 @@ impl AnalysisEngine {
         diagnostics_by_file
             .entry(diagnostic_range.file_id)
             .or_default()
-            .push(DiagnosticFact::new(
+            .push(UNSUPPORTED_RUNTIME_API.fact(
                 diagnostic_range,
-                crate::core::DiagnosticSeverity::Warning,
-                "unsupported-runtime-api",
                 format!(
                     "Runtime API `{}` is unavailable: {}",
                     method.as_str(),
@@ -74,9 +75,11 @@ impl AnalysisEngine {
         let mismatch = if declares_keywords
             && effective_signature.trailing_positional_may_be_options_hash
         {
-            assert!(
+            invariant!(
                 effective_signature.positional_count > 0,
-                "INVARIANT VIOLATED: a trailing positional options-hash marker exists without a positional argument. This is a bug because the marker can only be set while counting the final positional argument. Fix: update positional_count and trailing_positional_may_be_options_hash atomically."
+                what = "a trailing positional options-hash marker exists without a positional argument",
+                why = "the marker can only be set while counting the final positional argument",
+                fix = "update positional_count and trailing_positional_may_be_options_hash atomically",
             );
             let direct_mismatch = arity_mismatch(&effective_signature, &arity);
             let mut converted_signature = effective_signature.clone();
@@ -124,10 +127,8 @@ impl AnalysisEngine {
             diagnostics_by_file
                 .entry(diagnostic_range.file_id)
                 .or_default()
-                .push(DiagnosticFact::new(
+                .push(WRONG_ARITY.fact(
                     diagnostic_range,
-                    crate::core::DiagnosticSeverity::Warning,
-                    "wrong-arity",
                     format!(
                         "Wrong number of arguments for `{}` (expected {}, got {})",
                         method.as_str(),
@@ -160,12 +161,7 @@ impl AnalysisEngine {
                 diagnostics_by_file
                     .entry(kwarg.range.file_id)
                     .or_default()
-                    .push(DiagnosticFact::new(
-                        kwarg.range,
-                        crate::core::DiagnosticSeverity::Warning,
-                        "unknown-kwarg",
-                        message,
-                    ));
+                    .push(UNKNOWN_KWARG.fact(kwarg.range, message));
             }
         }
 
@@ -195,10 +191,8 @@ impl AnalysisEngine {
                 diagnostics_by_file
                     .entry(diagnostic_range.file_id)
                     .or_default()
-                    .push(DiagnosticFact::new(
+                    .push(MISSING_KWARG.fact(
                         diagnostic_range,
-                        crate::core::DiagnosticSeverity::Warning,
-                        "missing-kwarg",
                         format!(
                             "Missing required keyword argument(s) for `{}`: {}",
                             method.as_str(),

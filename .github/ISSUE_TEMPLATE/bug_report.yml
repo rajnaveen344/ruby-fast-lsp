@@ -1,5 +1,5 @@
 name: Bug report
-description: Report an installation, analysis, editor, or simulation problem.
+description: Report an installation, analysis, or editor problem.
 title: "[Bug]: "
 body:
   - type: markdown
@@ -58,7 +58,7 @@ body:
     id: lifecycle
     attributes:
       label: Lifecycle steps
-      description: Include startup/indexing state, which files were open, exact edit/save/close/reopen or restart order, and dependency/workspace changes. For simulations, include the seed and replay command.
+      description: Include startup/indexing state, which files were open, exact edit/save/close/reopen or restart order, and dependency/workspace changes.
       placeholder: |
         1. Open …
         2. Wait for indexing / edit while indexing …

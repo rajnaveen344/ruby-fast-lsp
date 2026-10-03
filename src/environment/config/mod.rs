@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 pub mod runtime;
 
@@ -271,43 +270,5 @@ impl RubyFastLspConfig {
         };
         log::set_max_level(level);
         log::info!("Log level set to: {}", self.log_level);
-    }
-
-    /// Parse Ruby version from configuration
-    pub fn get_ruby_version(&self) -> Option<(u8, u8)> {
-        if self.ruby_version == "auto" {
-            None // Will trigger auto-detection
-        } else {
-            // Parse version like "3.0" -> (3, 0)
-            let parts: Vec<&str> = self.ruby_version.split('.').collect();
-            if parts.len() >= 2 {
-                if let (Ok(major), Ok(minor)) = (parts[0].parse::<u8>(), parts[1].parse::<u8>()) {
-                    return Some((major, minor));
-                }
-            }
-            None
-        }
-    }
-
-    /// Internal method to get core stubs path
-    pub fn get_core_stubs_path_internal(&self, ruby_version: (u8, u8)) -> Option<String> {
-        // Use extension path if available
-        if let Some(ref ext_path) = self.extension_path {
-            let stubs_dir = PathBuf::from(ext_path).join("stubs");
-            if stubs_dir.exists() {
-                let version_dir = format!("rubystubs{}{}", ruby_version.0, ruby_version.1);
-                let version_path = stubs_dir.join(version_dir);
-                if version_path.exists() {
-                    return Some(version_path.to_string_lossy().to_string());
-                }
-
-                // Fallback to default rubystubs30 if specific version not found
-                let default_path = stubs_dir.join("rubystubs30");
-                if default_path.exists() {
-                    return Some(default_path.to_string_lossy().to_string());
-                }
-            }
-        }
-        None
     }
 }

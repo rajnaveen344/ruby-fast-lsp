@@ -1,4 +1,5 @@
 use super::*;
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_extension_api::{
     Argument, ArgumentValue, CalleeResolution, DocumentContext, ExecutionContextTarget, LockedGem,
     LockedGemSource, NamespaceKind, ProjectContext, ProjectSourceKind, Receiver, ResolvedCall,
@@ -145,10 +146,10 @@ fn rspec_ruby_mruby_wasm_extension_works() {
             | IndexPatch::ApplyMixin(_)
             | IndexPatch::ConnectExecutionContext(_) => None,
         })
-        .expect(
-            "INVARIANT VIOLATED: rspec let did not emit user helper DefineMethod. \
-                 This is a bug because let(:user) must define a generated helper method. \
-                 Fix: keep rspec-ruby let handler mapped to DefineMethod.",
+        .expect_invariant(
+            "rspec let did not emit user helper DefineMethod",
+            "let(:user) must define a generated helper method",
+            "keep rspec-ruby let handler mapped to DefineMethod",
         );
     assert_eq!(method.name, "user");
     assert_eq!(method.namespace, &["User".to_string()]);
@@ -159,12 +160,18 @@ fn rspec_ruby_mruby_wasm_extension_works() {
         Some(ruby_fast_lsp_extension_api::MethodReturnTypeSource::Block)
     );
 
-    let output = ext.index_call_output(&root_describe_context()).expect(
-            "INVARIANT VIOLATED: actual RSpec Wasm failed to return its execution context. This is a bug because the bundled artifact must exercise the same public event contract as the Ruby source. Fix: rebuild the mruby Wasm after SDK or guest changes.",
+    let output = ext
+        .index_call_output(&root_describe_context())
+        .expect_invariant(
+            "actual RSpec Wasm failed to return its execution context",
+            "the bundled artifact must exercise the same public event contract as the Ruby source",
+            "rebuild the mruby Wasm after SDK or guest changes",
         );
-    let context = output.execution_contexts.first().expect(
-            "INVARIANT VIOLATED: actual RSpec Wasm omitted the describe execution context. This is a bug because source-only tests cannot prove packaged generated-owner behavior. Fix: keep handle_event returning index_call_output.",
-        );
+    let context = output.execution_contexts.first().expect_invariant(
+        "actual RSpec Wasm omitted the describe execution context",
+        "source-only tests cannot prove packaged generated-owner behavior",
+        "keep handle_event returning index_call_output",
+    );
     assert!(matches!(
         context.implicit_receiver,
         ExecutionContextTarget::GeneratedOwner {
@@ -180,8 +187,12 @@ fn rspec_ruby_mruby_wasm_extension_works() {
         }
     ));
 
-    let shared_output = ext.index_call_output(&root_shared_context()).expect(
-            "INVARIANT VIOLATED: actual RSpec Wasm failed to return its project-scoped shared context. This is a packaged guest bug because shared contexts require stable cross-file identity. Fix: rebuild the mruby Wasm after SDK or guest changes.",
+    let shared_output = ext
+        .index_call_output(&root_shared_context())
+        .expect_invariant(
+            "actual RSpec Wasm failed to return its project-scoped shared context",
+            "shared contexts require stable cross-file identity",
+            "rebuild the mruby Wasm after SDK or guest changes",
         );
     let shared = shared_output
         .execution_contexts
@@ -200,9 +211,11 @@ fn rspec_ruby_mruby_wasm_extension_works() {
     );
 
     for _ in 0..64 {
-        let repeated = ext.index_call(&let_context()).expect(
-                "INVARIANT VIOLATED: repeated mruby calls corrupted guest allocation state. This is a bug because the host owns and frees every returned output buffer. Fix: clear the shim's retained output pointer when dealloc receives it.",
-            );
+        let repeated = ext.index_call(&let_context()).expect_invariant(
+            "repeated mruby calls corrupted guest allocation state",
+            "the host owns and frees every returned output buffer",
+            "clear the shim's retained output pointer when dealloc receives it",
+        );
         assert_eq!(repeated.len(), 2);
     }
 }
@@ -239,22 +252,24 @@ fn rspec_ruby_mruby_wasm_document_events_work() {
     assert_eq!(output.response_patches.len(), 2);
 
     let repeated = ext
-            .handle_event(&ExtensionEvent {
-                event: "request.document_symbol".to_string(),
-                call: None,
-                document: Some(DocumentContext {
-                    uri: "file:///spec/other_spec.rb".to_string(),
-                    text: "RSpec.describe Other do\nend\n".to_string(),
-                    project: None,
-                }),
+        .handle_event(&ExtensionEvent {
+            event: "request.document_symbol".to_string(),
+            call: None,
+            document: Some(DocumentContext {
+                uri: "file:///spec/other_spec.rb".to_string(),
+                text: "RSpec.describe Other do\nend\n".to_string(),
                 project: None,
-                settings: None,
-                files: None,
-                process_results: None,
-            })
-            .expect(
-                "INVARIANT VIOLATED: repeated mruby events corrupted guest allocation state. This is a bug because response hooks execute for every matching document. Fix: keep host/guest output ownership single-sourced.",
-            );
+            }),
+            project: None,
+            settings: None,
+            files: None,
+            process_results: None,
+        })
+        .expect_invariant(
+            "repeated mruby events corrupted guest allocation state",
+            "response hooks execute for every matching document",
+            "keep host/guest output ownership single-sourced",
+        );
     assert_eq!(repeated.response_patches.len(), 1);
 }
 
@@ -270,9 +285,11 @@ fn typed_rust_wasm_guest_returns_execution_context_and_generated_method() {
         return;
     }
 
-    let mut extension = WasmExtension::from_file("example-rust", &path).expect(
-            "INVARIANT VIOLATED: typed Rust SDK artifact failed to load through Wasmtime. This is an SDK bug because generated exports must match the public host ABI. Fix: keep export_extension! synchronized with WasmExtension.",
-        );
+    let mut extension = WasmExtension::from_file("example-rust", &path).expect_invariant(
+        "typed Rust SDK artifact failed to load through Wasmtime",
+        "generated exports must match the public host ABI",
+        "keep export_extension! synchronized with WasmExtension",
+    );
     assert_eq!(
         extension.indexed_call_names(),
         &[
@@ -283,16 +300,20 @@ fn typed_rust_wasm_guest_returns_execution_context_and_generated_method() {
     );
 
     let scope = example_scope_context();
-    let scope_output = extension.index_call_output(&scope).expect(
-            "INVARIANT VIOLATED: typed Rust guest failed to return scope output. This is an SDK bug because handle_event must decode and encode ExtensionOutput. Fix: keep typed event dispatch synchronized with extension-api.",
-        );
+    let scope_output = extension.index_call_output(&scope).expect_invariant(
+        "typed Rust guest failed to return scope output",
+        "handle_event must decode and encode ExtensionOutput",
+        "keep typed event dispatch synchronized with extension-api",
+    );
     assert_eq!(scope_output.execution_contexts.len(), 1);
 
     let property_output = extension
-            .index_call_output(&example_property_context(&scope))
-            .expect(
-                "INVARIANT VIOLATED: typed Rust guest failed to return property output. This is an SDK bug because nested CallContext values must survive Wasm serialization. Fix: preserve enclosing calls in typed decoding.",
-            );
+        .index_call_output(&example_property_context(&scope))
+        .expect_invariant(
+            "typed Rust guest failed to return property output",
+            "nested CallContext values must survive Wasm serialization",
+            "preserve enclosing calls in typed decoding",
+        );
     assert_eq!(property_output.index_patches.len(), 1);
 }
 
@@ -317,18 +338,18 @@ fn abi_mismatch_is_recoverable_error() {
     .unwrap();
 
     let err = match WasmExtension::from_bytes("bad-abi", &wasm) {
-            Ok(_) => panic!(
-                "INVARIANT VIOLATED: ABI mismatch loaded successfully. \
-                 This is a bug because bad external extensions must not cross the host ABI boundary. \
-                 Fix: keep ABI validation before returning WasmExtension."
-            ),
-            Err(err) => err,
-        };
-    assert!(
+        Ok(_) => unreachable_invariant!(
+            what = "ABI mismatch loaded successfully",
+            why = "bad external extensions must not cross the host ABI boundary",
+            fix = "keep ABI validation before returning WasmExtension",
+        ),
+        Err(err) => err,
+    };
+    invariant!(
         err.to_string().contains("ABI version"),
-        "INVARIANT VIOLATED: ABI mismatch did not return a clear error. \
-             This is a bug because bad external extensions must not panic the server. \
-             Fix: keep ABI validation on the recoverable error path."
+        what = "ABI mismatch did not return a clear error",
+        why = "bad external extensions must not panic the server",
+        fix = "keep ABI validation on the recoverable error path",
     );
 }
 
@@ -345,11 +366,11 @@ fn oversized_output_is_recoverable_error() {
     )
     .unwrap();
     let err = ext.index_call(&let_context()).unwrap_err();
-    assert!(
+    invariant!(
         err.to_string().contains("output payload"),
-        "INVARIANT VIOLATED: oversized extension output did not return a clear error. \
-             This is a bug because bad external extensions must be disabled without crashing. \
-            Fix: keep output size validation on the recoverable error path."
+        what = "oversized extension output did not return a clear error",
+        why = "bad external extensions must be disabled without crashing",
+        fix = "keep output size validation on the recoverable error path",
     );
 }
 
@@ -366,11 +387,11 @@ fn oversized_input_is_recoverable_error() {
     )
     .unwrap();
     let err = ext.index_call(&let_context()).unwrap_err();
-    assert!(
+    invariant!(
         err.to_string().contains("input payload"),
-        "INVARIANT VIOLATED: oversized extension input did not return a clear error. \
-             This is a bug because host payload budgets must fail before guest execution. \
-             Fix: keep input size validation before alloc/call."
+        what = "oversized extension input did not return a clear error",
+        why = "host payload budgets must fail before guest execution",
+        fix = "keep input size validation before alloc/call",
     );
 }
 
@@ -387,11 +408,12 @@ fn fuel_exhaustion_is_recoverable_error() {
     )
     .unwrap();
     let err = ext.index_call(&let_context()).unwrap_err();
-    assert!(
+    invariant!(
         err.to_string().contains("fuel"),
-        "INVARIANT VIOLATED: fuel exhaustion did not return a clear recoverable error: {err}. \
-             This is a bug because runaway extensions must not freeze indexing. \
-             Fix: keep consume_fuel enabled and refuel each guest call."
+        what = "fuel exhaustion did not return a clear recoverable error: {err}",
+        why = "runaway extensions must not freeze indexing",
+        fix = "keep consume_fuel enabled and refuel each guest call",
+        err = err,
     );
 }
 
@@ -432,11 +454,12 @@ fn memory_growth_limit_is_recoverable_error() {
     )
     .unwrap();
     let err = ext.index_call(&let_context()).unwrap_err();
-    assert!(
+    invariant!(
         err.to_string().contains("memory") || err.to_string().contains("grow"),
-        "INVARIANT VIOLATED: memory growth limit did not return a clear recoverable error: {err}. \
-             This is a bug because memory budgets must stop extension heap growth. \
-             Fix: keep StoreLimits memory_size + trap_on_grow_failure wired."
+        what = "memory growth limit did not return a clear recoverable error: {err}",
+        why = "memory budgets must stop extension heap growth",
+        fix = "keep StoreLimits memory_size + trap_on_grow_failure wired",
+        err = err,
     );
 }
 

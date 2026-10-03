@@ -393,10 +393,10 @@ impl FakeEditor {
 
         match observe_response("document_symbol", self.server.document_symbol(params).await) {
             Some(DocumentSymbolResponse::Nested(symbols)) => symbols,
-            Some(DocumentSymbolResponse::Flat(_)) => panic!(
-                "INVARIANT VIOLATED: FakeEditor document_symbols received flat symbols. \
-                 This is a bug because Ruby Fast LSP document symbol capability returns nested symbols. \
-                 Fix: update the harness if flat symbols become supported."
+            Some(DocumentSymbolResponse::Flat(_)) => unreachable_invariant!(
+                what = "FakeEditor document_symbols received flat symbols",
+                why = "ruby Fast LSP document symbol capability returns nested symbols",
+                fix = "update the harness if flat symbols become supported",
             ),
             None => Vec::new(),
         }

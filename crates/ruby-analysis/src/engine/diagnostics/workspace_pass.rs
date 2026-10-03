@@ -1,26 +1,33 @@
 //! Whole-workspace resolve pass: turns every stored reference candidate into
 //! resolved references, call outcomes, and rebuilt diagnostics.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::time::Instant;
 
 use super::grouped_methods::grouped_method_targets;
-use super::{
-    constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache, MethodReferenceCacheKey,
-};
+use super::policy::{MethodAbsenceClaims, UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
+use super::{constant_name, MethodCallOutcomeCaches, MethodReferenceCacheKey};
+use crate::core::names::fqn_id::ConstLookupId;
+use crate::core::names::fqn_id::FqnId;
+use crate::core::storage::reference_store::ConstLookup;
+use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
-    ConstLookup, ConstLookupId, ConstantPath, DiagnosticFact, FqnId, FullyQualifiedName,
-    MethodReferenceAccess, NamespaceKind, ReferenceFact, RubyMethod, RubyType,
-    StoredReferenceCandidateRef, TypeInferenceOutcome, UnknownReason,
+    ConstantPath, FullyQualifiedName, MethodReferenceAccess, NamespaceKind, ReferenceFact,
+    RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
-use crate::engine::state::{elapsed_ns, ResolvePassStats};
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::state::ResolveStat;
+use crate::engine::{Project, View};
+use crate::stats::{self, StatsSnapshot};
 
-impl AnalysisEngine {
-    pub(in crate::engine) fn resolve_reference_candidates(&mut self, stats: &mut ResolvePassStats) {
-        let mut candidate_file_ids = self.facts.references.candidates.file_ids();
-        for file_id in self.facts.diagnostics.candidates.file_ids() {
+impl Project {
+    pub(in crate::engine) fn resolve_reference_candidates(
+        &mut self,
+        stats: &mut StatsSnapshot<ResolveStat>,
+    ) {
+        let mut candidate_file_ids = self.uses.candidate_file_ids();
+        for file_id in self.diagnostics.candidate_file_ids() {
             if !candidate_file_ids.contains(&file_id) {
                 candidate_file_ids.push(file_id);
             }
@@ -28,8 +35,11 @@ impl AnalysisEngine {
 
         let diagnostic_seed_started = Instant::now();
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
-        stats.diagnostic_seed_ns = elapsed_ns(diagnostic_seed_started);
-        let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
+        stats.record_duration(
+            ResolveStat::DiagnosticSeedNs,
+            diagnostic_seed_started.elapsed(),
+        );
+        let reference_candidate_store = self.uses.take_candidates();
         let mut method_fact_cache: HashMap<(MethodReferenceCacheKey, bool), MethodLookupResult> =
             HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
@@ -37,47 +47,37 @@ impl AnalysisEngine {
             HashMap::new();
         let mut constant_target_cache: HashMap<ConstLookupId, Option<FqnId>> = HashMap::new();
         let mut method_lookup_chain_cache = MethodLookupChainCache::new();
-        let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
-        let mut method_chain_completeness_cache = MethodChainCompletenessCache::default();
+        let mut method_absence_claims = MethodAbsenceClaims::new(self);
         let mut resolved_call_outcomes = HashMap::new();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
-        self.facts.references.resolved.clear();
+        self.uses.clear_resolved();
         let candidate_loop_started = Instant::now();
         for candidate in reference_candidate_store.iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Resolved(candidate) => {
-                    self.facts.references.resolved.add(
+                    self.uses.add_resolved(
                         candidate.target,
                         ReferenceFact::new(candidate.range, candidate.caller),
                     );
                 }
                 StoredReferenceCandidateRef::Constant(candidate) => {
-                    let lookup = self.names.const_lookup(candidate.lookup).expect(
-                        "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
-                         This is a bug because stored reference candidates must only contain interned lookup ids. \
-                         Fix: intern constant lookups before inserting candidates.",
+                    let lookup = self.names.const_lookup(candidate.lookup).expect_invariant(
+                        "reference candidate points to missing constant lookup",
+                        "stored reference candidates must only contain interned lookup ids",
+                        "intern constant lookups before inserting candidates",
                     );
                     let parts = lookup.path.to_vec();
-                    let context = self.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
-                         This is a bug because constant lookups must only store interned context FQN ids. \
-                         Fix: intern lookup contexts before inserting candidates.",
+                    let context = self.names.fqn(lookup.context).expect_invariant(
+                        "constant lookup points to missing context FQN id",
+                        "constant lookups must only store interned context FQN ids",
+                        "intern lookup contexts before inserting candidates",
                     );
                     let target = if let Some(target) = constant_target_cache.get(&candidate.lookup)
                     {
-                        stats.constant_cache_hits = stats.constant_cache_hits.checked_add(1).expect(
-                            "INVARIANT VIOLATED: constant resolve-cache hit counter overflowed usize. \
-                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                             Fix: inspect corrupt resolve instrumentation.",
-                        );
+                        stats.increment(ResolveStat::ConstantCacheHits);
                         *target
                     } else {
-                        stats.constant_cache_misses =
-                            stats.constant_cache_misses.checked_add(1).expect(
-                                "INVARIANT VIOLATED: constant resolve-cache miss counter overflowed usize. \
-                                 This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                                 Fix: inspect corrupt resolve instrumentation.",
-                            );
+                        stats.increment(ResolveStat::ConstantCacheMisses);
                         let target = self
                             .resolve_constant_reference(
                                 &parts,
@@ -92,18 +92,14 @@ impl AnalysisEngine {
                         target
                     };
                     if let Some(target) = target {
-                        self.facts
-                            .references
-                            .resolved
-                            .add(target, ReferenceFact::new(candidate.range, None));
+                        self.uses
+                            .add_resolved(target, ReferenceFact::new(candidate.range, None));
                     } else {
                         unresolved_constants
                             .entry(candidate.range.file_id)
                             .or_default()
-                            .push(DiagnosticFact::new(
+                            .push(UNRESOLVED_CONSTANT.fact(
                                 candidate.range,
-                                crate::core::DiagnosticSeverity::Error,
-                                "unresolved-constant",
                                 format!("Unresolved constant `{}`", constant_name(&parts)),
                             ));
                     }
@@ -131,26 +127,11 @@ impl AnalysisEngine {
                             .flatten()
                     });
                     if deferred_receiver_range.is_some() {
-                        stats.deferred_receiver_candidates = stats
-                            .deferred_receiver_candidates
-                            .checked_add(1)
-                            .expect(
-                                "INVARIANT VIOLATED: deferred-receiver candidate counter overflowed usize. This is a bug because one resolve pass cannot contain more candidates than addressable memory. Fix: inspect corrupt reference-candidate storage.",
-                            );
+                        stats.increment(ResolveStat::DeferredReceiverCandidates);
                         if effective_receiver_type.is_some() {
-                            stats.deferred_receiver_proven = stats
-                                .deferred_receiver_proven
-                                .checked_add(1)
-                                .expect(
-                                    "INVARIANT VIOLATED: proven deferred-receiver counter overflowed usize. This is a bug because proven receivers are a subset of addressable candidates. Fix: inspect corrupt resolve instrumentation.",
-                                );
+                            stats.increment(ResolveStat::DeferredReceiverProven);
                         } else {
-                            stats.deferred_receiver_unknown = stats
-                                .deferred_receiver_unknown
-                                .checked_add(1)
-                                .expect(
-                                    "INVARIANT VIOLATED: Unknown deferred-receiver counter overflowed usize. This is a bug because Unknown receivers are a subset of addressable candidates. Fix: inspect corrupt resolve instrumentation.",
-                                );
+                            stats.increment(ResolveStat::DeferredReceiverUnknown);
                         }
                     }
                     if deferred_receiver_range.is_some() && effective_receiver_type.is_none() {
@@ -163,6 +144,20 @@ impl AnalysisEngine {
                         }
                         continue;
                     }
+                    let safe_navigation = candidate
+                        .diagnostics
+                        .as_deref()
+                        .is_some_and(|diagnostics| diagnostics.safe_navigation);
+                    let Some((effective_receiver_type, nil_skips_dispatch)) =
+                        Self::safe_navigation_receiver(
+                            &mut resolved_call_outcomes,
+                            candidate.call_expression_range,
+                            safe_navigation,
+                            effective_receiver_type,
+                        )
+                    else {
+                        continue;
+                    };
                     let grouped_receiver_type = effective_receiver_type
                         .as_ref()
                         .filter(|ruby_type| matches!(ruby_type, RubyType::Union(_)))
@@ -177,7 +172,7 @@ impl AnalysisEngine {
                             let targets = grouped_method_targets(&callees, candidate.method);
                             for target in targets {
                                 let target = self.names.intern_fqn(target);
-                                self.facts.references.resolved.add(
+                                self.uses.add_resolved(
                                     target,
                                     ReferenceFact::method(
                                         candidate.range,
@@ -195,7 +190,7 @@ impl AnalysisEngine {
                                 );
                             }
                             if let Some(expression_range) = candidate.call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     self.call_expression_outcome_from_grouped_resolution(
@@ -203,6 +198,7 @@ impl AnalysisEngine {
                                         candidate.method,
                                         &mut call_outcome_caches,
                                     ),
+                                    nil_skips_dispatch,
                                 );
                             }
                         } else if let Some(diagnostics) = candidate.diagnostics.as_deref() {
@@ -210,17 +206,17 @@ impl AnalysisEngine {
                                 receiver_type,
                                 candidate.method,
                                 diagnostics,
-                                &unresolved_method_edge_sources,
-                                &mut method_chain_completeness_cache,
+                                &mut method_absence_claims,
                                 &mut unresolved_constants,
                             );
                             if let Some(expression_range) = candidate.call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     TypeInferenceOutcome::unknown(
                                         UnknownReason::UnresolvedMethodReturn,
                                     ),
+                                    nil_skips_dispatch,
                                 );
                             }
                         }
@@ -237,16 +233,19 @@ impl AnalysisEngine {
                             self.proven_receiver_namespace(receiver_type, allow_unindexed_owner)
                         else {
                             if let Some(expression_range) = candidate.call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver),
+                                    nil_skips_dispatch,
                                 );
                             }
                             continue;
                         };
-                        let owner_kind = owner_fqn.namespace_kind().expect(
-                            "INVARIANT VIOLATED: a proven receiver namespace has no namespace kind. This is a bug because type-to-namespace conversion must return a Namespace FQN. Fix: keep receiver proof conversion in AnalysisQuery::type_to_namespace.",
+                        let owner_kind = owner_fqn.namespace_kind().expect_invariant(
+                            "a proven receiver namespace has no namespace kind",
+                            "type-to-namespace conversion must return a Namespace FQN",
+                            "keep receiver proof conversion in View::type_to_namespace",
                         );
                         let root = self
                             .names
@@ -268,7 +267,7 @@ impl AnalysisEngine {
                     let fact_cache_key = (method_cache_key, reflects_instance);
                     let cached = method_fact_cache.contains_key(&fact_cache_key);
                     let fact = method_fact_cache.entry(fact_cache_key).or_insert_with(|| {
-                        let query = AnalysisQuery::new(self);
+                        let query = View::new(self);
                         if candidate.is_super {
                             query.resolve_super_method_reference(&owner_fqn, &candidate.method)
                         } else if reflects_instance {
@@ -286,30 +285,22 @@ impl AnalysisEngine {
                         }
                     });
                     if cached {
-                        stats.method_cache_hits = stats.method_cache_hits.checked_add(1).expect(
-                            "INVARIANT VIOLATED: method resolve-cache hit counter overflowed usize. \
-                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                             Fix: inspect corrupt resolve instrumentation.",
-                        );
+                        stats.increment(ResolveStat::MethodCacheHits);
                     } else {
-                        stats.method_cache_misses = stats.method_cache_misses.checked_add(1).expect(
-                            "INVARIANT VIOLATED: method resolve-cache miss counter overflowed usize. \
-                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                             Fix: inspect corrupt resolve instrumentation.",
-                        );
+                        stats.increment(ResolveStat::MethodCacheMisses);
                     }
                     let mut fact = fact.clone();
                     if candidate.access == MethodReferenceAccess::Normal
                         && matches!(fact, MethodLookupResult::Ambiguous { .. })
                     {
-                        if let Some(source_ordered) = AnalysisQuery::new(self)
+                        if let Some(source_ordered) = View::new(self)
                             .source_ordered_top_level_method_reference(
                                 &owner_fqn,
                                 &candidate.method,
                                 candidate.range,
                             )
                         {
-                            fact = MethodLookupResult::Unique(source_ordered);
+                            fact = MethodLookupResult::Found(source_ordered);
                         }
                     }
                     if let Some(expression_range) = candidate.call_expression_range {
@@ -321,17 +312,18 @@ impl AnalysisEngine {
                             &fact,
                             &mut call_outcome_caches,
                         );
-                        Self::insert_resolved_call_outcome(
+                        Self::insert_dispatched_call_outcome(
                             &mut resolved_call_outcomes,
                             expression_range,
                             outcome,
+                            nil_skips_dispatch,
                         );
                     }
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {
                         let target =
                             FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
                         let target = self.names.intern_fqn(target);
-                        self.facts.references.resolved.add(
+                        self.uses.add_resolved(
                             target,
                             ReferenceFact::method(
                                 candidate.range,
@@ -360,7 +352,7 @@ impl AnalysisEngine {
                                 }
                             }
                         }
-                    } else if fact.is_missing() {
+                    } else if fact.has_no_target() {
                         let namespace_exists = *method_namespace_exists_cache
                             .entry(owner_fqn.clone())
                             .or_insert_with_key(|owner_fqn| {
@@ -378,7 +370,7 @@ impl AnalysisEngine {
                             candidate.method,
                         );
                         let target = self.names.intern_fqn(target);
-                        self.facts.references.resolved.add(
+                        self.uses.add_resolved(
                             target,
                             ReferenceFact::method(
                                 candidate.range,
@@ -391,14 +383,7 @@ impl AnalysisEngine {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
-                            let explicit_absence = self
-                                .method_absence_has_explicit_contract(&owner_fqn, candidate.method);
-                            if !explicit_absence
-                                && self.method_lookup_chain_is_incomplete_cached(
-                                    &owner_fqn,
-                                    &unresolved_method_edge_sources,
-                                    &mut method_chain_completeness_cache,
-                                )
+                            if method_absence_claims.suppresses(self, &owner_fqn, candidate.method)
                             {
                                 continue;
                             }
@@ -431,12 +416,9 @@ impl AnalysisEngine {
                             unresolved_constants
                                 .entry(diagnostics.diagnostic_range.file_id)
                                 .or_default()
-                                .push(DiagnosticFact::new(
-                                    diagnostics.diagnostic_range,
-                                    crate::core::DiagnosticSeverity::Warning,
-                                    "unresolved-method",
-                                    message,
-                                ));
+                                .push(
+                                    UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message),
+                                );
                         }
                     }
                 }
@@ -446,22 +428,70 @@ impl AnalysisEngine {
         // one-shot per-arm Instant split was removed (it inflated production A/B).
         // The detailed constant-vs-method split remains in
         // support/performance/resolve-pass-cache-cardinality-2026-08-01.json.
-        stats.method_candidates_ns = elapsed_ns(candidate_loop_started);
-        stats.constant_cache_unique_keys = constant_target_cache.len();
-        stats.method_cache_unique_keys = method_fact_cache.len();
-        stats.method_lookup_chain_cache_entries = method_lookup_chain_cache.len();
-        stats.method_namespace_exists_cache_entries = method_namespace_exists_cache.len();
-        stats.method_suggestion_cache_entries = method_suggestion_cache.len();
-        stats.incomplete_method_chain_cache_entries = method_chain_completeness_cache.results.len();
-        stats.method_return_cache_hits = call_outcome_caches.return_hits;
-        stats.method_return_cache_misses = call_outcome_caches.return_misses;
-        stats.method_return_cache_entries = call_outcome_caches.returns.len();
-        stats.method_visibility_cache_hits = call_outcome_caches.visibility_hits;
-        stats.method_visibility_cache_misses = call_outcome_caches.visibility_misses;
-        stats.method_visibility_cache_entries = call_outcome_caches.visibilities.len();
-        stats.ambiguous_method_return_cache_hits = call_outcome_caches.ambiguous_return_hits;
-        stats.ambiguous_method_return_cache_misses = call_outcome_caches.ambiguous_return_misses;
-        stats.ambiguous_method_return_cache_entries = call_outcome_caches.ambiguous_returns.len();
+        stats.record_duration(
+            ResolveStat::MethodCandidatesNs,
+            candidate_loop_started.elapsed(),
+        );
+        stats.set(
+            ResolveStat::ConstantCacheUniqueKeys,
+            stats::count(constant_target_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodCacheUniqueKeys,
+            stats::count(method_fact_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodLookupChainCacheEntries,
+            stats::count(method_lookup_chain_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodNamespaceExistsCacheEntries,
+            stats::count(method_namespace_exists_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodSuggestionCacheEntries,
+            stats::count(method_suggestion_cache.len()),
+        );
+        stats.set(
+            ResolveStat::IncompleteMethodChainCacheEntries,
+            stats::count(method_absence_claims.decided_owner_count()),
+        );
+        stats.set(
+            ResolveStat::MethodReturnCacheHits,
+            stats::count(call_outcome_caches.return_hits),
+        );
+        stats.set(
+            ResolveStat::MethodReturnCacheMisses,
+            stats::count(call_outcome_caches.return_misses),
+        );
+        stats.set(
+            ResolveStat::MethodReturnCacheEntries,
+            stats::count(call_outcome_caches.returns.len()),
+        );
+        stats.set(
+            ResolveStat::MethodVisibilityCacheHits,
+            stats::count(call_outcome_caches.visibility_hits),
+        );
+        stats.set(
+            ResolveStat::MethodVisibilityCacheMisses,
+            stats::count(call_outcome_caches.visibility_misses),
+        );
+        stats.set(
+            ResolveStat::MethodVisibilityCacheEntries,
+            stats::count(call_outcome_caches.visibilities.len()),
+        );
+        stats.set(
+            ResolveStat::AmbiguousMethodReturnCacheHits,
+            stats::count(call_outcome_caches.ambiguous_return_hits),
+        );
+        stats.set(
+            ResolveStat::AmbiguousMethodReturnCacheMisses,
+            stats::count(call_outcome_caches.ambiguous_return_misses),
+        );
+        stats.set(
+            ResolveStat::AmbiguousMethodReturnCacheEntries,
+            stats::count(call_outcome_caches.ambiguous_returns.len()),
+        );
 
         // These caches are complete once the candidate loop ends. Release
         // them before merging call outcomes into retained inference evidence;
@@ -471,53 +501,38 @@ impl AnalysisEngine {
         drop(method_suggestion_cache);
         drop(constant_target_cache);
         drop(method_lookup_chain_cache);
-        drop(unresolved_method_edge_sources);
-        drop(method_chain_completeness_cache);
+        drop(method_absence_claims);
         drop(call_outcome_caches);
 
-        self.facts.references.candidates = reference_candidate_store;
+        self.uses.restore_candidates(reference_candidate_store);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         let sort_started = Instant::now();
-        self.facts.references.resolved.sort_all();
-        stats.sort_all_ns = elapsed_ns(sort_started);
+        self.uses.sort_resolved();
+        stats.record_duration(ResolveStat::SortAllNs, sort_started.elapsed());
 
         let diagnostic_rebuild_started = Instant::now();
         for file_id in candidate_file_ids {
-            let mut diagnostics = self
-                .facts
-                .diagnostics
-                .resolved
-                .facts_in_file(file_id)
-                .into_iter()
-                .filter(|fact| fact.code != "unresolved-constant")
-                .filter(|fact| fact.code != "unresolved-method")
-                .filter(|fact| fact.code != "unsupported-runtime-api")
-                .filter(|fact| fact.code != "wrong-arity")
-                .filter(|fact| fact.code != "unknown-kwarg")
-                .filter(|fact| fact.code != "missing-kwarg")
-                .filter(|fact| fact.code != "raise-non-exception")
-                .filter(|fact| fact.code != "bad-splat")
-                .filter(|fact| fact.code != "nil-call")
-                .collect::<Vec<_>>();
-            diagnostics.extend(unresolved_constants.remove(&file_id).unwrap_or_default());
-            self.facts
-                .diagnostics
-                .resolved
-                .replace_file(file_id, diagnostics);
+            self.diagnostics.rebuild_resolved(
+                file_id,
+                unresolved_constants.remove(&file_id).unwrap_or_default(),
+            );
         }
-        stats.diagnostic_rebuild_ns = elapsed_ns(diagnostic_rebuild_started);
+        stats.record_duration(
+            ResolveStat::DiagnosticRebuildNs,
+            diagnostic_rebuild_started.elapsed(),
+        );
     }
 }
 
 fn method_reference_owner_fqn(
-    engine: &AnalysisEngine,
+    engine: &Project,
     owner: ConstLookupId,
     owner_kind: NamespaceKind,
 ) -> FullyQualifiedName {
-    let owner_lookup = engine.names.const_lookup(owner).expect(
-        "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
-         This is a bug because stored reference candidates must only contain interned lookup ids. \
-         Fix: intern constant lookups before inserting candidates.",
+    let owner_lookup = engine.names.const_lookup(owner).expect_invariant(
+        "method reference candidate points to missing owner lookup",
+        "stored reference candidates must only contain interned lookup ids",
+        "intern constant lookups before inserting candidates",
     );
     FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind)
 }

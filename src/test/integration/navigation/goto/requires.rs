@@ -26,7 +26,7 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
     };
     use crate::environment::config::RubyFastLspConfig;
     use crate::environment::runtime::catalog::{RuntimeDiscoverySource, RuntimeImplementation};
-    use crate::indexer::coordinator::IndexingCoordinator;
+    use crate::loader::coordinator::IndexingCoordinator;
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -81,7 +81,7 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
     let filename = main.to_str().unwrap().trim_start_matches('/');
     let mut editor = FakeEditor::new().await;
     editor.add_workspace(root.to_str().unwrap().trim_start_matches('/'));
-    *editor.server().config.lock() = config.clone();
+    editor.server().replace_configuration(config.clone());
     editor.open(filename, source).await;
     let unresolved_lines = |diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>| {
         diagnostics.into_iter().filter(|diagnostic| {
@@ -93,8 +93,9 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
         [0, 1, 2].into_iter().collect()
     );
 
+    let ctx = editor.server().load_context_for_project(&root);
     IndexingCoordinator::new(root, config)
-        .run_complete_indexing(editor.server())
+        .run_complete_indexing(&ctx)
         .await
         .unwrap();
 
@@ -206,6 +207,7 @@ async fn goto_require_uses_workspace_dependency_require_roots() {
     editor
         .workspace_for("project/main.rb")
         .expect("project workspace")
+        .handle()
         .set_dependency_require_paths(vec![gem_lib]);
     editor
         .open("project/main.rb", "require 'platform/helpers/json'\n")
@@ -244,7 +246,9 @@ async fn unresolved_require_clears_after_dependency_roots_without_edit() {
     let workspace = editor
         .workspace_for("project/main.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -281,7 +285,9 @@ async fn unresolved_require_stays_after_refresh_when_still_missing() {
     let workspace = editor
         .workspace_for("project/main.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -316,7 +322,9 @@ async fn unresolved_require_refresh_clears_only_resolved_requires_in_one_file() 
     let workspace = editor
         .workspace_for("project/main.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -364,7 +372,9 @@ async fn unresolved_require_clears_on_closed_file_after_dependency_roots() {
     let workspace = editor
         .workspace_for("project/app.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -398,15 +408,17 @@ async fn goto_require_lib_file() {
 async fn goto_require_custom_load_path_wins_before_lib() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
-        default: Vec::new(),
-        projects: vec![ProjectLoadPaths {
-            root: crate::test::harness::fixture_path("/project")
-                .to_string_lossy()
-                .into_owned(),
-            paths: vec!["custom".to_string()],
-        }],
-    };
+    editor.server().update_configuration(|config| {
+        config.indexing.load_paths = LoadPathsConfig {
+            default: Vec::new(),
+            projects: vec![ProjectLoadPaths {
+                root: crate::test::harness::fixture_path("/project")
+                    .to_string_lossy()
+                    .into_owned(),
+                paths: vec!["custom".to_string()],
+            }],
+        }
+    });
     editor.open("project/custom/foo.rb", "# custom foo\n").await;
     editor.open("project/lib/foo.rb", "# lib foo\n").await;
     editor.open("project/main.rb", "require \"foo\"\n").await;
@@ -420,23 +432,25 @@ async fn goto_require_load_paths_are_isolated_per_project() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("server");
     editor.add_workspace("admin");
-    editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
-        default: Vec::new(),
-        projects: vec![
-            ProjectLoadPaths {
-                root: crate::test::harness::fixture_path("/server")
-                    .to_string_lossy()
-                    .into_owned(),
-                paths: vec!["custom".to_string()],
-            },
-            ProjectLoadPaths {
-                root: crate::test::harness::fixture_path("/admin")
-                    .to_string_lossy()
-                    .into_owned(),
-                paths: vec!["other".to_string()],
-            },
-        ],
-    };
+    editor.server().update_configuration(|config| {
+        config.indexing.load_paths = LoadPathsConfig {
+            default: Vec::new(),
+            projects: vec![
+                ProjectLoadPaths {
+                    root: crate::test::harness::fixture_path("/server")
+                        .to_string_lossy()
+                        .into_owned(),
+                    paths: vec!["custom".to_string()],
+                },
+                ProjectLoadPaths {
+                    root: crate::test::harness::fixture_path("/admin")
+                        .to_string_lossy()
+                        .into_owned(),
+                    paths: vec!["other".to_string()],
+                },
+            ],
+        }
+    });
 
     editor
         .open("server/custom/foo.rb", "# server custom\n")
@@ -462,10 +476,12 @@ async fn goto_require_load_paths_are_isolated_per_project() {
 async fn goto_require_falls_back_to_workspace_default_load_paths() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
-        default: vec!["shared".to_string()],
-        projects: Vec::new(),
-    };
+    editor.server().update_configuration(|config| {
+        config.indexing.load_paths = LoadPathsConfig {
+            default: vec!["shared".to_string()],
+            projects: Vec::new(),
+        }
+    });
     editor.open("project/shared/foo.rb", "# shared foo\n").await;
     editor.open("project/lib/foo.rb", "# lib foo\n").await;
     editor.open("project/main.rb", "require \"foo\"\n").await;

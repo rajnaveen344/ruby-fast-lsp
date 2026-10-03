@@ -5,6 +5,12 @@
 //! by `ruby-fast-lsp-extension-wasm-host`; no engine, server, or LSP protocol
 //! handle crosses the guest boundary.
 
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_extension_api::{
     CallContext, Extension, ExtensionEvent, ExtensionOutput, ABI_VERSION,
 };
@@ -18,8 +24,10 @@ pub trait GuestExtension: Send + 'static {
 
     fn handle_event(&mut self, event: &ExtensionEvent) -> ExtensionOutput {
         if event.event == "index.call.enter" {
-            let context = event.call.as_ref().expect(
-                "INVARIANT VIOLATED: index.call.enter omitted CallContext. This is a host/guest ABI bug because call events require their typed call payload. Fix: encode CallContext on every index.call.enter event.",
+            let context = event.call.as_ref().expect_invariant(
+                "index.call.enter omitted CallContext",
+                "call events require their typed call payload",
+                "encode CallContext on every index.call.enter event",
             );
             return self.index_call(context);
         }
@@ -44,22 +52,28 @@ where
 
 #[doc(hidden)]
 pub fn decode_call(input: &[u8]) -> CallContext {
-    serde_json::from_slice(input).expect(
-        "INVARIANT VIOLATED: Rust guest received invalid CallContext JSON. This is a host/guest ABI bug because the host must serialize the versioned extension-api type. Fix: keep host and guest ABI versions synchronized.",
+    serde_json::from_slice(input).expect_invariant(
+        "Rust guest received invalid CallContext JSON",
+        "the host must serialize the versioned extension-api type",
+        "keep host and guest ABI versions synchronized",
     )
 }
 
 #[doc(hidden)]
 pub fn decode_event(input: &[u8]) -> ExtensionEvent {
-    serde_json::from_slice(input).expect(
-        "INVARIANT VIOLATED: Rust guest received invalid ExtensionEvent JSON. This is a host/guest ABI bug because the host must serialize the versioned extension-api type. Fix: keep host and guest ABI versions synchronized.",
+    serde_json::from_slice(input).expect_invariant(
+        "Rust guest received invalid ExtensionEvent JSON",
+        "the host must serialize the versioned extension-api type",
+        "keep host and guest ABI versions synchronized",
     )
 }
 
 #[doc(hidden)]
 pub fn encode_json<T: Serialize>(value: &T) -> Vec<u8> {
-    serde_json::to_vec(value).expect(
-        "INVARIANT VIOLATED: typed Rust guest output failed JSON serialization. This is a guest SDK bug because extension-api domain values must be serializable. Fix: keep every public ABI value serde-compatible.",
+    serde_json::to_vec(value).expect_invariant(
+        "typed Rust guest output failed JSON serialization",
+        "extension-api domain values must be serializable",
+        "keep every public ABI value serde-compatible",
     )
 }
 
@@ -76,9 +90,11 @@ pub const fn abi_version() -> i32 {
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub fn allocate(len: i32) -> *mut u8 {
-    assert!(
+    invariant!(
         len >= 0,
-        "INVARIANT VIOLATED: Rust guest alloc received a negative length. This is a host ABI bug because payload lengths are non-negative i32 values. Fix: validate the host payload length before allocation."
+        what = "Rust guest alloc received a negative length",
+        why = "payload lengths are non-negative i32 values",
+        fix = "validate the host payload length before allocation",
     );
     let bytes = vec![0_u8; len as usize].into_boxed_slice();
     Box::into_raw(bytes) as *mut u8
@@ -87,9 +103,11 @@ pub fn allocate(len: i32) -> *mut u8 {
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub unsafe fn deallocate(ptr: *mut u8, len: i32) {
-    assert!(
+    invariant!(
         len >= 0,
-        "INVARIANT VIOLATED: Rust guest dealloc received a negative length. This is a host ABI bug because payload lengths are non-negative i32 values. Fix: preserve the allocation length across the call boundary."
+        what = "Rust guest dealloc received a negative length",
+        why = "payload lengths are non-negative i32 values",
+        fix = "preserve the allocation length across the call boundary",
     );
     let slice = std::ptr::slice_from_raw_parts_mut(ptr, len as usize);
     drop(Box::from_raw(slice));
@@ -98,9 +116,11 @@ pub unsafe fn deallocate(ptr: *mut u8, len: i32) {
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub fn input_bytes<'a>(ptr: *const u8, len: i32) -> &'a [u8] {
-    assert!(
+    invariant!(
         len >= 0,
-        "INVARIANT VIOLATED: Rust guest input received a negative length. This is a host ABI bug because payload lengths are non-negative i32 values. Fix: validate the host payload length before invoking the guest."
+        what = "Rust guest input received a negative length",
+        why = "payload lengths are non-negative i32 values",
+        fix = "validate the host payload length before invoking the guest",
     );
     unsafe { std::slice::from_raw_parts(ptr, len as usize) }
 }
@@ -108,9 +128,11 @@ pub fn input_bytes<'a>(ptr: *const u8, len: i32) -> &'a [u8] {
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub fn return_bytes(bytes: Vec<u8>) -> i64 {
-    assert!(
+    invariant!(
         bytes.len() <= i32::MAX as usize,
-        "INVARIANT VIOLATED: Rust guest output exceeds the i32 ABI length. This is a guest bug because the host enforces a much smaller bounded output. Fix: emit bounded semantic patches."
+        what = "Rust guest output exceeds the i32 ABI length",
+        why = "the host enforces a much smaller bounded output",
+        fix = "emit bounded semantic patches",
     );
     let boxed = bytes.into_boxed_slice();
     let len = boxed.len() as u32;
@@ -126,9 +148,8 @@ pub fn return_bytes(bytes: Vec<u8>) -> i64 {
 macro_rules! export_extension {
     ($factory:path) => {
         fn ruby_fast_lsp_guest() -> &'static std::sync::Mutex<Box<dyn $crate::GuestExtension>> {
-            static GUEST: std::sync::OnceLock<
-                std::sync::Mutex<Box<dyn $crate::GuestExtension>>,
-            > = std::sync::OnceLock::new();
+            static GUEST: std::sync::OnceLock<std::sync::Mutex<Box<dyn $crate::GuestExtension>>> =
+                std::sync::OnceLock::new();
             GUEST.get_or_init(|| std::sync::Mutex::new(Box::new($factory())))
         }
 
@@ -149,8 +170,10 @@ macro_rules! export_extension {
 
         #[unsafe(no_mangle)]
         pub extern "C" fn indexed_call_names() -> i64 {
-            let guest = ruby_fast_lsp_guest().lock().expect(
-                "INVARIANT VIOLATED: Rust guest mutex was poisoned. This is a guest bug because a prior callback panicked. Fix: remove the panic and allow the host to isolate failures as Wasm traps.",
+            let guest = ruby_fast_lsp_guest().lock().expect_invariant(
+                "Rust guest mutex was poisoned",
+                "a prior callback panicked",
+                "remove the panic and allow the host to isolate failures as Wasm traps",
             );
             $crate::return_bytes($crate::encode_json(&guest.indexed_call_names()))
         }
@@ -158,18 +181,28 @@ macro_rules! export_extension {
         #[unsafe(no_mangle)]
         pub extern "C" fn index_call(ptr: *const u8, len: i32) -> i64 {
             let context = $crate::decode_call($crate::input_bytes(ptr, len));
-            let output = ruby_fast_lsp_guest().lock().expect(
-                "INVARIANT VIOLATED: Rust guest mutex was poisoned. This is a guest bug because a prior callback panicked. Fix: remove the panic and allow the host to isolate failures as Wasm traps.",
-            ).index_call(&context);
+            let output = ruby_fast_lsp_guest()
+                .lock()
+                .expect_invariant(
+                    "Rust guest mutex was poisoned",
+                    "a prior callback panicked",
+                    "remove the panic and allow the host to isolate failures as Wasm traps",
+                )
+                .index_call(&context);
             $crate::return_bytes($crate::encode_json(&output.index_patches))
         }
 
         #[unsafe(no_mangle)]
         pub extern "C" fn handle_event(ptr: *const u8, len: i32) -> i64 {
             let event = $crate::decode_event($crate::input_bytes(ptr, len));
-            let output = ruby_fast_lsp_guest().lock().expect(
-                "INVARIANT VIOLATED: Rust guest mutex was poisoned. This is a guest bug because a prior callback panicked. Fix: remove the panic and allow the host to isolate failures as Wasm traps.",
-            ).handle_event(&event);
+            let output = ruby_fast_lsp_guest()
+                .lock()
+                .expect_invariant(
+                    "Rust guest mutex was poisoned",
+                    "a prior callback panicked",
+                    "remove the panic and allow the host to isolate failures as Wasm traps",
+                )
+                .handle_event(&event);
             $crate::return_bytes($crate::encode_json(&output))
         }
     };

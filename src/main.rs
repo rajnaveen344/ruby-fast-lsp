@@ -1,11 +1,11 @@
 use ruby_fast_lsp::lsp::check::{render_report, CheckOutputFormat, CheckSession};
-use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::server::Server;
 use std::path::PathBuf;
 use std::process::exit;
 
 use anyhow::{anyhow, Result};
 use log::{error, info};
-use tower_lsp::{LspService, Server};
+use tower_lsp::LspService;
 
 #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
 #[global_allocator]
@@ -45,59 +45,35 @@ async fn main() -> Result<()> {
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::build(|client| {
-        RubyLanguageServer::new(client).unwrap_or_else(|e| {
+        Server::new(client).unwrap_or_else(|e| {
             error!("Failed to initialize Ruby LSP server: {}", e);
             exit(1)
         })
     })
-    .custom_method(
-        "ruby/namespaceTree",
-        RubyLanguageServer::handle_namespace_tree_request,
-    )
-    // Debug commands for custom LSP clients
-    .custom_method("$/listCommands", RubyLanguageServer::handle_list_commands)
-    .custom_method(
-        "ruby-fast-lsp/debug/lookup",
-        RubyLanguageServer::handle_debug_lookup,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/stats",
-        RubyLanguageServer::handle_debug_stats,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/ancestors",
-        RubyLanguageServer::handle_debug_ancestors,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/methods",
-        RubyLanguageServer::handle_debug_methods,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/inference-stats",
-        RubyLanguageServer::handle_debug_inference_stats,
-    )
-    .custom_method("ruby/exportGraph", RubyLanguageServer::handle_export_graph)
+    .custom_method("ruby/namespaceTree", Server::handle_namespace_tree_request)
+    .custom_method("ruby-fast-lsp/debug/lookup", Server::handle_debug_lookup)
+    .custom_method("ruby/exportGraph", Server::handle_export_graph)
     .custom_method(
         "ruby-fast-lsp/extensions/status",
-        RubyLanguageServer::handle_extension_status,
+        Server::handle_extension_status,
     )
     .custom_method(
         "ruby-fast-lsp/runtime/discover",
-        RubyLanguageServer::handle_runtime_discover,
+        Server::handle_runtime_discover,
     )
     .custom_method(
         "ruby-fast-lsp/runtime/status",
-        RubyLanguageServer::handle_runtime_status,
+        Server::handle_runtime_status,
     )
     .custom_method(
         "ruby-fast-lsp/indexing/status",
-        RubyLanguageServer::handle_indexing_status,
+        Server::handle_indexing_status,
     )
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");
 
-    Server::new(stdin, stdout, socket)
+    tower_lsp::Server::new(stdin, stdout, socket)
         // tower-lsp defaults to 4 concurrent request handlers. Completed handlers
         // that are waiting on a backpressured stdout response slot still occupy
         // those slots, so a small limit turns client IO stalls into multi-second
@@ -141,8 +117,8 @@ fn run_cache_command(mut arguments: impl Iterator<Item = String>) -> Result<()> 
             "cache command received unexpected argument `{unexpected}`"
         ));
     }
-    let cache = ruby_fast_lsp::indexer::cache::persistent::PersistentDerivedProductCache::new(
-        ruby_fast_lsp::utils::ruby_fast_lsp_user_cache_root()?,
+    let cache = ruby_fast_lsp::utils::persistent_cache::PersistentDerivedProductCache::new(
+        ruby_fast_lsp::utils::cache::ruby_fast_lsp_user_cache_root()?,
     );
     let (action, summary) = match operation.as_str() {
         "show" => ("show", cache.summary()?),

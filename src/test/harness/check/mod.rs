@@ -1,7 +1,8 @@
 //! Tag-driven assertions for inline fixtures.
 //!
 //! `check()` opens one fixture; `check_multi_file()` opens several and treats
-//! them as one scenario. Each tag kind has one runner; the runner compares the
+//! them as one scenario; `check_project()` writes them to disk and cold-indexes
+//! them as a workspace with bundled core. Each tag kind has one runner; the runner compares the
 //! production response exactly. See [`super::fixture`] for the tag syntax.
 //!
 //! | Tag | Position | Asserts |
@@ -25,7 +26,10 @@ mod diagnostics;
 mod hierarchy;
 mod navigation;
 mod presentation;
+mod project;
 mod types;
+
+pub use project::check_project;
 
 #[cfg(test)]
 mod tests;
@@ -38,7 +42,7 @@ use tower_lsp::lsp_types::{
 
 use super::fake_editor::FakeEditor;
 use super::fixture::{parse_fixture, Fixture, Tag, TagKind};
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 
 /// Open a single fixture as `inline_test.rb` and run its assertions.
 pub async fn check(fixture_text: &str) {
@@ -75,7 +79,7 @@ pub(super) struct FixtureFile {
 }
 
 /// Run every assertion in an already-opened set of fixtures.
-pub(super) async fn run_fixture_checks(server: &RubyLanguageServer, files: &[FixtureFile]) {
+pub(super) async fn run_fixture_checks(server: &Server, files: &[FixtureFile]) {
     assert!(
         files.iter().any(|file| file.fixture.has_markers()),
         "fixture asserts nothing: add tags, or assert the expected result directly"

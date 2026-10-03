@@ -1,7 +1,7 @@
-use crate::indexer::scheduling::status::{
+use crate::loader::scheduling::status::{
     IndexingPhase, IndexingReuseSnapshot, IndexingStatusParams,
 };
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use tower_lsp::lsp_types::Url;
 
 #[test]
@@ -11,7 +11,7 @@ fn indexing_snapshot_is_sorted_and_failure_aware() {
     let server_project = fixture.path().join("server");
     std::fs::create_dir_all(&admin).unwrap();
     std::fs::create_dir_all(&server_project).unwrap();
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
     let server_workspace =
         language_server.add_workspace(Url::from_directory_path(&server_project).unwrap());
     let admin_workspace = language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
@@ -58,7 +58,7 @@ async fn indexing_status_request_prioritizes_active_document_and_sequences_exact
     let server_project = fixture.path().join("server");
     std::fs::create_dir_all(&admin).unwrap();
     std::fs::create_dir_all(&server_project).unwrap();
-    let language_server = RubyLanguageServer::default();
+    let language_server = Server::default();
     language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
     let server_workspace =
         language_server.add_workspace(Url::from_directory_path(&server_project).unwrap());

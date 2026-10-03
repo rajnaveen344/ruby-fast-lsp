@@ -5,6 +5,7 @@
 //! without revisiting Prism nodes. Recursive components start at a private
 //! bottom value and iterate synchronously to a bounded least fixed point.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::equations::method_return_equation::MethodReturnBase;
@@ -64,8 +65,10 @@ struct MethodSolveId(u32);
 
 impl MethodSolveId {
     fn index(self) -> usize {
-        usize::try_from(self.0).expect(
-            "INVARIANT VIOLATED: method-return solve id does not fit usize. This is a bug because interned ids are assigned from a memory-resident equation set. Fix: keep MethodSolveId as a dense index into that set.",
+        usize::try_from(self.0).expect_invariant(
+            "method-return solve id does not fit usize",
+            "interned ids are assigned from a memory-resident equation set",
+            "keep MethodSolveId as a dense index into that set",
         )
     }
 }
@@ -87,8 +90,10 @@ pub(crate) fn solve_method_return_equations_with_telemetry(
                 .is_some_and(|method| graph[method.index()].contains(method));
 
         if !recursive {
-            let method = *component.first().expect(
-                "INVARIANT VIOLATED: the SCC solver produced an empty component. This is a bug because every component must own at least one method. Fix: keep Tarjan component emission paired with a popped root node.",
+            let method = *component.first().expect_invariant(
+                "the SCC solver produced an empty component",
+                "every component must own at least one method",
+                "keep Tarjan component emission paired with a popped root node",
             );
             let approximation = evaluate_method(
                 method,
@@ -108,11 +113,15 @@ pub(crate) fn solve_method_return_equations_with_telemetry(
         );
         telemetry.recursive_methods = telemetry
             .recursive_methods
-            .checked_add(u64::try_from(component.len()).expect(
-                "INVARIANT VIOLATED: recursive component size exceeded u64. This is a bug because one process cannot retain that many methods. Fix: bound equation collection below u64::MAX.",
+            .checked_add(u64::try_from(component.len()).expect_invariant(
+                "recursive component size exceeded u64",
+                "one process cannot retain that many methods",
+                "bound equation collection below u64::MAX",
             ))
-            .expect(
-                "INVARIANT VIOLATED: recursive method count exhausted u64. This is a bug because telemetry must remain exact. Fix: reset file-owned telemetry or widen the counter before overflow.",
+            .expect_invariant(
+                "recursive method count exhausted u64",
+                "telemetry must remain exact",
+                "reset file-owned telemetry or widen the counter before overflow",
             );
 
         let mut approximations = vec![Approximation::Bottom; component.len()];
@@ -163,8 +172,11 @@ pub(crate) fn solve_method_return_equations_with_telemetry(
     let mut outcomes = BTreeMap::new();
     for (index, method) in methods.into_iter().enumerate() {
         let outcome = solved[index].take().unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: method-return solver omitted interned method `{method}`. This is a bug because every grouped method must produce exactly one proof outcome. Fix: keep SCC emission and result insertion exhaustive."
+            unreachable_invariant!(
+                what = "method-return solver omitted interned method `{method}`",
+                why = "every grouped method must produce exactly one proof outcome",
+                fix = "keep SCC emission and result insertion exhaustive",
+                method = method,
             )
         });
         telemetry.observe_method_return(&outcome);
@@ -194,14 +206,18 @@ fn intern_method_equations(
             Some(method) if *method == equation.method() => {
                 grouped
                     .last_mut()
-                    .expect(
-                        "INVARIANT VIOLATED: interned method-return grouping has a method without a definition list. This is a bug because a new interned method always pushes an empty group. Fix: push the method and its group together.",
+                    .expect_invariant(
+                        "interned method-return grouping has a method without a definition list",
+                        "a new interned method always pushes an empty group",
+                        "push the method and its group together",
                     )
                     .push(equation);
             }
             Some(_) | None => {
-                let _id = u32::try_from(methods.len()).expect(
-                    "INVARIANT VIOLATED: interned method-return equations exceeded u32::MAX distinct methods. This is a bug because one process cannot retain that many equations. Fix: bound equation collection below u32::MAX.",
+                let _id = u32::try_from(methods.len()).expect_invariant(
+                    "interned method-return equations exceeded u32::MAX distinct methods",
+                    "one process cannot retain that many equations",
+                    "bound equation collection below u32::MAX",
                 );
                 methods.push(equation.method());
                 grouped.push(vec![equation]);
@@ -242,16 +258,21 @@ fn method_solve_id(
     method: &FullyQualifiedName,
 ) -> Option<MethodSolveId> {
     methods.binary_search(&method).ok().map(|index| {
-        MethodSolveId(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: interned method index exceeded u32. This is a bug because intern construction rejects sets larger than u32::MAX. Fix: keep MethodSolveId assignment aligned with intern_method_equations.",
+        MethodSolveId(u32::try_from(index).expect_invariant(
+            "interned method index exceeded u32",
+            "intern construction rejects sets larger than u32::MAX",
+            "keep MethodSolveId assignment aligned with intern_method_equations",
         ))
     })
 }
 
 fn increment(value: u64, counter: &str) -> u64 {
     value.checked_add(1).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {counter} exhausted u64. This is a bug because telemetry must remain exact. Fix: reset file-owned telemetry or widen the counter before overflow."
+        unreachable_invariant!(
+            what = "{counter} exhausted u64",
+            why = "telemetry must remain exact",
+            fix = "reset file-owned telemetry or widen the counter before overflow",
+            counter = counter,
         )
     })
 }
@@ -264,16 +285,24 @@ fn evaluate_method(
     approximations: &[Approximation],
     solved: &[Option<TypeInferenceOutcome>],
 ) -> Approximation {
-    let definitions = grouped.get(method.index()).expect(
-        "INVARIANT VIOLATED: the return solver evaluated a method without an equation. This is a bug because SCC nodes must be derived from the interned equation keys. Fix: keep graph and equation construction atomic.",
+    let definitions = grouped.get(method.index()).expect_invariant(
+        "the return solver evaluated a method without an equation",
+        "SCC nodes must be derived from the interned equation keys",
+        "keep graph and equation construction atomic",
     );
-    let interned_dependencies = definition_dependencies.get(method.index()).expect(
-        "INVARIANT VIOLATED: interned method-return dependencies are missing for an equation group. This is a bug because dependency ids are assigned with the grouped definitions. Fix: keep intern_method_equations atomic.",
-    );
-    assert_eq!(
+    let interned_dependencies = definition_dependencies
+        .get(method.index())
+        .expect_invariant(
+            "interned method-return dependencies are missing for an equation group",
+            "dependency ids are assigned with the grouped definitions",
+            "keep intern_method_equations atomic",
+        );
+    invariant_eq!(
         definitions.len(),
         interned_dependencies.len(),
-        "INVARIANT VIOLATED: interned method-return definitions and dependency lists drifted. This is a bug because both vectors are built from the same grouped equations. Fix: keep intern_method_equations atomic."
+        what = "interned method-return definitions and dependency lists drifted",
+        why = "both vectors are built from the same grouped equations",
+        fix = "keep intern_method_equations atomic",
     );
     let mut alternatives = Vec::new();
 
@@ -291,8 +320,10 @@ fn evaluate_method(
             let dependency_approximation = if let Ok(slot) = component.binary_search(&dependency_id)
             {
                 approximations.get(slot).cloned().unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: recursive dependency has no approximation. This is a bug because the component key set must be initialized before evaluation. Fix: seed every SCC member with private bottom."
+                    unreachable_invariant!(
+                        what = "recursive dependency has no approximation",
+                        why = "the component key set must be initialized before evaluation",
+                        fix = "seed every SCC member with private bottom",
                     )
                 })
             } else if let Some(Some(outcome)) = solved.get(dependency_id.index()) {
@@ -342,8 +373,10 @@ fn strongly_connected_components(graph: &[BTreeSet<MethodSolveId>]) -> Vec<Vec<M
     impl Tarjan<'_> {
         fn visit(&mut self, method: MethodSolveId) {
             let index = self.next_index;
-            self.next_index = self.next_index.checked_add(1).expect(
-                "INVARIANT VIOLATED: the return-equation DFS index exhausted usize. This is a bug because the method graph cannot exceed addressable memory. Fix: bound collected method equations below usize::MAX.",
+            self.next_index = self.next_index.checked_add(1).expect_invariant(
+                "the return-equation DFS index exhausted usize",
+                "the method graph cannot exceed addressable memory",
+                "bound collected method equations below usize::MAX",
             );
             let slot = method.index();
             self.indexes[slot] = Some(index);
@@ -357,23 +390,31 @@ fn strongly_connected_components(graph: &[BTreeSet<MethodSolveId>]) -> Vec<Vec<M
                     self.visit(*dependency);
                     self.lowlinks[slot] = self.lowlinks[slot].min(self.lowlinks[dependency_slot]);
                 } else if self.on_stack[dependency_slot] {
-                    let dependency_index = self.indexes[dependency_slot].expect(
-                        "INVARIANT VIOLATED: an on-stack dependency has no DFS index. This is a bug because stack membership begins after index insertion. Fix: update these structures atomically.",
+                    let dependency_index = self.indexes[dependency_slot].expect_invariant(
+                        "an on-stack dependency has no DFS index",
+                        "stack membership begins after index insertion",
+                        "update these structures atomically",
                     );
                     self.lowlinks[slot] = self.lowlinks[slot].min(dependency_index);
                 }
             }
 
-            if self.lowlinks[slot] != self.indexes[slot].expect(
-                "INVARIANT VIOLATED: the active Tarjan method lost its DFS index. This is a bug because active stack entries must remain indexed. Fix: do not clear indexes during traversal.",
-            ) {
+            if self.lowlinks[slot]
+                != self.indexes[slot].expect_invariant(
+                    "the active Tarjan method lost its DFS index",
+                    "active stack entries must remain indexed",
+                    "do not clear indexes during traversal",
+                )
+            {
                 return;
             }
 
             let mut component = Vec::new();
             loop {
-                let member = self.stack.pop().expect(
-                    "INVARIANT VIOLATED: Tarjan reached a component root with an empty stack. This is a bug because the root itself must remain active until component emission. Fix: pop only through the current root.",
+                let member = self.stack.pop().expect_invariant(
+                    "Tarjan reached a component root with an empty stack",
+                    "the root itself must remain active until component emission",
+                    "pop only through the current root",
                 );
                 self.on_stack[member.index()] = false;
                 let finished = member == method;
@@ -398,8 +439,10 @@ fn strongly_connected_components(graph: &[BTreeSet<MethodSolveId>]) -> Vec<Vec<M
         components: Vec::new(),
     };
     for index in 0..method_count {
-        let method = MethodSolveId(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: interned method index exceeded u32 during SCC roots. This is a bug because intern construction rejects sets larger than u32::MAX. Fix: keep MethodSolveId assignment aligned with intern_method_equations.",
+        let method = MethodSolveId(u32::try_from(index).expect_invariant(
+            "interned method index exceeded u32 during SCC roots",
+            "intern construction rejects sets larger than u32::MAX",
+            "keep MethodSolveId assignment aligned with intern_method_equations",
         ));
         if tarjan.indexes[index].is_none() {
             tarjan.visit(method);

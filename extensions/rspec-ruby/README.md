@@ -1,8 +1,9 @@
 # RSpec Ruby Extension
 
-Ruby-authored prototype of the RSpec extension. The source is written against
-`extensions/mruby-sdk` and is intended to be packaged into an mruby Wasm
-module.
+The RSpec extension, written in Ruby against `extensions/mruby-sdk` and
+packaged as an mruby Wasm module. It is the server's only RSpec
+implementation: the VSIX and the npm platform packages ship it, and a project
+without it loaded indexes RSpec calls as ordinary Ruby.
 
 Current coverage:
 

@@ -7,3 +7,4 @@ description = "Runtime-neutral JRuby compatibility and Java interop semantics"
 
 [dependencies]
 ruby-fast-lsp-jvm-metadata = { path = "../jvm-metadata" }
+ruby-prism = "1.4.0"

@@ -6,6 +6,7 @@ use crate::core::{
 use crate::inference::type_tracker::flow::shapes::narrowing::narrow_shape_literal_type;
 use crate::inference::type_tracker::observations::{get_var_type_at, LocalReadType};
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -44,14 +45,18 @@ fn exact_local_read_type(tracker: &mut TypeTracker, source: &str, needle: &str) 
 }
 
 fn exact_local_read(tracker: &mut TypeTracker, source: &str, needle: &str) -> LocalReadType {
-    let start_offset = source.rfind(needle).expect(
-            "INVARIANT VIOLATED: the test local-read needle is absent. This is a bug because the fixture and assertion must identify the same source token. Fix: keep the needle synchronized with the fixture.",
-        );
+    let start_offset = source.rfind(needle).expect_invariant(
+        "the test local-read needle is absent",
+        "the fixture and assertion must identify the same source token",
+        "keep the needle synchronized with the fixture",
+    );
     tracker
-            .take_local_read_types()
-            .into_iter()
-            .find(|read| read.start_offset == start_offset)
-            .expect(
-                "INVARIANT VIOLATED: TypeTracker did not retain the expected exact local read. This is a bug because the fixture places it inside rescue control flow. Fix: keep local-read evidence enabled and traverse the rescue expression through track_node.",
-            )
+        .take_local_read_types()
+        .into_iter()
+        .find(|read| read.start_offset == start_offset)
+        .expect_invariant(
+            "TypeTracker did not retain the expected exact local read",
+            "the fixture places it inside rescue control flow",
+            "keep local-read evidence on and traverse rescue via track_node",
+        )
 }

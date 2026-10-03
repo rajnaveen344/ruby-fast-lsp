@@ -2,11 +2,12 @@ use super::catalog::rbs_method_name_catalog;
 use super::embedded_callable::prepare_rbs_higher_order_call;
 use super::*;
 use crate::core::RubyType;
+use crate::inference::semantics::Semantics;
 use rbs_parser::RbsType;
 
 #[test]
 fn test_rbs_loader_initialized() {
-    let count = rbs_declaration_count();
+    let count = RBS_LOADER.read().declaration_count();
     assert!(count > 0, "RBS loader should have declarations");
     println!("Loaded {} RBS declarations", count);
 }
@@ -208,23 +209,23 @@ fn rbs_method_catalog_is_shared_and_preserves_inherited_aliases() {
     let first = rbs_method_name_catalog("String", false);
     let second = rbs_method_name_catalog("String", false);
 
-    assert!(
+    invariant!(
         std::sync::Arc::ptr_eq(&first, &second),
-        "INVARIANT VIOLATED: repeated immutable RBS catalog queries rebuilt String. \
-             This is a bug because the embedded RBS environment cannot change at runtime. \
-             Fix: share one catalog per declared RBS owner and singleton mode."
+        what = "repeated immutable RBS catalog queries rebuilt String",
+        why = "the embedded RBS environment cannot change at runtime",
+        fix = "share one catalog per declared RBS owner and singleton mode",
     );
-    assert!(
+    invariant!(
         first.contains("tap"),
-        "INVARIANT VIOLATED: cached String methods lost inherited Kernel#tap. \
-             This is a bug because caching must preserve the complete RBS ancestor lookup. \
-             Fix: construct the cache entry through the ordinary recursive collector."
+        what = "cached String methods lost inherited Kernel#tap",
+        why = "caching must preserve the complete RBS ancestor lookup",
+        fix = "construct the cache entry through the ordinary recursive collector",
     );
-    assert!(
+    invariant!(
         first.contains("object_id"),
-        "INVARIANT VIOLATED: cached String methods lost the Kernel#object_id alias. \
-             This is a bug because cached and uncached RBS lookup must be semantically identical. \
-             Fix: retain alias collection when constructing a cache entry."
+        what = "cached String methods lost the Kernel#object_id alias",
+        why = "cached and uncached RBS lookup must be semantically identical",
+        fix = "retain alias collection when constructing a cache entry",
     );
 }
 
@@ -312,12 +313,22 @@ fn enumerable_each_with_object_binds_the_accumulator_argument() {
 #[test]
 fn higher_order_prepare_cache_reuses_identical_array_each_calls() {
     let receiver = RubyType::array_of(RubyType::integer());
-    let first =
-        prepare_higher_order_call_with_fallbacks(None, None, Some(&receiver), None, "each", &[])
-            .expect("Array#each must prepare through the cached fallback path");
-    let second =
-        prepare_higher_order_call_with_fallbacks(None, None, Some(&receiver), None, "each", &[])
-            .expect("repeated Array#each must hit the same prepare cache");
+    let first = prepare_higher_order_call_with_fallbacks(
+        None::<&dyn Semantics>,
+        Some(&receiver),
+        None,
+        "each",
+        &[],
+    )
+    .expect("Array#each must prepare through the cached fallback path");
+    let second = prepare_higher_order_call_with_fallbacks(
+        None::<&dyn Semantics>,
+        Some(&receiver),
+        None,
+        "each",
+        &[],
+    )
+    .expect("repeated Array#each must hit the same prepare cache");
     assert_eq!(
         first.block_parameter_types(),
         second.block_parameter_types()
@@ -328,8 +339,7 @@ fn higher_order_prepare_cache_reuses_identical_array_each_calls() {
 #[test]
 fn higher_order_prepare_cache_does_not_reuse_a_different_element_type() {
     let integers = prepare_higher_order_call_with_fallbacks(
-        None,
-        None,
+        None::<&dyn Semantics>,
         Some(&RubyType::array_of(RubyType::integer())),
         None,
         "each",
@@ -337,8 +347,7 @@ fn higher_order_prepare_cache_does_not_reuse_a_different_element_type() {
     )
     .expect("Array[Integer]#each must prepare");
     let strings = prepare_higher_order_call_with_fallbacks(
-        None,
-        None,
+        None::<&dyn Semantics>,
         Some(&RubyType::array_of(RubyType::string())),
         None,
         "each",

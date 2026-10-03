@@ -363,3 +363,24 @@ MetaTarget.generated_singleton_from_string
         "instance_eval string must not inherit block lexical semantics or synthesize parser facts"
     );
 }
+
+#[tokio::test]
+async fn class_eval_on_const_get_receiver_changes_method_owner() {
+    check(
+        r#"
+module Outer
+  class Inner
+  end
+end
+
+Outer.const_get(:Inner).class_eval do
+  <def>def patched
+    "patched"
+  end</def>
+end
+
+Outer::Inner.new.patched$0
+"#,
+    )
+    .await;
+}

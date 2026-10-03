@@ -1,8 +1,24 @@
 use super::*;
+use crate::environment::extensions::ExtensionStat;
+use crate::utils::persistent_cache::PersistentProductStat;
 
 #[test]
 fn tracked_call_name_set_is_shared_arc_and_covers_rspec_without_ordinary_ruby_names() {
-    let registry = ExtensionRegistryHandle::empty();
+    assert!(
+        ExtensionRegistryHandle::empty()
+            .tracked_call_names()
+            .is_empty(),
+        "a registry without loaded extensions tracks no call names"
+    );
+    let config = RubyFastLspConfig {
+        extension_packages: vec![Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("extensions/rspec-ruby")
+            .to_string_lossy()
+            .into_owned()],
+        ..RubyFastLspConfig::default()
+    };
+    let registry = ExtensionRegistryHandle::from_config(&config);
+    assert_eq!(registry.status_reports()[0].status, "loaded");
     let names = registry.tracked_call_names();
     let again = registry.tracked_call_names();
     assert!(
@@ -53,21 +69,24 @@ fn activation_failure_disables_extension_before_use() {
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, "activation-failure");
     assert_eq!(reports[0].status, "failed");
-    assert_eq!(reports[0].telemetry.guest_calls, 1);
-    assert_eq!(reports[0].telemetry.lifecycle_calls, 1);
-    assert_eq!(reports[0].telemetry.index_calls, 0);
-    assert_eq!(reports[0].telemetry.event_calls, 0);
-    assert_eq!(reports[0].telemetry.guest_failures, 1);
-    assert_eq!(reports[0].telemetry.disablements, 1);
-    assert!(reports[0].telemetry.max_guest_time_ns <= reports[0].telemetry.total_guest_time_ns);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::GuestCalls), 1);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::IndexCalls), 0);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::EventCalls), 0);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::GuestFailures), 1);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::Disablements), 1);
     assert!(
+        reports[0].telemetry.get(ExtensionStat::MaxGuestTimeNs)
+            <= reports[0].telemetry.get(ExtensionStat::TotalGuestTimeNs)
+    );
+    invariant!(
         reports[0]
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("activation")),
-        "INVARIANT VIOLATED: activation failure was not reported with lifecycle context. \
-         This is a bug because users cannot diagnose why an extension was disabled. \
-         Fix: retain the activation error in extension status."
+        what = "activation failure was not reported with lifecycle context",
+        why = "users cannot diagnose why an extension was disabled",
+        fix = "retain the activation error in extension status",
     );
 }
 
@@ -87,11 +106,14 @@ fn resource_limit_failure_is_visible_in_extension_telemetry() {
 
     let report = &registry.status_reports()[0];
     assert_eq!(report.status, "failed");
-    assert_eq!(report.telemetry.lifecycle_calls, 1);
-    assert_eq!(report.telemetry.guest_failures, 1);
-    assert_eq!(report.telemetry.resource_limit_failures, 1);
-    assert_eq!(report.telemetry.guest_traps, 0);
-    assert_eq!(report.telemetry.disablements, 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestFailures), 1);
+    assert_eq!(
+        report.telemetry.get(ExtensionStat::ResourceLimitFailures),
+        1
+    );
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestTraps), 0);
+    assert_eq!(report.telemetry.get(ExtensionStat::Disablements), 1);
     assert!(report
         .last_error
         .as_deref()
@@ -114,11 +136,14 @@ fn guest_trap_is_visible_in_extension_telemetry() {
 
     let report = &registry.status_reports()[0];
     assert_eq!(report.status, "failed");
-    assert_eq!(report.telemetry.lifecycle_calls, 1);
-    assert_eq!(report.telemetry.guest_failures, 1);
-    assert_eq!(report.telemetry.guest_traps, 1);
-    assert_eq!(report.telemetry.resource_limit_failures, 0);
-    assert_eq!(report.telemetry.disablements, 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestFailures), 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestTraps), 1);
+    assert_eq!(
+        report.telemetry.get(ExtensionStat::ResourceLimitFailures),
+        0
+    );
+    assert_eq!(report.telemetry.get(ExtensionStat::Disablements), 1);
     assert!(report
         .last_error
         .as_deref()
@@ -145,14 +170,14 @@ fn settings_only_reconfiguration_notifies_existing_extension() {
 
     let reports = registry.status_reports();
     assert_eq!(reports[0].status, "failed");
-    assert!(
+    invariant!(
         reports[0]
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("settings.changed")),
-        "INVARIANT VIOLATED: settings event failure lacks event context. \
-         This is a bug because settings-only reload failures must be diagnosable. \
-         Fix: report the settings.changed event in extension status."
+        what = "settings event failure lacks event context",
+        why = "settings-only reload failures must be diagnosable",
+        fix = "report the settings.changed event in extension status",
     );
 
     config.extension_settings.insert(
@@ -178,12 +203,7 @@ async fn extension_reconfiguration_waits_for_weighted_admission_without_blocking
     };
     let registry = ExtensionRegistryHandle::from_config(&RubyFastLspConfig::default());
     let governor = IndexingResourceGovernor::new(
-        crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
-            1,
-            1,
-            256 * 1024 * 1024,
-            1,
-        ),
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
     );
     let holder_release = Arc::new(tokio::sync::Notify::new());
     let holder_release_task = holder_release.clone();
@@ -258,7 +278,7 @@ async fn extension_reconfiguration_waits_for_weighted_admission_without_blocking
 async fn response_requests_without_loaded_capability_bypass_resource_admission() {
     let registry = ExtensionRegistryHandle::empty();
     let governor = IndexingResourceGovernor::new(
-        crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(1, 1, 1, 1),
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 1, 1),
     );
 
     assert!(registry
@@ -339,8 +359,18 @@ fn fresh_registry_process_reuses_exact_persistent_compiled_wasm() {
     let first_registry = ExtensionRegistryHandle::empty_with_cache(first_cache.clone());
     first_registry.configure_from_config(&config);
     assert_eq!(first_registry.status_reports()[0].status, "loaded");
-    assert_eq!(first_cache.compiled_wasm_snapshot().producers, 1);
-    assert_eq!(first_cache.compiled_wasm_snapshot().publications, 1);
+    assert_eq!(
+        first_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Producers),
+        1
+    );
+    assert_eq!(
+        first_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Publications),
+        1
+    );
     first_registry.shutdown();
     drop(first_registry);
     drop(first_cache);
@@ -349,8 +379,18 @@ fn fresh_registry_process_reuses_exact_persistent_compiled_wasm() {
     let second_registry = ExtensionRegistryHandle::empty_with_cache(second_cache.clone());
     second_registry.configure_from_config(&config);
     assert_eq!(second_registry.status_reports()[0].status, "loaded");
-    assert_eq!(second_cache.compiled_wasm_snapshot().hits, 1);
-    assert_eq!(second_cache.compiled_wasm_snapshot().producers, 0);
+    assert_eq!(
+        second_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
+    assert_eq!(
+        second_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Producers),
+        0
+    );
 }
 
 #[test]
@@ -382,10 +422,10 @@ fn valid_envelope_with_invalid_native_wasm_artifact_is_rebuilt() {
     });
     assert_eq!(registry.status_reports()[0].status, "loaded");
     let snapshot = recovering_cache.compiled_wasm_snapshot();
-    assert_eq!(snapshot.hits, 1);
-    assert_eq!(snapshot.corruptions, 1);
-    assert_eq!(snapshot.producers, 1);
-    assert_eq!(snapshot.publications, 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Hits), 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Corruptions), 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Producers), 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Publications), 1);
 }
 
 #[test]
@@ -403,85 +443,6 @@ fn shutdown_deactivates_loaded_extensions() {
     registry.shutdown();
 
     assert_eq!(registry.status_reports()[0].status, "deactivated");
-}
-
-#[tokio::test]
-async fn trusted_workspace_discovers_project_local_extension_package() {
-    let temp_dir = TempDir::new().expect("test temp dir must be created");
-    let package = temp_dir.path().join(".ruby-fast-lsp/extensions/rspec-ruby");
-    copy_rspec_package(&package, "0.1.0-project");
-    let root_uri = Url::from_directory_path(temp_dir.path())
-        .expect("test workspace path must convert to a file URI");
-    let server = RubyLanguageServer::default();
-
-    server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            initialization_options: Some(serde_json::json!({
-                "workspaceTrusted": true,
-                "projectExtensionsEnabled": true
-            })),
-            ..InitializeParams::default()
-        })
-        .await
-        .expect("test server initialization must succeed");
-
-    let reports = server.extensions.registry().status_reports();
-    assert_eq!(reports.len(), 1);
-    assert_eq!(reports[0].id, "rspec-ruby");
-    assert_eq!(reports[0].version.as_deref(), Some("0.1.0-project"));
-    assert_eq!(reports[0].status, "loaded");
-}
-
-#[tokio::test]
-async fn dynamic_workspace_change_reconfigures_project_extensions() {
-    let temp_dir = TempDir::new().expect("test temp dir must be created");
-    copy_rspec_package(
-        &temp_dir.path().join(".ruby-fast-lsp/extensions/rspec-ruby"),
-        "0.1.0-dynamic-lsp",
-    );
-    let root_uri = Url::from_directory_path(temp_dir.path())
-        .expect("test workspace path must convert to a file URI");
-    let folder = WorkspaceFolder {
-        uri: root_uri,
-        name: "dynamic".to_string(),
-    };
-    let server = RubyLanguageServer::default();
-    server
-        .initialize(InitializeParams {
-            initialization_options: Some(serde_json::json!({
-                "workspaceTrusted": true,
-                "projectExtensionsEnabled": true
-            })),
-            ..InitializeParams::default()
-        })
-        .await
-        .expect("test server initialization must succeed");
-
-    server
-        .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
-            event: WorkspaceFoldersChangeEvent {
-                added: vec![folder.clone()],
-                removed: Vec::new(),
-            },
-        })
-        .await;
-    assert_eq!(
-        server.extensions.registry().status_reports()[0]
-            .version
-            .as_deref(),
-        Some("0.1.0-dynamic-lsp")
-    );
-
-    server
-        .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
-            event: WorkspaceFoldersChangeEvent {
-                added: Vec::new(),
-                removed: vec![folder],
-            },
-        })
-        .await;
-    assert!(server.extensions.registry().status_reports().is_empty());
 }
 
 #[test]
@@ -621,64 +582,6 @@ fn workspace_root_changes_add_and_remove_project_extensions() {
     assert!(registry.status_reports().is_empty());
 }
 
-#[tokio::test]
-async fn matching_watched_file_change_is_routed_to_manifest_extension() {
-    let temp_dir = TempDir::new().expect("test temp dir must be created");
-    let package = temp_dir.path().join("watched-file-failure");
-    write_watched_file_failure_package(&package);
-    let root_uri = Url::from_directory_path(temp_dir.path())
-        .expect("test workspace path must convert to a file URI");
-    let config = RubyFastLspConfig {
-        extension_packages: vec![package.to_string_lossy().into_owned()],
-        ..RubyFastLspConfig::default()
-    };
-    let server = RubyLanguageServer::default();
-    server.add_workspace(root_uri);
-    server.extensions.registry().configure_from_config(&config);
-    assert_eq!(
-        server.extensions.registry().status_reports()[0].status,
-        "loaded"
-    );
-
-    crate::lsp::handlers::notification::handle_did_change_watched_files(
-        &server,
-        DidChangeWatchedFilesParams {
-            changes: vec![FileEvent::new(
-                Url::from_file_path(temp_dir.path().join("README.md"))
-                    .expect("test nonmatching path must convert to URI"),
-                FileChangeType::CHANGED,
-            )],
-        },
-    )
-    .await;
-    assert_eq!(
-        server.extensions.registry().status_reports()[0].status,
-        "loaded"
-    );
-
-    crate::lsp::handlers::notification::handle_did_change_watched_files(
-        &server,
-        DidChangeWatchedFilesParams {
-            changes: vec![FileEvent::new(
-                Url::from_file_path(temp_dir.path().join("config/routes.rb"))
-                    .expect("test matching path must convert to URI"),
-                FileChangeType::CHANGED,
-            )],
-        },
-    )
-    .await;
-
-    let report = &server.extensions.registry().status_reports()[0];
-    assert_eq!(report.status, "failed");
-    assert!(
-        report
-            .last_error
-            .as_deref()
-            .is_some_and(|error| error.contains("files.changed")),
-        "INVARIANT VIOLATED: watched-file failure lacks event context. This is a bug because extension watcher failures must be diagnosable. Fix: retain files.changed in extension status."
-    );
-}
-
 #[test]
 fn watched_file_candidates_use_deepest_root_and_deduplicate() {
     let root = crate::test::harness::fixture_path("/workspace");
@@ -811,19 +714,19 @@ fn telemetry_classifies_calls_failures_rejections_and_conflicts_without_dimensio
     telemetry.record_disablement();
 
     let report = telemetry.report(2);
-    assert_eq!(report.guest_calls, 3);
-    assert_eq!(report.lifecycle_calls, 1);
-    assert_eq!(report.index_calls, 1);
-    assert_eq!(report.event_calls, 1);
-    assert_eq!(report.guest_failures, 2);
-    assert_eq!(report.guest_traps, 1);
-    assert_eq!(report.resource_limit_failures, 2);
-    assert_eq!(report.rejected_outputs, 1);
-    assert_eq!(report.patch_conflicts, 1);
-    assert_eq!(report.disablements, 1);
-    assert_eq!(report.total_guest_time_ns, 15);
-    assert_eq!(report.max_guest_time_ns, 7);
-    assert_eq!(report.project_instances, 2);
+    assert_eq!(report.get(ExtensionStat::GuestCalls), 3);
+    assert_eq!(report.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(report.get(ExtensionStat::IndexCalls), 1);
+    assert_eq!(report.get(ExtensionStat::EventCalls), 1);
+    assert_eq!(report.get(ExtensionStat::GuestFailures), 2);
+    assert_eq!(report.get(ExtensionStat::GuestTraps), 1);
+    assert_eq!(report.get(ExtensionStat::ResourceLimitFailures), 2);
+    assert_eq!(report.get(ExtensionStat::RejectedOutputs), 1);
+    assert_eq!(report.get(ExtensionStat::PatchConflicts), 1);
+    assert_eq!(report.get(ExtensionStat::Disablements), 1);
+    assert_eq!(report.get(ExtensionStat::TotalGuestTimeNs), 15);
+    assert_eq!(report.get(ExtensionStat::MaxGuestTimeNs), 7);
+    assert_eq!(report.get(ExtensionStat::ProjectInstances), 2);
 
     let serialized = serde_json::to_value(&report)
         .expect("extension telemetry must remain serializable through the status contract");
@@ -849,10 +752,10 @@ fn initialization_options_do_not_load_direct_wasm_files() {
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: initialization options loaded a direct wasm file. \
-         This is a bug because editor-installed extensions must be manifest packages. \
-         Fix: require extension.toml for initialization option extension paths."
+        what = "initialization options loaded a direct wasm file",
+        why = "editor-installed extensions must be manifest packages",
+        fix = "require extension.toml for initialization option extension paths",
     );
 }

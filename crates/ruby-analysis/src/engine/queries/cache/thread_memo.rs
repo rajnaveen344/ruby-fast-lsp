@@ -3,17 +3,19 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 
-use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
+use crate::core::{FullyQualifiedName, RubyMethod};
+use crate::engine::lookup::MethodAnswer;
 
-use super::memo::MethodReturnQueryKey;
+use super::memo::MethodMemoKey;
 
 const MAX_THREAD_METHOD_RETURN_CACHE_ENTRIES: usize = 8192;
 
-/// Thread-local memo of engine method-return lookups for one engine identity.
+/// Thread-local memo of engine method-return lookup answers for one engine
+/// identity, keyed like the per-source memo.
 ///
 /// Parallel project collection keeps this cache on the worker thread so identical
 /// `Integer#to_s` / `User#new` lookups reuse the same bounded result without
-/// sharing `AnalysisQueryCache` across a file batch. Explicit calls use the
+/// sharing `ViewCache` across a file batch. Explicit calls use the
 /// public cache when the receiver chain has no private/protected method of that
 /// name, so caller namespace is not part of the hot key. Identity changes drop
 /// the entries. A 256-entry cap left ~52k misses and ~4s of engine return
@@ -23,8 +25,8 @@ const MAX_THREAD_METHOD_RETURN_CACHE_ENTRIES: usize = 8192;
 /// cache only on method name.
 struct ThreadMethodReturnCache {
     identity: Option<(u64, u64)>,
-    entries: HashMap<MethodReturnQueryKey, Option<RubyType>>,
-    order: VecDeque<MethodReturnQueryKey>,
+    entries: HashMap<MethodMemoKey, MethodAnswer>,
+    order: VecDeque<MethodMemoKey>,
     non_public: HashMap<(FullyQualifiedName, RubyMethod), bool>,
     non_public_order: VecDeque<(FullyQualifiedName, RubyMethod)>,
 }
@@ -52,11 +54,11 @@ impl ThreadMethodReturnCache {
         }
     }
 
-    fn get(&mut self, key: &MethodReturnQueryKey) -> Option<Option<RubyType>> {
+    fn get(&mut self, key: &MethodMemoKey) -> Option<MethodAnswer> {
         self.entries.get(key).cloned()
     }
 
-    fn insert(&mut self, key: MethodReturnQueryKey, value: Option<RubyType>) {
+    fn insert(&mut self, key: MethodMemoKey, value: MethodAnswer) {
         if self.entries.contains_key(&key) {
             self.entries.insert(key, value);
             return;
@@ -96,10 +98,7 @@ thread_local! {
         RefCell::new(ThreadMethodReturnCache::default());
 }
 
-pub(super) fn thread_method_return_get(
-    identity: (u64, u64),
-    key: &MethodReturnQueryKey,
-) -> Option<Option<RubyType>> {
+pub(super) fn thread_method_get(identity: (u64, u64), key: &MethodMemoKey) -> Option<MethodAnswer> {
     THREAD_METHOD_RETURN_CACHE.with(|cell| {
         let mut cache = cell.borrow_mut();
         cache.bind(identity);
@@ -107,11 +106,7 @@ pub(super) fn thread_method_return_get(
     })
 }
 
-pub(super) fn thread_method_return_insert(
-    identity: (u64, u64),
-    key: MethodReturnQueryKey,
-    value: Option<RubyType>,
-) {
+pub(super) fn thread_method_insert(identity: (u64, u64), key: MethodMemoKey, value: MethodAnswer) {
     THREAD_METHOD_RETURN_CACHE.with(|cell| {
         let mut cache = cell.borrow_mut();
         cache.bind(identity);
@@ -119,7 +114,7 @@ pub(super) fn thread_method_return_insert(
     });
 }
 
-pub(super) fn thread_receiver_has_non_public(
+pub(super) fn thread_protected_return_may_differ(
     identity: (u64, u64),
     namespace: &FullyQualifiedName,
     method: RubyMethod,

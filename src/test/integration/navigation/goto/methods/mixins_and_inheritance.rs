@@ -131,6 +131,47 @@ Utils.helper$0
     .await;
 }
 
+#[tokio::test]
+async fn goto_module_function_method_through_module_receiver() {
+    check(
+        r#"
+module Utils
+  module_function
+
+  <def>def helper
+    "helping"
+  end</def>
+end
+
+Utils.helper$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_extended_module_method_through_subclass_receiver() {
+    check(
+        r#"
+module ClassHelpers
+  <def>def configure
+    "configured"
+  end</def>
+end
+
+class Base
+  extend ClassHelpers
+end
+
+class Child < Base
+end
+
+Child.configure$0
+"#,
+    )
+    .await;
+}
+
 /// Goto definition for method from included module.
 #[tokio::test]
 async fn goto_included_module_method() {

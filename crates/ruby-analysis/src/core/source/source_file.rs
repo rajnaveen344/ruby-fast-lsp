@@ -36,17 +36,17 @@ impl LibraryPackageId {
     pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
         let name = name.into();
         let version = version.into();
-        assert!(
+        invariant!(
             !name.is_empty(),
-            "INVARIANT VIOLATED: library package name is empty. \
-             This is a bug because gem package identity requires a Bundler/GemInfo name. \
-             Fix: pass gem_info.name when constructing LibraryPackageId."
+            what = "library package name is empty",
+            why = "gem package identity requires a Bundler/GemInfo name",
+            fix = "pass gem_info.name when constructing LibraryPackageId",
         );
-        assert!(
+        invariant!(
             !version.is_empty(),
-            "INVARIANT VIOLATED: library package version is empty. \
-             This is a bug because gem package identity requires a locked version. \
-             Fix: pass gem_info.locked_version when constructing LibraryPackageId."
+            what = "library package version is empty",
+            why = "gem package identity requires a locked version",
+            fix = "pass gem_info.locked_version when constructing LibraryPackageId",
         );
         Self { name, version }
     }

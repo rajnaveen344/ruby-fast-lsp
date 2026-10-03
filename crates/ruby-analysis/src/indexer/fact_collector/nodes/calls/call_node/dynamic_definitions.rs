@@ -4,10 +4,12 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, TypeFact, TypeProvenance,
     TypeSubject,
 };
-use crate::indexer::mixin_ref_from_node;
+use crate::indexer::documents::scope_rules::{
+    implicit_singleton_namespace, resolve_receiver_namespace,
+};
 use ruby_prism::{CallNode, Node};
 
-use crate::indexer::yard::YardTypeConverter;
+use crate::indexer::yard::converter::YardTypeConverter;
 
 use super::names::{define_method_name_and_range, direct_attr_name_and_range};
 use crate::indexer::fact_collector::FactCollector;
@@ -131,55 +133,12 @@ impl FactCollector {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        if let Some(namespace) = self.resolve_const_get_receiver_namespace(receiver) {
-            return Some(namespace);
-        }
-
-        let receiver_ref = mixin_ref_from_node(receiver)?;
-        let mut search = if receiver_ref.absolute {
-            Vec::new()
-        } else {
-            self.scope_tracker.get_ns_stack()
-        };
-
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(receiver_ref.parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.namespace_is_known(&fqn) {
-                return Some(candidate);
-            }
-            if receiver_ref.absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(receiver_ref.parts.clone());
-        self.namespace_is_known(&fqn).then_some(receiver_ref.parts)
-    }
-
-    fn resolve_const_get_receiver_namespace(
-        &self,
-        receiver: &Node<'_>,
-    ) -> Option<Vec<RubyConstant>> {
-        let call = receiver.as_call_node()?;
-        if call.name().as_slice() != b"const_get" {
-            return None;
-        }
-        let Some(base_receiver) = call.receiver() else {
-            return None;
-        };
-        let arguments = call.arguments()?;
-        let first = arguments.arguments().iter().next()?;
-        let (name, _) = direct_attr_name_and_range(self, &first)?;
-        let Ok(constant) = RubyConstant::new(&name) else {
-            return None;
-        };
-        let mut namespace = self.resolve_constant_receiver_namespace(&base_receiver)?;
-        namespace.push(constant);
-        let fqn = FullyQualifiedName::namespace(namespace.clone());
-        self.namespace_is_known(&fqn).then_some(namespace)
+        resolve_receiver_namespace(
+            receiver,
+            implicit_singleton_namespace(&self.scope_tracker).as_deref(),
+            &self.scope_tracker.get_ns_stack(),
+            &|fqn| self.namespace_is_known(fqn),
+        )
     }
 
     fn push_direct_define_method_return_type(
@@ -204,7 +163,7 @@ impl FactCollector {
             return;
         }
         let return_type = YardTypeConverter::convert_multiple(&all_return_types);
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(FullyQualifiedName::method(namespace, method)),
             return_type,
             range,
@@ -234,7 +193,7 @@ impl FactCollector {
         let subject = TypeSubject::MethodReturn(FullyQualifiedName::method(namespace, method));
         if self
             .facts
-            .types
+            .flow_types
             .facts_for(&subject)
             .iter()
             .any(|fact| fact.range == range)
@@ -245,7 +204,7 @@ impl FactCollector {
             return;
         };
         let fact = TypeFact::new(subject, return_type, range, TypeProvenance::Inferred);
-        self.facts.types.add(fact.clone());
-        self.facts.direct.types.push(fact);
+        self.facts.flow_types.add(fact.clone());
+        self.facts.analysis.types.push(fact);
     }
 }

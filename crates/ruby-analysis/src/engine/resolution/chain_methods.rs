@@ -8,15 +8,16 @@ use crate::core::{
     RubyConstant, RubyMethod,
 };
 use crate::engine::state::EffectiveMethodFactMatch;
+use crate::invariant::ExpectInvariant;
 
 pub(in crate::engine) fn execution_context_application_targets(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     template: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut targets = engine
         .graph_stored_edges_from_kind(template, GraphEdgeKind::ExecutionContextApplication)
         .into_iter()
-        .map(|edge| engine.expand_interned_fqn(edge.target))
+        .map(|edge| engine.names.expand_interned_fqn(edge.target))
         .collect::<Vec<_>>();
     targets.sort_by_key(ToString::to_string);
     targets.dedup();
@@ -24,7 +25,7 @@ pub(in crate::engine) fn execution_context_application_targets(
 }
 
 pub(super) fn method_callee_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     resolution: MethodCalleeResolution,
@@ -47,7 +48,7 @@ pub(super) fn method_callee_in_chain(
 }
 
 pub(in crate::engine) fn method_facts_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     allow_private: bool,
@@ -55,6 +56,7 @@ pub(in crate::engine) fn method_facts_in_chain(
 ) -> Option<(FullyQualifiedName, Vec<MethodFact>)> {
     for ancestor in ancestor_chain {
         let mut facts = engine
+            .view()
             .method_facts_matching_owner_name(ancestor, method)
             .into_iter()
             .filter(|fact| {
@@ -77,22 +79,24 @@ pub(in crate::engine) fn method_facts_in_chain(
 
         if facts.iter().any(|fact| {
             engine
+                .view()
                 .file(fact.range.file_id)
-                .expect(
-                    "INVARIANT VIOLATED: method fact references an unregistered source file. \
-                     This is a bug because engine facts must never outlive their file metadata. \
-                     Fix: register the file before replacing method facts.",
+                .expect_invariant(
+                    "method fact references an unregistered source file",
+                    "engine facts must never outlive their file metadata",
+                    "register the file before replacing method facts",
                 )
                 .kind
                 != crate::core::SourceKind::Signature
         }) {
             facts.retain(|fact| {
                 engine
+                    .view()
                     .file(fact.range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: method fact references an unregistered source file. \
-                         This is a bug because source precedence requires valid file metadata. \
-                         Fix: remove facts through the per-file replacement lifecycle.",
+                    .expect_invariant(
+                        "method fact references an unregistered source file",
+                        "source precedence requires valid file metadata",
+                        "remove facts through the per-file replacement lifecycle",
                     )
                     .kind
                     != crate::core::SourceKind::Signature
@@ -117,12 +121,13 @@ pub(in crate::engine) fn method_facts_in_chain(
 }
 
 pub(super) fn private_method_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
 ) -> bool {
     ancestor_chain.iter().any(|ancestor| {
         engine
+            .view()
             .method_facts_matching_owner_name(ancestor, method)
             .iter()
             .any(|fact| {
@@ -136,7 +141,7 @@ pub(super) fn private_method_in_chain(
 }
 
 pub(in crate::engine) fn effective_method_visibility_for_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     fact: &crate::core::MethodFact,
     method: &RubyMethod,
@@ -150,14 +155,15 @@ pub(in crate::engine) fn effective_method_visibility_for_chain(
 }
 
 fn method_visibility_override_for_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     for ancestor in ancestor_chain {
-        let mut overrides =
-            engine.method_visibility_overrides_matching_owner_name(ancestor, method);
+        let mut overrides = engine
+            .view()
+            .method_visibility_overrides_matching_owner_name(ancestor, method);
         overrides.sort_by_key(|fact| {
             (
                 fact.range.file_id,
@@ -178,13 +184,13 @@ fn method_visibility_override_for_chain(
 }
 
 pub(super) fn global_visibility_override_for_method_owner(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut public_overrides = Vec::new();
     let mut non_public_overrides = Vec::new();
-    for override_fact in engine.all_method_visibility_overrides() {
+    for override_fact in engine.view().all_method_visibility_overrides() {
         if override_fact.method != *method {
             continue;
         }
@@ -218,12 +224,13 @@ pub(super) fn global_visibility_override_for_method_owner(
 }
 
 pub(super) fn global_visibility_override_for_method_owner_matching(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
     visibility: MethodVisibility,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut overrides = engine
+        .view()
         .all_method_visibility_overrides()
         .into_iter()
         .filter(|override_fact| {
@@ -248,7 +255,7 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
 }
 
 fn method_visibility_allowed(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     visibility: MethodVisibility,
     owner: &FullyQualifiedName,
     allow_private: bool,
@@ -266,7 +273,7 @@ fn method_visibility_allowed(
 }
 
 pub(in crate::engine) fn protected_method_visible_from(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     protected_owner: &FullyQualifiedName,
     caller_namespace: &FullyQualifiedName,
 ) -> bool {
@@ -291,7 +298,7 @@ pub(super) fn receiver_only_callee(
 }
 
 pub(super) fn method_missing_callee_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
 ) -> Option<ResolvedMethodCallee> {
     let method_missing = method_missing_method();
@@ -310,12 +317,12 @@ pub(super) fn method_missing_callee_in_chain(
 }
 
 pub(super) fn default_basic_object_method_missing_fact(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fact: &MethodFact,
 ) -> bool {
     fact.owner == basic_object_instance_fqn()
         && method_name_from_fact(fact) == method_missing_method()
-        && engine.file(fact.range.file_id).is_some_and(|file| {
+        && engine.view().file(fact.range.file_id).is_some_and(|file| {
             matches!(
                 file.kind,
                 crate::core::SourceKind::Stub | crate::core::SourceKind::Signature
@@ -324,13 +331,13 @@ pub(super) fn default_basic_object_method_missing_fact(
 }
 
 fn default_basic_object_method_missing_callee(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     callee: &ResolvedMethodCallee,
 ) -> bool {
     callee.owner == basic_object_instance_fqn()
         && !callee.definition_ranges.is_empty()
         && callee.definition_ranges.iter().all(|range| {
-            engine.file(range.file_id).is_some_and(|file| {
+            engine.view().file(range.file_id).is_some_and(|file| {
                 matches!(
                     file.kind,
                     crate::core::SourceKind::Stub | crate::core::SourceKind::Signature
@@ -341,17 +348,17 @@ fn default_basic_object_method_missing_callee(
 
 fn basic_object_instance_fqn() -> FullyQualifiedName {
     FullyQualifiedName::namespace_with_kind(
-        vec![RubyConstant::new("BasicObject").expect(
-            "INVARIANT VIOLATED: `BasicObject` is not a valid Ruby constant. \
-             This is a bug because Ruby core class names must be valid constants. \
-             Fix: update RubyConstant validation to accept core Ruby class names.",
+        vec![RubyConstant::new("BasicObject").expect_invariant(
+            "`BasicObject` is not a valid Ruby constant",
+            "ruby core class names must be valid constants",
+            "update RubyConstant validation to accept core Ruby class names",
         )],
         crate::core::NamespaceKind::Instance,
     )
 }
 
 pub(super) fn method_callee_after_owner(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     owner: &FullyQualifiedName,
     method: &RubyMethod,
@@ -380,15 +387,15 @@ pub(super) fn method_callee_after_owner(
 }
 
 pub(in crate::engine) fn method_missing_method() -> RubyMethod {
-    RubyMethod::new("method_missing").expect(
-        "INVARIANT VIOLATED: `method_missing` is not a valid Ruby method name. \
-         This is a bug because Ruby's fallback dispatch method must be representable. \
-         Fix: update RubyMethod validation to accept core Ruby method names.",
+    RubyMethod::new("method_missing").expect_invariant(
+        "`method_missing` is not a valid Ruby method name",
+        "ruby's fallback dispatch method must be representable",
+        "update RubyMethod validation to accept core Ruby method names",
     )
 }
 
 pub(in crate::engine) fn chain_has_custom_method_missing(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
 ) -> bool {
     let method = method_missing_method();

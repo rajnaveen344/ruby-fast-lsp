@@ -3,8 +3,8 @@
 use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
-use crate::engine::AnalysisQuery;
 use crate::inference::r#type::shape as shape_reads;
+use crate::inference::semantics::{ReceiverAccess, Semantics};
 
 /// Resolve every reachable member of a union before publishing a call result.
 ///
@@ -19,8 +19,8 @@ pub(crate) fn resolve_proven_union(
 }
 
 /// Resolve a method call return type for a receiver type.
-pub fn method_call_return_type(
-    query: Option<&AnalysisQuery<'_>>,
+pub fn method_call_return_type<S: Semantics + ?Sized>(
+    query: Option<&S>,
     receiver_type: &RubyType,
     method_name: &str,
 ) -> Option<RubyType> {
@@ -28,26 +28,16 @@ pub fn method_call_return_type(
 }
 
 /// Resolve a method call while retaining why a concrete result was withheld.
-pub fn method_call_type_outcome(
-    query: Option<&AnalysisQuery<'_>>,
+pub fn method_call_type_outcome<S: Semantics + ?Sized>(
+    query: Option<&S>,
     receiver_type: &RubyType,
     method_name: &str,
 ) -> TypeInferenceOutcome {
     method_call_type_outcome_with_private(query, receiver_type, method_name, true)
 }
 
-pub fn method_call_return_type_with_private(
-    query: Option<&AnalysisQuery<'_>>,
-    receiver_type: &RubyType,
-    method_name: &str,
-    allow_private: bool,
-) -> Option<RubyType> {
-    method_call_type_outcome_with_private(query, receiver_type, method_name, allow_private)
-        .into_proven_type()
-}
-
-pub fn method_call_type_outcome_with_private(
-    query: Option<&AnalysisQuery<'_>>,
+pub fn method_call_type_outcome_with_private<S: Semantics + ?Sized>(
+    query: Option<&S>,
     receiver_type: &RubyType,
     method_name: &str,
     allow_private: bool,
@@ -55,8 +45,8 @@ pub fn method_call_type_outcome_with_private(
     method_call_type_outcome_with_visibility(query, receiver_type, method_name, allow_private, None)
 }
 
-pub fn method_call_return_type_with_visibility(
-    query: Option<&AnalysisQuery<'_>>,
+pub fn method_call_return_type_with_visibility<S: Semantics + ?Sized>(
+    query: Option<&S>,
     receiver_type: &RubyType,
     method_name: &str,
     allow_private: bool,
@@ -72,8 +62,8 @@ pub fn method_call_return_type_with_visibility(
     .into_proven_type()
 }
 
-pub fn method_call_type_outcome_with_visibility(
-    query: Option<&AnalysisQuery<'_>>,
+pub fn method_call_type_outcome_with_visibility<S: Semantics + ?Sized>(
+    query: Option<&S>,
     receiver_type: &RubyType,
     method_name: &str,
     allow_private: bool,
@@ -119,7 +109,14 @@ pub fn method_call_type_outcome_with_visibility(
 
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
-            return TypeInferenceOutcome::proven(RubyType::Class(fqn.clone()));
+            let instance = RubyType::Class(fqn.clone());
+            return match query {
+                Some(query) => query.constructor_result(fqn).into_type_outcome(instance),
+                None => TypeInferenceOutcome::from_optional(
+                    super::constructor::seed_constructor_type(fqn),
+                    UnknownReason::UnresolvedMethodReturn,
+                ),
+            };
         }
     }
 
@@ -134,15 +131,17 @@ pub fn method_call_type_outcome_with_visibility(
         return TypeInferenceOutcome::unknown(UnknownReason::InvalidMethodName);
     };
     if let Some(query) = query {
-        for namespace in AnalysisQuery::receiver_type_to_method_namespaces(receiver_type) {
-            let return_type = if allow_private {
-                query.method_return_type_for_receiver(&namespace, &method)
-            } else if let Some(caller) = protected_caller {
-                query.method_return_type_for_protected_receiver(&namespace, &method, caller)
-            } else {
-                query.method_return_type_for_public_receiver(&namespace, &method)
-            };
-            if let Some(return_type) = return_type {
+        let access = if allow_private {
+            ReceiverAccess::Any
+        } else if let Some(caller) = protected_caller {
+            ReceiverAccess::Protected { caller }
+        } else {
+            ReceiverAccess::Public
+        };
+        for namespace in crate::core::receiver_type_to_method_namespaces(receiver_type) {
+            if let Some(return_type) =
+                query.receiver_method_return_type(&namespace, &method, access)
+            {
                 return TypeInferenceOutcome::from_optional(
                     Some(return_type),
                     UnknownReason::UnresolvedMethodReturn,
@@ -356,15 +355,14 @@ mod tests {
     fn union_receiver_reports_machine_readable_unknown_reason() {
         let receiver = RubyType::Union(vec![RubyType::string(), RubyType::integer()]);
 
-        let outcome = method_call_type_outcome(None, &receiver, "length");
+        let outcome = method_call_type_outcome(None::<&dyn Semantics>, &receiver, "length");
 
-        assert_eq!(
+        invariant_eq!(
             outcome.unknown_reason(),
             Some(UnknownReason::IncompleteUnionMember),
-            "INVARIANT VIOLATED: an incomplete union call did not retain its Unknown reason. \
-             This is a bug because CLI and LSP consumers need one shared, deterministic \
-             explanation for withheld concrete types. Fix: return a TypeOutcome carrying \
-             IncompleteUnionMember when any reachable receiver member cannot resolve."
+            what = "an incomplete union call lost its Unknown reason",
+            why = "CLI and LSP need one explanation for withheld types",
+            fix = "return IncompleteUnionMember when any receiver member is unresolved",
         );
         assert_eq!(
             outcome
@@ -379,13 +377,12 @@ mod tests {
     fn union_receiver_requires_a_return_type_for_every_member() {
         let receiver = RubyType::Union(vec![RubyType::string(), RubyType::integer()]);
 
-        assert_eq!(
-            method_call_return_type(None, &receiver, "length"),
+        invariant_eq!(
+            method_call_return_type(None::<&dyn Semantics>, &receiver, "length"),
             None,
-            "INVARIANT VIOLATED: a union call discarded the unresolved Integer#length branch. \
-             This is a bug because a concrete chained-call type requires proof for every \
-             reachable receiver member. Fix: return Unknown/None when any union member cannot \
-             resolve the method return type."
+            what = "a union call discarded the unresolved Integer#length branch",
+            why = "a concrete chained-call type requires proof for every reachable receiver member",
+            fix = "return Unknown/None when any union member cannot resolve the method return type",
         );
     }
 
@@ -393,13 +390,12 @@ mod tests {
     fn union_receiver_combines_returns_when_every_member_is_proven() {
         let receiver = RubyType::Union(vec![RubyType::string(), RubyType::integer()]);
 
-        assert_eq!(
-            method_call_return_type(None, &receiver, "to_s"),
+        invariant_eq!(
+            method_call_return_type(None::<&dyn Semantics>, &receiver, "to_s"),
             Some(RubyType::string()),
-            "INVARIANT VIOLATED: a union call with two proven String returns did not resolve. \
-             This is a bug because proof-first inference must retain complete evidence rather \
-             than degrading all union receivers to Unknown. Fix: combine the return type from \
-             every union member after all members resolve."
+            what = "a union call with two proven String returns did not resolve",
+            why = "complete union evidence must not degrade to Unknown",
+            fix = "combine returns from every member once all resolve",
         );
     }
 }

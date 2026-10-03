@@ -8,15 +8,16 @@ use super::lookup_chain::{
     method_lookup_chain, method_lookup_chain_has_unresolved_dependency_from_graph,
 };
 use super::{module_instance_receivers, namespace_target_exists, receiver_type_members};
+use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, ResolvedMethodCallee,
-    RubyMethod, RubyType, StoredMethodReferenceCandidate,
+    RubyMethod, RubyType,
 };
-use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::definitions::DefinitionLookupChains;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
+use crate::invariant::ExpectInvariant;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub(in crate::engine) fn method_candidate_callees(
         &self,
         candidate: &StoredMethodReferenceCandidate,
@@ -29,9 +30,15 @@ impl<'a> AnalysisQuery<'a> {
         candidate: &StoredMethodReferenceCandidate,
         mut lookup_chains: Option<&mut DefinitionLookupChains>,
     ) -> Vec<ResolvedMethodCallee> {
-        let owner_lookup = self.engine.names.const_lookup(candidate.owner).expect(
-            "INVARIANT VIOLATED: method rename candidate points to a missing owner lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern method owners before storing candidates.",
-        );
+        let owner_lookup = self
+            .engine
+            .names
+            .const_lookup(candidate.owner)
+            .expect_invariant(
+                "method rename candidate points to a missing owner lookup",
+                "candidates contain only interned lookup ids",
+                "intern method owners before storing candidates",
+            );
         let owner = FullyQualifiedName::namespace_with_kind(
             owner_lookup.path.to_vec(),
             candidate.owner_kind,
@@ -41,34 +48,44 @@ impl<'a> AnalysisQuery<'a> {
             .as_deref()
             .and_then(|diagnostics| diagnostics.receiver_type.as_deref())
             .filter(|receiver_type| matches!(receiver_type, RubyType::Union(_)));
-        assert!(
+        invariant!(
             grouped_receiver_type.is_none() || !candidate.is_super,
-            "INVARIANT VIOLATED: a super reference carries grouped receiver metadata. This is a bug because super has one lexical owner chain rather than a value receiver union. Fix: attach receiver_type only to explicit call-node receiver inference."
+            what = "a super reference carries grouped receiver metadata",
+            why = "super has one lexical owner chain rather than a value receiver union",
+            fix = "attach receiver_type only to explicit call-node receiver inference",
         );
         let callees = if let Some(receiver_type) = grouped_receiver_type {
             match candidate.access {
-                MethodReferenceAccess::InstanceMethodReflection => panic!(
-                    "INVARIANT VIOLATED: instance-method reflection has a grouped value receiver. This is a bug because reflection names one namespace. Fix: collect reflection separately from value dispatch."
+                MethodReferenceAccess::InstanceMethodReflection => unreachable_invariant!(
+                    what = "instance-method reflection has a grouped value receiver",
+                    why = "reflection names one namespace",
+                    fix = "collect reflection separately from value dispatch",
                 ),
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
-                    .resolve_method_callees_for_type_inner(receiver_type, &candidate.method, true, None, lookup_chains.as_deref_mut())
+                    .resolve_method_callees_for_type_inner(
+                        receiver_type,
+                        &candidate.method,
+                        true,
+                        None,
+                        lookup_chains.as_deref_mut(),
+                    )
                     .unwrap_or_default(),
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
                         .caller
-                        .and_then(|caller| self.engine.fqn_for_id(caller))
+                        .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
-                            let mut owners = self
-                                .engine
-                                .method_facts_for(caller)
+                            let mut owners = self.method_facts_for(caller)
                                 .into_iter()
                                 .map(|fact| fact.owner)
                                 .collect::<Vec<_>>();
                             owners.sort_by_key(ToString::to_string);
                             owners.dedup();
                             let caller = if owners.len() == 1 {
-                                owners.pop().expect(
-                                    "INVARIANT VIOLATED: one grouped rename caller owner disappeared after length validation. This is a bug because caller selection must be atomic. Fix: keep the local owner vector unchanged before pop.",
+                                owners.pop().expect_invariant(
+                                    "one grouped rename caller owner disappeared after length validation",
+                                    "caller selection must be atomic",
+                                    "keep the local owner vector unchanged before pop",
                                 )
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
@@ -77,7 +94,13 @@ impl<'a> AnalysisQuery<'a> {
                         });
                     protected
                         .or_else(|| {
-                            self.resolve_method_callees_for_type_inner(receiver_type, &candidate.method, false, None, lookup_chains.as_deref_mut())
+                            self.resolve_method_callees_for_type_inner(
+                                receiver_type,
+                                &candidate.method,
+                                false,
+                                None,
+                                lookup_chains.as_deref_mut(),
+                            )
                         })
                         .unwrap_or_default()
                 }
@@ -88,19 +111,10 @@ impl<'a> AnalysisQuery<'a> {
                 .collect::<Vec<_>>()
         } else {
             match candidate.access {
-                MethodReferenceAccess::InstanceMethodReflection => {
-                    let chain = method_lookup_chain(self.engine, &owner);
-                    method_callee_in_chain(
-                        self.engine,
-                        &chain,
-                        &candidate.method,
-                        MethodCalleeResolution::Exact,
-                        true,
-                        None,
-                    )
+                MethodReferenceAccess::InstanceMethodReflection => self
+                    .resolve_reflected_method_callee(&owner, &candidate.method)
                     .into_iter()
-                    .collect()
-                }
+                    .collect(),
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
                     .resolve_method_callees_inner(
                         &owner,
@@ -113,19 +127,19 @@ impl<'a> AnalysisQuery<'a> {
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
                         .caller
-                        .and_then(|caller| self.engine.fqn_for_id(caller))
+                        .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
-                            let mut owners = self
-                                .engine
-                                .method_facts_for(caller)
+                            let mut owners = self.method_facts_for(caller)
                                 .into_iter()
                                 .map(|fact| fact.owner)
                                 .collect::<Vec<_>>();
                             owners.sort_by_key(ToString::to_string);
                             owners.dedup();
                             let caller = if owners.len() == 1 {
-                                owners.pop().expect(
-                                    "INVARIANT VIOLATED: one method rename caller owner disappeared after length validation. This is a bug because caller selection must be atomic. Fix: keep the local owner vector unchanged before pop.",
+                                owners.pop().expect_invariant(
+                                    "one method rename caller owner disappeared after length validation",
+                                    "caller selection must be atomic",
+                                    "keep the local owner vector unchanged before pop",
                                 )
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
@@ -169,84 +183,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
-    pub fn resolve_method_callees(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, true, None, None)
-    }
-
-    pub fn resolve_method_callees_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        cache.method_callees(
-            self.engine.query_cache_identity(),
-            namespace_fqn,
-            *method,
-            MethodReturnQueryAccess::Private,
-            || self.resolve_method_callees(namespace_fqn, method),
-        )
-    }
-
-    pub fn resolve_public_method_callees(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, false, None, None)
-    }
-
-    pub fn resolve_protected_method_callees(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(
-            namespace_fqn,
-            method,
-            false,
-            Some(caller_namespace_fqn),
-            None,
-        )
-    }
-
-    pub fn resolve_method_callees_for_type(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(receiver_type, method, true, None, None)
-    }
-
-    pub fn resolve_public_method_callees_for_type(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(receiver_type, method, false, None, None)
-    }
-
-    pub fn resolve_protected_method_callees_for_type(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(
-            receiver_type,
-            method,
-            false,
-            Some(caller_namespace_fqn),
-            None,
-        )
-    }
-
+impl<'a> View<'a> {
     pub(in crate::engine) fn resolve_method_callees_for_type_inner(
         &self,
         receiver_type: &RubyType,
@@ -258,7 +195,7 @@ impl<'a> AnalysisQuery<'a> {
         let members = receiver_type_members(receiver_type);
         let mut all_callees = Vec::new();
         for member in members {
-            let namespaces = Self::receiver_type_to_method_namespaces(member);
+            let namespaces = crate::core::receiver_type_to_method_namespaces(member);
             if namespaces.is_empty() {
                 return None;
             }
@@ -404,7 +341,25 @@ impl<'a> AnalysisQuery<'a> {
         Some(callees)
     }
 
-    pub fn resolve_super_method_callee(
+    /// `instance_method(:name)` reflection: the exact winner on the
+    /// namespace's own chain, without dispatch to module includers.
+    pub(in crate::engine) fn resolve_reflected_method_callee(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<ResolvedMethodCallee> {
+        let chain = method_lookup_chain(self.engine, namespace_fqn);
+        method_callee_in_chain(
+            self.engine,
+            &chain,
+            method,
+            MethodCalleeResolution::Exact,
+            true,
+            None,
+        )
+    }
+
+    pub(in crate::engine) fn resolve_super_method_callee(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
@@ -421,7 +376,7 @@ impl<'a> AnalysisQuery<'a> {
 /// Retain the proven chain starting at the callable winner. Earlier namespaces
 /// rejected by visibility/availability cannot claim navigation priority.
 fn retain_definition_lookup_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     lookup_chains: Option<&mut DefinitionLookupChains>,
     receiver: &FullyQualifiedName,
     winner: &FullyQualifiedName,
@@ -433,9 +388,14 @@ fn retain_definition_lookup_chain(
     if method_lookup_chain_has_unresolved_dependency_from_graph(engine, receiver) {
         return;
     }
-    let start = chain.iter().position(|owner| owner == winner).expect(
-        "INVARIANT VIOLATED: a method winner is absent from its lookup chain. This is a bug because ranking must use the chain that selected the callee. Fix: retain the owning namespace returned by method lookup.",
-    );
+    let start = chain
+        .iter()
+        .position(|owner| owner == winner)
+        .expect_invariant(
+            "a method winner is absent from its lookup chain",
+            "ranking must use the chain that selected the callee",
+            "retain the owning namespace returned by method lookup",
+        );
     chain.drain(..start);
     chains.push(chain);
 }

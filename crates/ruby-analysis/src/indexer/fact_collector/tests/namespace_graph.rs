@@ -1,8 +1,8 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, RubyConstant, RubyType,
-    SourceKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    FileAnalysis, FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, RubyConstant,
+    RubyType, SourceKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
 use parking_lot::RwLock;
@@ -16,7 +16,7 @@ use url::Url;
 fn recovered_invalid_namespace_does_not_unbalance_an_enclosing_method_context() {
     let source = "def outer\n  def self.forName(module, name); end\nend\n";
     let uri = Url::parse("file:///workspace/lib/recovered.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/recovered.rb"),
         content: source.to_string(),
@@ -45,7 +45,7 @@ fn shared_known_namespaces_are_immutable_while_file_declarations_stay_local() {
     let shared = Arc::new(HashSet::from([shared_namespace.clone()]));
     let source = "class Local\nend\n";
     let uri = Url::parse("file:///workspace/lib/local.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/local.rb"),
         content: source.to_string(),
@@ -107,7 +107,7 @@ fn shared_known_namespaces_are_immutable_while_file_declarations_stay_local() {
 fn qualified_class_superclass_uses_predeclaration_lexical_context() {
     let source = "class BigDecimal\n  def to_s\n    \"base\"\n  end\nend\n\nmodule SitemapGenerator\nend\n\nclass SitemapGenerator::BigDecimal < BigDecimal\n  alias_method :original_to_s, :to_s\nend\n";
     let uri = Url::parse("file:///workspace/core_ext/big_decimal.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/core_ext/big_decimal.rb"),
         content: source.to_string(),
@@ -129,7 +129,7 @@ fn qualified_class_superclass_uses_predeclaration_lexical_context() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| edge.kind == GraphEdgeKind::Superclass
@@ -140,7 +140,7 @@ fn qualified_class_superclass_uses_predeclaration_lexical_context() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .all(|edge| edge.kind != GraphEdgeKind::Superclass
@@ -154,7 +154,7 @@ fn qualified_class_superclass_uses_predeclaration_lexical_context() {
 fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
     let source = "class PlatformApp < Object\nend\n";
     let uri = Url::parse("file:///workspace/lib/api_app.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/api_app.rb"),
         content: source.to_string(),
@@ -164,9 +164,9 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
         FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
     let constant = FullyQualifiedName::constant(vec![RubyConstant::new("PlatformApp").unwrap()]);
     // Prior didOpen / earlier pass left the ordinary class ClassReference in the engine.
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 platform_app.clone(),
                 GraphNodeKind::Class,
@@ -190,12 +190,12 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
     collector.visit(&parse.node());
 
     assert!(
-            collector.facts.direct
+            collector.facts.analysis
                 .graph_nodes
                 .iter()
                 .any(|fact| fact.fqn == platform_app && fact.kind == GraphNodeKind::Class),
             "recollecting class PlatformApp while its ClassReference remains visible must still emit the class graph node; nodes={:?}",
-            collector.facts.direct
+            collector.facts.analysis
                 .graph_nodes
                 .iter()
                 .map(|fact| fact.fqn.to_string())
@@ -204,13 +204,13 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| { edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app })
             || collector
                 .facts
-                .direct
+                .analysis
                 .unresolved_graph_edges
                 .iter()
                 .any(|edge| {
@@ -232,7 +232,7 @@ fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() 
                           end\n\
                         end\n";
     let uri = Url::parse("file:///workspace/lib/constant_alias.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/constant_alias.rb"),
         content: source.to_string(),
@@ -248,7 +248,7 @@ fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() 
 
     let method = collector
         .facts
-        .direct
+        .analysis
         .methods
         .iter()
         .find(|fact| fact.fqn.name() == "from_alias")
@@ -262,7 +262,7 @@ fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() 
         "class Alias must reopen the class object stored in Alias"
     );
     assert!(
-        collector.facts.direct.graph_nodes.iter().all(|fact| {
+        collector.facts.analysis.graph_nodes.iter().all(|fact| {
             fact.fqn
                 != FullyQualifiedName::namespace(vec![
                     RubyConstant::new("Types").unwrap(),
@@ -288,7 +288,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
                         end\n\
                       end\n";
     let uri = Url::parse("file:///workspace/sass/multibyte_string_scanner.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/sass/multibyte_string_scanner.rb"),
         content: source.to_string(),
@@ -311,7 +311,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
         FullyQualifiedName::namespace(vec![RubyConstant::new("StringScanner").unwrap()]);
     let method = collector
         .facts
-        .direct
+        .analysis
         .methods
         .iter()
         .find(|fact| fact.fqn.name() == "wrapped_string")
@@ -324,7 +324,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| edge.kind == GraphEdgeKind::Superclass
@@ -335,7 +335,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .all(|edge| edge.kind != GraphEdgeKind::Superclass
@@ -349,7 +349,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
 fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
     let source = "";
     let uri = Url::parse("file:///workspace/lib/invalid_inheritance.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/invalid_inheritance.rb"),
         content: source.to_string(),
@@ -393,6 +393,7 @@ fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
     assert_eq!(
         collector
             .facts
+            .analysis
             .diagnostics
             .iter()
             .map(|diagnostic| diagnostic.code.as_str())
@@ -400,7 +401,7 @@ fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
         vec!["cyclic-inheritance", "conflicting-superclass"]
     );
     assert_eq!(
-        collector.facts.direct.graph_edges.len(),
+        collector.facts.analysis.graph_edges.len(),
         2,
         "only the two valid ancestry edges may become same-pass semantic input"
     );

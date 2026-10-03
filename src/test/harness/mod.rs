@@ -27,7 +27,7 @@ mod inlay_hints;
 mod paths;
 mod process;
 
-pub use check::{check, check_multi_file};
+pub use check::{check, check_multi_file, check_project};
 pub use fake_editor::FakeEditor;
 pub use paths::{fixture_path, fixture_uri, fixture_uri_path};
 

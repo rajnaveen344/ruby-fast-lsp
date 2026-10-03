@@ -1,13 +1,8 @@
-use std::sync::Arc;
-
-use parking_lot::RwLock;
-use ruby_analysis::core::{
-    FullyQualifiedName, MethodCalleeResolution, NamespaceKind, RubyConstant, RubyMethod,
-};
-use ruby_analysis::engine::AnalysisQueryCache;
+use crate::invariant::ExpectInvariant;
+use ruby_analysis::core::MethodReceiver as CoreMethodReceiver;
+use ruby_analysis::core::{MethodCalleeResolution, NamespaceKind, RubyConstant, RubyMethod};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
 use ruby_fast_lsp_extension_api::{
     Argument, ArgumentValue, CallContext, Keyword, NamespaceKind as AbiNamespaceKind, Receiver,
     ResolvedCall, ResolvedCallee, SourcePosition, SourceRange,
@@ -105,56 +100,16 @@ pub(in crate::environment::extensions) fn resolved_core_callees_for_call(
         .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
         .unwrap_or(CoreMethodReceiver::None);
 
-    resolved_core_callees_for_call_analysis(
-        visitor.analysis_engine(),
-        visitor.analysis_query_cache(),
-        &core_receiver,
-        &method,
-        &visitor.scope_tracker().get_ns_stack(),
-        visitor.scope_tracker().current_method_context(),
-    )
-}
-
-fn resolved_core_callees_for_call_analysis(
-    engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    cache: &AnalysisQueryCache,
-    receiver: &CoreMethodReceiver,
-    method: &RubyMethod,
-    current_namespace: &[RubyConstant],
-    namespace_kind: NamespaceKind,
-) -> Vec<ruby_analysis::core::ResolvedMethodCallee> {
-    let engine = engine.read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-    let namespace_fqn = match receiver {
-        CoreMethodReceiver::Constant(path) => {
-            query.resolve_constant_receiver(path, current_namespace)
-        }
-        CoreMethodReceiver::None | CoreMethodReceiver::SelfReceiver | CoreMethodReceiver::Super => {
-            FullyQualifiedName::namespace_with_kind(current_namespace.to_vec(), namespace_kind)
-        }
-        CoreMethodReceiver::LocalVariable(_)
-        | CoreMethodReceiver::InstanceVariable(_)
-        | CoreMethodReceiver::ClassVariable(_)
-        | CoreMethodReceiver::GlobalVariable(_)
-        | CoreMethodReceiver::Expression
-        | CoreMethodReceiver::MethodCall { .. }
-        | CoreMethodReceiver::Literal(_) => return Vec::new(),
-    };
-
-    let Some(callees) = query.resolve_method_callees_cached(&namespace_fqn, method, cache) else {
-        return Vec::new();
-    };
-
-    callees
+    visitor.extension_call_callees(&core_receiver, &method)
 }
 
 fn resolved_callee_to_abi(callee: ruby_analysis::core::ResolvedMethodCallee) -> ResolvedCallee {
     let owner_kind = callee.owner.namespace_kind().unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: analysis resolved extension callee owner `{}` is not a namespace. \
-             This is a bug because extension callee owners must be namespaces. \
-             Fix: keep AnalysisQuery::resolve_method_callees returning namespace owners.",
-            callee.owner
+        unreachable_invariant!(
+            what = "analysis resolved extension callee owner `{}` is not a namespace",
+            why = "extension callee owners must be namespaces",
+            fix = "keep lookup::method callee answers owned by namespaces",
+            callee.owner,
         )
     });
     ResolvedCallee {
@@ -177,10 +132,10 @@ fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreM
         CoreMethodReceiver::Constant(vec![RubyConstant::new(utils::utf8_str(
             constant.name().as_slice(),
         ))
-        .expect(
-            "INVARIANT VIOLATED: Prism returned an invalid constant-read name. \
-             This is a bug because Prism constant names must be valid Ruby constants. \
-             Fix: inspect constant receiver conversion.",
+        .expect_invariant(
+            "Prism returned an invalid constant-read name",
+            "prism constant names must be valid Ruby constants",
+            "inspect constant receiver conversion",
         )])
     } else if let Some(path) = node.as_constant_path_node() {
         let mut parts = Vec::new();
@@ -204,7 +159,7 @@ fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreM
             method_name: utils::utf8_str(call.name().as_slice()).to_string(),
         }
     } else if let Some(ruby_type) =
-        ruby_analysis::inference::LiteralAnalyzer::new().analyze_literal(node)
+        ruby_analysis::inference::r#type::literal::LiteralAnalyzer::new().analyze_literal(node)
     {
         CoreMethodReceiver::Literal(ruby_type)
     } else {

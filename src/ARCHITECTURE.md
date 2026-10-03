@@ -8,14 +8,15 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 
 ```
 crates/
-└── ruby-analysis/  - Reusable core facts, engine, inference, and parser-to-facts indexer
+├── ruby-analysis/  - Reusable core facts, engine, inference, and parser-to-facts indexer
+└── devtools/       - Profilers, benchmarks, AST dump, and extension validation tools
 src/
 ├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
-├── indexer/        - Workspace discovery, fact collection, scheduling, and caches
-├── lsp/            - Editor projections: capabilities, query adapters, handlers, check
-├── server/         - LSP protocol facade, documents, project routing, and publication
-├── utils/          - Shared helpers, single-flight, and performance corpus tooling
-├── bin/            - Profilers, benchmarks, and developer tools
+├── features/       - Editor features, one module per feature, over a shared cursor context
+├── loader/         - Workspace discovery, fact collection, scheduling, and caches
+├── lsp/            - Protocol layer: service facade, lifecycle notifications and document indexing, check report
+├── server/         - Server state: documents, project routing, products, and publication
+├── utils/          - Shared helpers, single-flight, the resource admission governor, and the persistent product cache
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
 editors/
@@ -23,6 +24,15 @@ editors/
 ├── vscode/         - VS Code extension assets, packaging script, and VSIX stubs
 └── npm/            - npm package manifests and platform package directories
 ```
+
+Module dependencies point down: `loader`, `environment`, and `utils` never
+import `server`, `lsp`, or `features`; `server` never imports `lsp` or
+`features`; and `features` never imports `lsp`. The
+structure check enforces this; see
+[source folder organization](../support/structure/README.md#module-layering).
+`environment` produces facts and never mutates project semantic state: the
+extension registry hands its semantic seed to the loader, which commits it
+through `LoadTarget::commit_extension_seed`.
 
 ### Analysis Library
 
@@ -34,8 +44,8 @@ representations remain internal.
 
 Engine resolution invokes inference's AST-free constant and method-return
 solvers and stores their outcomes. Inference may consult engine queries, but
-lookup policy and file replacement remain engine-owned. `AnalysisQuery` and
-file-scoped `TypeQuery` borrow engine state; callers never clone or obtain a
+lookup policy and file replacement remain engine-owned. `View`
+borrows engine state; callers never clone or obtain a
 store to read it. Profiler representation sizes are detached numeric evidence.
 
 See the [analysis library guide](../crates/ruby-analysis/README.md) for public
@@ -57,17 +67,18 @@ from the [library guide](../crates/ruby-analysis/README.md). Every analysis fold
 meets the ten-entry limit, enforced by `support/structure/check.py` through the
 correctness gate.
 
-### 1. Indexer (`src/indexer/`)
+### 1. Loader (`src/loader/`)
 
-The Indexer is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis::engine`.
+The loader is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis::engine`.
 
 - **Primary Responsibility**: Workspace scanning and per-file fact collection
 - **Secondary Responsibility**: Coordinate gem, stdlib, and project indexing
 
 #### Key Files:
 
+- `context/`: `LoadContext`, the server-built inputs passed to each project load and interactive file pass; `LoadSink`, the trait through which the loader writes owner state; and `LoadTarget`, the named engine writes of one project, which the server implements for `ProjectHandle`
 - `coordinator/`: Orchestrates workspace indexing
-- `file_processor/`: Parses one file and runs `FactCollector`
+- `file_processor/`: Parses one file, runs `FactCollector`, and composes its `FileAnalysis` (`compose.rs`). `FileProcessor::analyze_file*` returns an uncommitted `LoadedFile`; the caller commits it with `LoadedFile::commit`
 - `sources/project/`: Discovers and indexes project files
 - `sources/gems/`: Discovers and indexes gem files
 - `sources/stdlib/`: Discovers and indexes stdlib files
@@ -75,8 +86,9 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 #### Design Decisions:
 
 - Storage is owned by `ruby-analysis::engine`
+- The loader is a function of `LoadContext`: it writes only through `LoadSink` and never sees the server. Open-project diagnostics are published by the server from the `LoadSink::project_facts_ready` hook
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass. Its ten private owners separate source/scope context, options, extensions, facts, flow, lookup inputs, and method/expression/constant evidence.
-- `FactCollector::finish()` returns an owned `CollectedFile`; production and simulation composers apply source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
+- `FactCollector::finish()` returns an owned `FactCollectorOutput` holding a `FileAnalysis`; interactive and batch indexing share one composer, `compose_file_analysis`, which merges declarations, extension facts, and flow types and applies source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
 - File discovery and parsing stay separate from engine query logic
 
 ### 2. Analyzer (`crates/ruby-analysis/src/indexer/`)
@@ -90,6 +102,7 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 
 - `mod.rs`: Explicit analysis entry points
 - `scope_tracker.rs`: Tracks current namespace and scope during traversal
+- `scope_rules.rs`: Lexical constant lookup, receiver-namespace, and block execution-context rules shared by every walk
 - `analysis_indexer/`: Declaration and graph fact collection
 - `fact_collector/`: Body, reference, diagnostic, and extension evidence, grouped into `context/`, `collection/`, `inference/`, and semantic node families under `nodes/`
 - `identifier_visitor/`: Cursor-target discovery
@@ -100,56 +113,54 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 - Separates analysis logic from feature implementation (Capabilities)
 - Stateless analysis: processes one document at a time
 
-### 3. Capabilities (`src/lsp/capabilities/`)
+### 3. Features (`src/features/`)
 
-Capabilities implement LSP/editor feature entry points by coordinating query
-adapters, analysis APIs, and editor-specific behavior.
+Each feature owns one editor capability end to end: the request body, cursor
+and document context, the query adapter over `ruby-analysis`, and conversion
+to protocol values. See the [feature guide](features/README.md).
 
-- **Primary Responsibility**: Implement LSP feature endpoints, trigger routing, snippets, and editor-only behavior
-- **Secondary Responsibility**: Convert between LSP types and internal types
+- **Primary Responsibility**: Implement each request as `handle(server, params)`
+- **Secondary Responsibility**: Convert between LSP types and analysis-domain types
 
 #### Layout:
 
+- `cursor/`: `EngineQuery` (document plus owning engine), `Cursor` (one
+  request's document and engine `View`, taken under one read guard each by
+  `EngineQuery::with_view`), method lookup at the cursor, and location
+  conversion (`analysis_location.rs`, over the one engine-range conversion
+  `utils::lsp::lsp_file_range`)
 - `navigation/`: definitions, references, implementations, call and type
   hierarchies, document highlights, workspace symbols, and the namespace tree
 - `editing/`: completion (with snippets and trigger handling), signature help,
   rename, code actions, and formatting
 - `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
   symbols, folding ranges, and selection ranges
-- `diagnostics.rs`, `indexing/`, `debug.rs`: diagnostic generation, document
-  lifecycle indexing, and debug requests
+- `diagnostics/`: the engine's diagnostics for a document (`engine_diagnostics`,
+  a free function over one `&View` owned by `server/diagnostics.rs`),
+  `run_linter` (the didOpen/didSave entry point that lints a document and
+  retains the output for its current source), and the external linter and
+  formatter runner
+- `debug.rs`: FQN lookup, graph export, and extension status requests
 
 #### Design Decisions:
 
-- Each capability is self-contained in its own module
-- Capabilities stay thin; reusable semantic analysis belongs in `ruby-analysis`
-- For engine-backed queries, capabilities delegate to the **Query Engine**
-- Capabilities handle LSP-specific concerns (request/validation/shaping)
+- The `lsp` layer reaches a feature only through its `handle` functions, the
+  request types they take and return, static capability descriptors, and
+  `diagnostics::run_linter`
+- Features may read `server` state and `loader` products and never name `lsp`
+- Reusable semantic analysis belongs in `ruby-analysis`; a feature only adapts
+  it and does not duplicate MRO, identity, ranking, or missing-method policy
+- Syntax diagnostics come from
+  `src/loader/file_processor/syntax_diagnostics.rs`
 
-### 4. Query Engine (`src/lsp/query/`)
+### 4. Lifecycle (`src/lsp/lifecycle/`)
 
-The Query Engine provides a unified service layer for querying the `AnalysisEngine`.
-
-- **Primary Responsibility**: Consolidate business logic for engine-backed queries
-- **Secondary Responsibility**: Provide composable helpers for complex resolution (e.g., method return types)
-
-#### Key Files:
-
-- `mod.rs`: Defines `EngineQuery` struct and entry points
-- `navigation/`: definition, reference, implementation, hierarchy, and symbol lookups
-- `editing/`: completion candidates and signature help
-- `presentation/`: hover, inlay hints, and code lenses
-- `method/`: Method resolution and dispatch logic
-- `analysis_location.rs`, `diagnostics.rs`: shared range conversion and diagnostic projection
-
-Both folders use the same `navigation/`, `editing/`, and `presentation/`
-families, so a feature's handler and query adapter sit in matching places.
-
-#### Design Decisions:
-
-- Consolidates all "index-aware" logic into one place
-- Provides a stable API for capabilities to query project-wide information
-- Enables complex "chained" queries through composable helpers
+- `notification/`: one module per protocol responsibility: `initialize`
+  (server capabilities, initialized), `configuration` (with extension watch
+  registration), `workspace_folders`, and `watched_files` (with project-input
+  rebuilds); `mod.rs` holds shutdown and the document delegators
+- `indexing/`: document open, change, save, and close indexing, workspace
+  initialization, and diagnostic publication
 
 ### Project Containers and Engine Isolation
 
@@ -159,7 +170,7 @@ its nearest nested Gemfile roots unless `indexing.projectRoots` explicitly
 defines non-overlapping roots. `.git` is never a project marker. Discovery and
 workspace-folder ownership live in `src/`, not `ruby-analysis`.
 
-Each registered project owns an `Arc<RwLock<AnalysisEngine>>`. Document,
+Each registered project owns an `Arc<RwLock<Project>>`. Document,
 watcher, hierarchy, rename, completion, diagnostics, and extension queries use
 the engine selected by longest project-root prefix. Files outside every project
 use a separate orphan engine. Workspace-symbol search is the intentional
@@ -267,8 +278,10 @@ loaded extension implements that response surface. The server owns this one
 configured registry; project coordinators adopt it instead of independently
 reading and activating identical packages.
 
-Each isolated project also retains the exact JRuby import provider produced by
-its coordinator. Interactive document processing selects that provider through
+Each isolated project also retains the exact JRuby add-on (`JrubyAddOn`, an
+opaque handle over the import provider) produced by its coordinator; the server
+reads only its classpath fingerprint. Interactive document processing selects
+that add-on through
 the same longest-root/external-provenance ownership rules as the analysis
 engine. Lazy Java signatures, verified source materialization, and bounded
 decompiler work triggered by didOpen/didChange/didSave therefore remain inside
@@ -289,7 +302,11 @@ source prefilter recognizes only supported Java DSL entry points, canonical
 catalog; ordinary Ruby files therefore avoid another AST traversal. Interactive
 edits use the same plan and materialization path after their ordinary parse.
 Java inputs remain file-owned facts in the isolated engine rather than a
-parallel semantic store.
+parallel semantic store. The catalog-independent Java DSL syntax scans (the
+static navigation scan, gem prefilter, import-alias evaluator, and
+`StaticJavaSourceHint`) live in the `jruby-support` crate, which reads Prism
+trees only; catalog lookup and fact lowering stay in
+`environment/runtime/jruby/imports/`.
 
 Retained-memory accounting still requires completion before resource governance
 is considered production complete.
@@ -327,7 +344,10 @@ Watched-file notifications pass through one 100 ms server-owned generation
 gate. A newer batch invalidates the older waiter and overwrites each URI with
 its final event before deterministic URI-order processing. Shutdown invalidates
 the pending batch. Ordinary closed project/RBS files use exact per-file
-replacement. Gemfile/lockfile, auto-runtime marker, trusted project-extension,
+replacement; a deleted or newly excluded file is removed from its project, so
+a later file at the same path starts from a fresh identity. Open project
+documents in an affected project are then reprocessed and their diagnostics
+republished. Gemfile/lockfile, auto-runtime marker, trusted project-extension,
 and owning JRuby classpath inputs create one scheduler-owned replacement
 generation for the affected project, clearing its runtime/external semantic
 state only after the prior generation releases project admission.
@@ -370,17 +390,17 @@ product has three distinct layers:
 2. **Project-neutral semantic template** in `ruby-analysis::engine`: immutable
    declarations and graph/type facts that cannot be inserted directly because
    their template file IDs are private.
-3. **Project binding** in `src/indexer`: register the requesting project's exact
+3. **Project binding** in `src/loader`: register the requesting project's exact
    source path/content/kind, instantiate every template with that engine's file
    ID, validate provenance and source precedence, then use the ordinary
-   `AnalysisEngine::replace_facts` lifecycle.
+   `Project::update` lifecycle.
 
 `ProjectNeutralFileFactsTemplate` is the first engine primitive for this
 boundary. It accepts only ranges owned by one template source and rejects
 reference candidates, diagnostics, and execution contexts. Those facts depend
 on project/query/extension state and cannot enter a generic external dependency
 cache. Instantiation clones and rebinds every supported range, including
-expression type subjects, before returning ordinary `FileFacts`.
+expression type subjects, before returning an ordinary `FileAnalysis`.
 
 Gem templates must be produced in a deterministic dependency-only engine seeded
 by the exact runtime/core semantic input—not by whichever project happens to
@@ -392,7 +412,10 @@ file-owned lifecycle; a production invariant rejects project, excluded, and
 previously bound gem sources from the reusable seed. The product key includes
 the exact selected gem identity, its declared dependency context, logical
 source paths and checksums, the clean semantic seed, and the JRuby provider
-identity only when the gem source is catalog-sensitive. Each consumer supplies
+identity only when the gem source is catalog-sensitive. It also hashes the
+producer sources that `build.rs` lists, which must include every workspace
+crate those producers call (`loader/cache/producer_identity_tests.rs` checks
+this). Each consumer supplies
 its own physical paths. Concurrent identical requests join one producer. The
 gem product is currently an
 **ephemeral flight**, not a completed-value memory cache: completion wakes all
@@ -465,9 +488,14 @@ provenance, and engine facts.
 
 The server has ten production fields: client, configuration, open documents,
 project registry, indexing services, runtime products, extension services,
-diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
+diagnostic publisher, watched-file changes, and namespace-tree cache.
+Per-project state stays under the project registry: each `ProjectHandle` owns
+its engine, runtime state, and published requires under separate locks. Focused
 modules under `src/server/` keep state with its operations; `server/mod.rs` retains
-common construction and the LSP protocol facade. See
+common construction. The `tower-lsp` protocol facade (`impl LanguageServer`
+and the debug and namespace-tree custom requests) lives in
+`src/lsp/service.rs` and routes to feature `handle` functions and
+`lsp/lifecycle`. See
 [server state ownership](../docs/development/server-state.md) for field counts,
 responsibilities, shared lifetimes, and test boundaries.
 
@@ -477,11 +505,11 @@ responsibilities, shared lifetimes, and test boundaries.
   complete `ruby-analysis` crate is editor-independent and exposes domain
   positions, ranges, symbols, tokens, and source identities; no reusable
   analysis module imports or depends on `tower-lsp`.
-- The server delegates actual implementation to capability modules
+- The server delegates actual implementation to feature modules
 - Server clones share owner handles and preserve existing lock identities.
-  Each project still owns a separate `AnalysisEngine`; unowned documents use
+  Each project still owns a separate `Project`; unowned documents use
   the registry's orphan engine. Open buffers are distinct from indexed facts.
-- No `RubyLanguageServer` field is publicly accessible outside the library.
+- No `Server` field is publicly accessible outside the library.
   Six use `pub(crate)` for sibling-module callers; routing, diagnostics, watched
   changes, and namespace-tree state stay private to `server`. Executables use
   explicit setup/admission methods and detached telemetry/configuration views.
@@ -653,18 +681,22 @@ measurements live under `support/performance/`; they are evidence, not a second
 architecture document. Mandatory release and memory gates are summarized in
 `AGENTS.md`.
 
-### 7. Handlers (`src/lsp/handlers/`)
+### 7. Service facade (`src/lsp/service.rs`)
 
-Handlers manage the routing of LSP requests and notifications.
+The service facade implements `tower_lsp::LanguageServer` and the custom
+requests. It logs and times each request, then calls the feature's `handle`
+function or the lifecycle handler.
 
-- **Primary Responsibility**: Receive requests from the server and route them to capabilities
-- **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
+### 8. Ruby Runtime and Version (`src/environment/runtime/`)
 
-### 8. Ruby Version (`src/indexer/version/`)
+Runtime discovery and Ruby version identity. `catalog` is the only reader of
+`.ruby-version` and `.tool-versions` markers and the only probe of a runtime's
+implementation and compatibility. `version` is the only parser of a
+`major.minor` family string; configuration validation, legacy compatibility,
+and core stub selection all use it. The loader takes the project's version
+from its effective runtime selection.
 
-Ruby version detection and version-manager integration.
-
-- **Key Types**: `RubyVersion`
+- **Key Types**: `DiscoveredRuntime`, `RuntimeImplementation`, `RubyVersion`
 
 ## Key Workflows
 
@@ -672,33 +704,34 @@ Ruby version detection and version-manager integration.
 
 1. Client connects to the LSP server
 2. Server initializes and receives workspace information
-3. Server asks the indexer to index all Ruby files in the workspace
-4. Indexer finds all Ruby files and processes each one:
+3. Server asks the loader to index all Ruby files in the workspace
+4. The loader finds all Ruby files and processes each one:
    - Parse the file using Ruby Prism
    - Traverse the AST once to collect facts and candidates
-   - Replace that file's facts in `AnalysisEngine`
+   - Replace that file's facts in `Project`
 
 ### 2. Go to Definition
 
 1. Client sends a "go to definition" request with a position
-2. Server delegates to the definition capability (`src/lsp/capabilities/navigation/definitions.rs`)
-3. Definition capability:
-   - Uses the analyzer to identify the identifier and local scope at the position
-   - If not a local variable, delegates to the **Query Engine** (`src/lsp/query/navigation/definition.rs`)
-4. Query Engine:
-   - Uses `EngineQuery` to perform project-wide lookups in `AnalysisEngine` (handling inheritance, mixins, etc.)
-   - Returns resolved locations
-5. Capability returns the location(s) to the client
+2. The service calls the definition feature (`src/features/navigation/definition/`)
+3. The definition feature:
+   - Resolves require-string paths first
+   - Otherwise reads one `Cursor` through `EngineQuery::with_view` and calls
+     `definitions_at` (`definition/query.rs`): the analyzer identifies the identifier and
+     local scope at the position, and the engine `View` answers project-wide lookups
+     (handling inheritance, mixins, etc.)
+   - While the target is still indexing, waits on an exact navigation demand and retries (`definition/demand.rs`)
+4. The feature returns the location(s) to the client
 
 ### 3. File Change Handling
 
 1. Client edits a file and sends a "did change" notification
 2. Server receives the notification and:
    - Updates its document cache
-   - Asks the indexer to reindex the file
-3. Indexer:
+   - Asks the loader to reindex the file
+3. Loader:
    - Parses the updated content
-   - Replaces that file's facts in `AnalysisEngine`
+   - Replaces that file's facts in `Project`
    - Recomputes engine diagnostics
    - Compares an engine-owned semantic export fingerprint that excludes method
      bodies, source ranges, references, locals, and diagnostics
@@ -726,8 +759,8 @@ Ruby version detection and version-manager integration.
 
 The Ruby Fast LSP follows a clear 3-layer architecture:
 
-1. **API Layer** (`server/`, `lsp/handlers/`): Handles LSP protocol, request validation, and routing.
-2. **Service Layer** (`src/lsp/query/`, `src/lsp/capabilities/`): Implements business logic for LSP features. `EngineQuery` acts as the primary service interface for data lookups.
+1. **API Layer** (`lsp/service.rs`, `lsp/lifecycle/`): Handles LSP protocol, lifecycle notifications, and routing over `server/` state.
+2. **Feature Layer** (`src/features/`): Implements each editor feature. `EngineQuery` is the shared cursor context for engine lookups.
 3. **Data Layer** (`ruby-analysis::engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
 
 ### Analyzer, Query Engine, and Indexer Relationship
@@ -744,11 +777,11 @@ This separation allows:
 2. Clearer testing boundaries
 3. Better caching strategies (indexer can be persistent, analyzer is on-demand)
 
-### Capability and Query Engine Relationship
+### Feature and Query Engine Relationship
 
-Capabilities use the Query Engine as their primary data service:
+Features use the Query Engine as their primary data service:
 
-1. Capabilities handle the AST traversal and identifying _what_ the user is interacting with.
+1. Features handle the AST traversal and identifying _what_ the user is interacting with.
 2. They call the Query Engine to resolve _where_ that thing is defined or referenced across the workspace.
 3. They translate the results back into LSP-specific formats.
 
@@ -757,7 +790,7 @@ Capabilities use the Query Engine as their primary data service:
 - The Indexer builds an in-memory index for fast lookups
 - Document changes trigger targeted reindexing
 - Analysis is performed on-demand rather than eagerly
-- `AnalysisEngine::replace_facts` records a deterministic per-file semantic
+- `Project::update` records a deterministic per-file semantic
   export fingerprint and reports initial, body-only, or exported-API change.
 - Shared symbol/type subject indexes retain deterministic `(SourceFileId,
   range...)` ordering without re-sorting an existing bucket for every file.

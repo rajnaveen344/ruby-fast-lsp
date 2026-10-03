@@ -1,3 +1,5 @@
+use crate::invariant::ExpectInvariant;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct JavaClassName {
     internal_name: String,
@@ -34,9 +36,11 @@ impl JavaClassName {
     }
 
     pub fn imported_constant(&self) -> &str {
-        self.classes
-            .last()
-            .expect("INVARIANT VIOLATED: validated Java class must have a class component")
+        self.classes.last().expect_invariant(
+            "validated Java class has no class component",
+            "name validation rejects empty class paths",
+            "keep validation before constructing the name",
+        )
     }
 
     pub fn ruby_namespace_parts(&self) -> Vec<String> {
@@ -54,9 +58,11 @@ impl JavaClassName {
             .iter()
             .map(|component| {
                 let mut chars = component.chars();
-                let first = chars
-                    .next()
-                    .expect("INVARIANT VIOLATED: validated package component cannot be empty");
+                let first = chars.next().expect_invariant(
+                    "validated package component is empty",
+                    "name validation rejects empty components",
+                    "keep validation before constructing the name",
+                );
                 format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
             })
             .collect()

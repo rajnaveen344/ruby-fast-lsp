@@ -1,10 +1,11 @@
-//! Integration tests grouped by the same feature families as
-//! `src/lsp/capabilities/` and `src/lsp/query/`.
+//! Integration tests grouped by the same feature families as `src/features/`.
 
 // Diagnostics publication and diagnostic kinds.
 mod diagnostics;
 // Rename, completion, formatting, and signature help.
 mod editing;
+// Open/edit/close, background schedules, and dependency refresh ordering.
+mod lifecycle;
 // Definition, references, hierarchies, and highlights.
 mod navigation;
 // Hover, inlay hints, code lenses, folding, and selection ranges.

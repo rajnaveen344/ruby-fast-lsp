@@ -1,3 +1,9 @@
+#[macro_use]
+#[allow(unused_macros, dead_code)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
+use ruby_fast_lsp::environment::extensions::ExtensionStat;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -61,10 +67,13 @@ fn package_paths_or_skip() -> Option<Vec<PathBuf>> {
                 .collect(),
         );
     }
-    assert_ne!(
+    invariant_ne!(
         std::env::var_os("RUBY_FAST_LSP_REQUIRE_BUNDLED_STRESS").as_deref(),
         Some(std::ffi::OsStr::new("1")),
-        "INVARIANT VIOLATED: required bundled-extension stress artifacts are missing: {missing:?}. This is a packaging gate failure because all five official guests must be tested together. Fix: build the guests or point RUBY_FAST_LSP_BUNDLED_EXTENSION_ROOT at an extracted VSIX."
+        what = "required bundled-extension stress artifacts are missing: {missing:?}",
+        why = "all five official guests must be tested together",
+        fix = "build the guests or point RUBY_FAST_LSP_BUNDLED_EXTENSION_ROOT at an extracted VSIX",
+        missing = missing,
     );
     eprintln!(
         "skipping bundled-extension stress test because artifacts are absent: {missing:?}; use editors/scripts/stress_bundled_extensions.sh for the required gate"
@@ -115,58 +124,77 @@ fn filename(project: &Path, relative: &str) -> String {
 fn assert_healthy(status: &ExtensionStatusReport, expected_project_instances: u64) {
     assert_eq!(status.status, "loaded", "unhealthy extension: {status:?}");
     assert_eq!(
-        status.telemetry.project_instances, expected_project_instances,
+        status.telemetry.get(ExtensionStat::ProjectInstances),
+        expected_project_instances,
         "each official guest must instantiate exactly once per applicable project: {status:?}"
     );
     assert_eq!(
-        status.telemetry.project_instance_creations, expected_project_instances,
+        status
+            .telemetry
+            .get(ExtensionStat::ProjectInstanceCreations),
+        expected_project_instances,
         "each applicable project must construct one reusable Wasm instance: {status:?}"
     );
     assert_eq!(
-        status.telemetry.project_instance_failures, 0,
+        status.telemetry.get(ExtensionStat::ProjectInstanceFailures),
+        0,
         "cold project activation must succeed: {status:?}"
     );
     assert_eq!(
-        status.telemetry.lifecycle_calls, 1,
+        status.telemetry.get(ExtensionStat::LifecycleCalls),
+        1,
         "registry activation must be observed once: {status:?}"
     );
     assert!(
-        status.telemetry.index_calls >= ITERATIONS as u64,
+        status.telemetry.get(ExtensionStat::IndexCalls) >= ITERATIONS as u64,
         "every edit cycle must reach the applicable guest: {status:?}"
     );
     assert_eq!(
-        status.telemetry.guest_failures, 0,
+        status.telemetry.get(ExtensionStat::GuestFailures),
+        0,
         "stress must not produce guest failures: {status:?}"
     );
     assert_eq!(
-        status.telemetry.guest_traps, 0,
+        status.telemetry.get(ExtensionStat::GuestTraps),
+        0,
         "stress must not trap a guest: {status:?}"
     );
     assert_eq!(
-        status.telemetry.resource_limit_failures, 0,
+        status.telemetry.get(ExtensionStat::ResourceLimitFailures),
+        0,
         "stress must stay inside resource limits: {status:?}"
     );
     assert_eq!(
-        status.telemetry.rejected_outputs, 0,
+        status.telemetry.get(ExtensionStat::RejectedOutputs),
+        0,
         "stress output must pass host validation: {status:?}"
     );
     assert_eq!(
-        status.telemetry.patch_conflicts, 0,
+        status.telemetry.get(ExtensionStat::PatchConflicts),
+        0,
         "official guests must not conflict: {status:?}"
     );
     assert_eq!(
-        status.telemetry.disablements, 0,
+        status.telemetry.get(ExtensionStat::Disablements),
+        0,
         "stress must not disable a guest: {status:?}"
     );
     assert!(
-        status.telemetry.emitted_index_patches + status.telemetry.emitted_execution_contexts > 0,
+        status.telemetry.get(ExtensionStat::EmittedIndexPatches)
+            + status
+                .telemetry
+                .get(ExtensionStat::EmittedExecutionContexts)
+            > 0,
         "each official guest must contribute semantic output: {status:?}"
     );
     assert!(
-        status.telemetry.max_guest_time_ns < MAX_GUEST_CALL.as_nanos() as u64,
+        status.telemetry.get(ExtensionStat::MaxGuestTimeNs) < MAX_GUEST_CALL.as_nanos() as u64,
         "a guest call reached the enforced wall-clock ceiling: {status:?}"
     );
-    assert!(status.telemetry.max_guest_time_ns <= status.telemetry.total_guest_time_ns);
+    assert!(
+        status.telemetry.get(ExtensionStat::MaxGuestTimeNs)
+            <= status.telemetry.get(ExtensionStat::TotalGuestTimeNs)
+    );
 }
 
 #[tokio::test]
@@ -280,12 +308,12 @@ async fn all_official_guests_survive_repeatable_isolated_project_load() {
         assert_healthy(status, expected_project_instances);
         eprintln!(
             "bundled-extension id={id} calls={} index_calls={} max_call_us={} cold_instance_ms={} patches={} contexts={}",
-            status.telemetry.guest_calls,
-            status.telemetry.index_calls,
-            status.telemetry.max_guest_time_ns / 1_000,
-            status.telemetry.max_project_instance_time_ns / 1_000_000,
-            status.telemetry.emitted_index_patches,
-            status.telemetry.emitted_execution_contexts,
+            status.telemetry.get(ExtensionStat::GuestCalls),
+            status.telemetry.get(ExtensionStat::IndexCalls),
+            status.telemetry.get(ExtensionStat::MaxGuestTimeNs) / 1_000,
+            status.telemetry.get(ExtensionStat::MaxProjectInstanceTimeNs) / 1_000_000,
+            status.telemetry.get(ExtensionStat::EmittedIndexPatches),
+            status.telemetry.get(ExtensionStat::EmittedExecutionContexts),
         );
     }
     let elapsed = started.elapsed();
@@ -306,6 +334,11 @@ fn source_for(framework: &str, iteration: usize) -> String {
         "minitest" => format!("describe Service do\n  let(:value) {{ {iteration} }}\n  it('works') {{ value }}\nend\n"),
         "sinatra" => format!("module Sinatra\n  class Base\n  end\nend\nclass App < Sinatra::Base\n  get('/{iteration}') {{ nil }}\nend\n"),
         "cucumber" => format!("Given('service {iteration}') {{ nil }}\nBefore {{ nil }}\n"),
-        other => panic!("INVARIANT VIOLATED: unknown stress framework `{other}`. This is a test bug because every fixture must map to one official extension. Fix: add an explicit source_for match arm."),
+        other => unreachable_invariant!(
+            what = "unknown stress framework `{other}`",
+            why = "every fixture must map to one official extension",
+            fix = "add an explicit source_for match arm",
+            other = other,
+        ),
     }
 }

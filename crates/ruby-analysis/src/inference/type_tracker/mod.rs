@@ -19,6 +19,7 @@ use flow::{environment::FlowEnvironment, ControlFlowState};
 use observations::TypeObservations;
 use returns::ReturnEvidence;
 
+#[cfg(test)]
 pub use observations::get_var_type_at;
 pub(crate) use observations::LocalReadType;
 

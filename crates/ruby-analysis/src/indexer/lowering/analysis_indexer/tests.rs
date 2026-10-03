@@ -1,5 +1,8 @@
 use super::*;
-use crate::core::{GraphEdgeKind, GraphNodeKind, MethodParamKind, SymbolKind, TypeSubject};
+use crate::core::{
+    GraphEdgeKind, GraphNodeKind, MethodParamKind, RubyMethod, SymbolKind, TypeSubject,
+};
+use crate::invariant::ExpectInvariant;
 
 fn file() -> SourceFileId {
     SourceFileId(1)
@@ -40,10 +43,10 @@ fn indexes_method_param_names() {
         .methods
         .iter()
         .find(|fact| fact.fqn.to_string() == "User#find")
-        .expect(
-            "INVARIANT VIOLATED: analysis indexer did not emit User#find. \
-                 This is a bug because def nodes must produce method facts. \
-                 Fix: keep visit_def_node method fact emission active.",
+        .expect_invariant(
+            "analysis indexer did not emit User#find",
+            "def nodes must produce method facts",
+            "keep visit_def_node method fact emission active",
         );
     assert_eq!(
         method.params,

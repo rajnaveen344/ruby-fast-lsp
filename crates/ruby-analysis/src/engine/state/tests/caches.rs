@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn cached_method_return_queries_invalidate_after_semantic_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -14,7 +14,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
     let method_name = RubyMethod::new("value").unwrap();
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let range = TextRange::new(file_id, 15, 34);
-    let facts = |ruby_type| FileFacts {
+    let facts = |ruby_type| FileAnalysis {
         graph_nodes: vec![GraphNodeFact::new(
             owner.clone(),
             GraphNodeKind::Class,
@@ -29,43 +29,59 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
         )],
         ..Default::default()
     };
-    engine.replace_facts(file_id, facts(RubyType::string()), ResolveMode::Immediate);
-    let cache = AnalysisQueryCache::default();
+    engine.update(file_id, facts(RubyType::string()), ResolveMode::Immediate);
+    let cache = ViewCache::default();
 
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver_cached(&owner, &method_name, &cache),
+        ask_any(
+            &engine.view().with_memo(&cache),
+            &owner,
+            &method_name,
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::string())
     );
-    let cached_callees = engine
-        .query()
-        .resolve_method_callees_cached(&owner, &method_name, &cache)
-        .expect("cached method owner must resolve");
+    let cached_callees = ask_any(
+        &engine.view().with_memo(&cache),
+        &owner,
+        &method_name,
+        MethodWant::Callees,
+    )
+    .into_callees()
+    .expect("cached method owner must resolve");
     assert_eq!(cached_callees.len(), 1);
     assert_eq!(
         engine
-            .query()
+            .view()
             .method_return_type_for_callee(&cached_callees[0]),
         Some(RubyType::string())
     );
     assert_eq!(cache.valid_entry_counts_for_test(), (1, 1, 0));
 
-    engine.replace_facts(file_id, facts(RubyType::integer()), ResolveMode::Immediate);
+    engine.update(file_id, facts(RubyType::integer()), ResolveMode::Immediate);
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver_cached(&owner, &method_name, &cache),
+        ask_any(
+            &engine.view().with_memo(&cache),
+            &owner,
+            &method_name,
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::integer()),
         "a semantic replacement must invalidate cached return types"
     );
-    let cached_callees = engine
-        .query()
-        .resolve_method_callees_cached(&owner, &method_name, &cache)
-        .expect("replacement method owner must resolve");
+    let cached_callees = ask_any(
+        &engine.view().with_memo(&cache),
+        &owner,
+        &method_name,
+        MethodWant::Callees,
+    )
+    .into_callees()
+    .expect("replacement method owner must resolve");
     assert_eq!(
         engine
-            .query()
+            .view()
             .method_return_type_for_callee(&cached_callees[0]),
         Some(RubyType::integer()),
         "semantic replacement must expose the resolved callee's new return type"
@@ -79,7 +95,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
 
 #[test]
 fn thread_local_method_return_cache_reuses_across_per_source_caches() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -89,9 +105,9 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
     let method_name = RubyMethod::new("value").unwrap();
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let range = TextRange::new(file_id, 15, 34);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -109,20 +125,22 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
         ResolveMode::Immediate,
     );
 
-    let first_cache = AnalysisQueryCache::default();
+    let first_cache = ViewCache::default();
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver_cached(&owner, &method_name, &first_cache),
+        ask_any(
+            &engine.view().with_memo(&first_cache),
+            &owner,
+            &method_name,
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::string())
     );
     assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
 
-    let second_cache = AnalysisQueryCache::default();
+    let second_cache = ViewCache::default();
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver_cached(&owner, &method_name, &second_cache),
+        ask_any(&engine.view().with_memo(&second_cache), &owner, &method_name, MethodWant::Return).into_return_type(),
         Some(RubyType::string()),
         "identical receiver/method lookups on one engine identity must reuse the thread-local return"
     );
@@ -135,7 +153,7 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
 
 #[test]
 fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -148,9 +166,9 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
     let count_fqn = FullyQualifiedName::method(owner.namespace_parts(), count);
     let value_range = TextRange::new(file_id, 15, 34);
     let count_range = TextRange::new(file_id, 37, 50);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -179,19 +197,27 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
         ResolveMode::Immediate,
     );
 
-    let first_cache = AnalysisQueryCache::default();
+    let first_cache = ViewCache::default();
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver_cached(&owner, &value, &first_cache),
+        ask_any(
+            &engine.view().with_memo(&first_cache),
+            &owner,
+            &value,
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::string())
     );
 
-    let second_cache = AnalysisQueryCache::default();
+    let second_cache = ViewCache::default();
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_receiver_cached(&owner, &count, &second_cache),
+        ask_any(
+            &engine.view().with_memo(&second_cache),
+            &owner,
+            &count,
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::integer()),
         "a different method on the same owner must not reuse the thread-local Widget#value return"
     );
@@ -204,7 +230,7 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
 
 #[test]
 fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -216,9 +242,9 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
     let method_name = RubyMethod::new("value").unwrap();
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let range = TextRange::new(file_id, 15, 34);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -236,30 +262,32 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
         ResolveMode::Immediate,
     );
 
-    let first_cache = AnalysisQueryCache::default();
+    let first_cache = ViewCache::default();
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_protected_receiver_cached(
-                &owner,
-                &method_name,
-                &controller,
-                &first_cache,
-            ),
+        ask(
+            &engine.view().with_memo(&first_cache),
+            &owner,
+            &method_name,
+            ReceiverAccess::Protected {
+                caller: &controller
+            },
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::string())
     );
     assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
 
-    let second_cache = AnalysisQueryCache::default();
+    let second_cache = ViewCache::default();
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_protected_receiver_cached(
-                &owner,
-                &method_name,
-                &helper,
-                &second_cache,
-            ),
+        ask(
+            &engine.view().with_memo(&second_cache),
+            &owner,
+            &method_name,
+            ReceiverAccess::Protected { caller: &helper },
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::string()),
         "public Widget#value must reuse the thread-local return across callers"
     );
@@ -272,7 +300,7 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
 
 #[test]
 fn protected_override_does_not_reuse_a_parent_public_return() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/vault.rb",
@@ -286,9 +314,9 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
     let child_method = FullyQualifiedName::method(child.namespace_parts(), method_name);
     let parent_range = TextRange::new(file_id, 15, 36);
     let child_range = TextRange::new(file_id, 70, 84);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -331,26 +359,28 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
         ResolveMode::Immediate,
     );
 
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
     assert_eq!(
-        engine.query().method_return_type_for_protected_receiver_cached(
+        ask(
+            &engine.view().with_memo(&cache),
             &child,
             &method_name,
-            &child,
-            &cache,
-        ),
+            ReceiverAccess::Protected { caller: &child },
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::integer()),
         "a same-family explicit call must keep the closer protected Child#value return"
     );
     assert_eq!(
-        engine
-            .query()
-            .method_return_type_for_protected_receiver_cached(
-                &child,
-                &method_name,
-                &outsider,
-                &cache,
-            ),
+        ask(
+            &engine.view().with_memo(&cache),
+            &child,
+            &method_name,
+            ReceiverAccess::Protected { caller: &outsider },
+            MethodWant::Return
+        )
+        .into_return_type(),
         Some(RubyType::string()),
         "an outsider explicit call must keep the public Parent#value return"
     );
@@ -358,12 +388,12 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
 
 #[test]
 fn resolved_method_callee_cache_is_bounded_per_source_collection() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -373,14 +403,18 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
         },
         ResolveMode::Immediate,
     );
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
 
     for index in 0..300 {
         let method = RubyMethod::new(&format!("missing_{index}")).unwrap();
-        assert!(engine
-            .query()
-            .resolve_method_callees_cached(&owner, &method, &cache)
-            .is_some());
+        assert!(ask_any(
+            &engine.view().with_memo(&cache),
+            &owner,
+            &method,
+            MethodWant::Callees
+        )
+        .into_callees()
+        .is_some());
     }
 
     assert_eq!(
@@ -392,7 +426,7 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
 
 #[test]
 fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -403,7 +437,7 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let first_range = TextRange::new(file_id, 15, 34);
     let second_range = TextRange::new(file_id, 15, 35);
-    let facts = |range| FileFacts {
+    let facts = |range| FileAnalysis {
         graph_nodes: vec![GraphNodeFact::new(
             owner.clone(),
             GraphNodeKind::Class,
@@ -412,25 +446,31 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
         methods: vec![MethodFact::new(method.clone(), owner.clone(), range)],
         ..Default::default()
     };
-    engine.replace_facts(file_id, facts(first_range), ResolveMode::Immediate);
-    let cache = AnalysisQueryCache::default();
+    engine.update(file_id, facts(first_range), ResolveMode::Immediate);
+    let cache = ViewCache::default();
 
-    let uncached = engine
-        .query()
-        .resolve_method_signature_facts(&owner, &method_name);
-    let cached = engine
-        .query()
-        .resolve_method_signature_facts_cached(&owner, &method_name, &cache);
+    let uncached =
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Signatures).into_signature_vec();
+    let cached = ask_any(
+        &engine.view().with_memo(&cache),
+        &owner,
+        &method_name,
+        MethodWant::Signatures,
+    )
+    .into_signature_vec();
     assert_eq!(uncached, cached);
     assert_eq!(uncached.len(), 1);
     assert_eq!(uncached[0].range, first_range);
     assert_eq!(cache.valid_entry_counts_for_test(), (0, 0, 1));
 
-    engine.replace_facts(file_id, facts(second_range), ResolveMode::Immediate);
-    let replaced =
-        engine
-            .query()
-            .resolve_method_signature_facts_cached(&owner, &method_name, &cache);
+    engine.update(file_id, facts(second_range), ResolveMode::Immediate);
+    let replaced = ask_any(
+        &engine.view().with_memo(&cache),
+        &owner,
+        &method_name,
+        MethodWant::Signatures,
+    )
+    .into_signature_vec();
     assert_eq!(replaced.len(), 1);
     assert_eq!(
         replaced[0].range, second_range,
@@ -445,12 +485,12 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
 
 #[test]
 fn method_signature_fact_cache_is_bounded_per_source_collection() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -460,14 +500,18 @@ fn method_signature_fact_cache_is_bounded_per_source_collection() {
         },
         ResolveMode::Immediate,
     );
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
 
     for index in 0..300 {
         let method = RubyMethod::new(&format!("missing_{index}")).unwrap();
-        assert!(engine
-            .query()
-            .resolve_method_signature_facts_cached(&owner, &method, &cache)
-            .is_empty());
+        assert!(ask_any(
+            &engine.view().with_memo(&cache),
+            &owner,
+            &method,
+            MethodWant::Signatures
+        )
+        .into_signature_vec()
+        .is_empty());
     }
 
     assert_eq!(
@@ -479,7 +523,7 @@ fn method_signature_fact_cache_is_bounded_per_source_collection() {
 
 #[test]
 fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -488,9 +532,9 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let method = RubyMethod::new("value").unwrap();
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -519,22 +563,27 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine
-        .query()
-        .resolve_method_callees(&child, &method)
-        .is_some());
+    assert!(
+        ask_any(&engine.view(), &child, &method, MethodWant::Callees)
+            .into_callees()
+            .is_some()
+    );
     assert_eq!(
         engine.valid_method_lookup_chain_cache_len_for_test(),
         1,
         "repeated method names on one receiver must reuse one MRO"
     );
-    assert!(engine
-        .query()
-        .resolve_method_callees(&child, &RubyMethod::new("missing").unwrap())
-        .is_some());
+    assert!(ask_any(
+        &engine.view(),
+        &child,
+        &RubyMethod::new("missing").unwrap(),
+        MethodWant::Callees
+    )
+    .into_callees()
+    .is_some());
     assert_eq!(engine.valid_method_lookup_chain_cache_len_for_test(), 1);
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(
         engine.valid_method_lookup_chain_cache_len_for_test(),
         0,
@@ -544,7 +593,7 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
 
 #[test]
 fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -552,9 +601,9 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
     );
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -589,7 +638,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
         "repeated lookup of one owner must reuse the constructed MRO for the current engine identity"
     );
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     let after_replace = method_lookup_chain_uncached_construction_count();
     let replaced = method_lookup_chain(&engine, &child);
     assert!(
@@ -605,7 +654,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
 
 #[test]
 fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -613,9 +662,9 @@ fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
     );
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -656,7 +705,7 @@ fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
 
 #[test]
 fn method_reference_chain_cache_reuses_interned_owner_ids() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -666,9 +715,9 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let first = RubyMethod::new("first").unwrap();
     let second = RubyMethod::new("second").unwrap();
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -706,19 +755,21 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
 
     let mut cache = MethodLookupChainCache::new();
     let first_resolution = engine
-        .query()
+        .view()
         .resolve_method_reference_with_chain_cache(&child, &first, &mut cache);
     let cloned_resolution = first_resolution.clone();
     match (&first_resolution, &cloned_resolution) {
         (
-            crate::engine::resolution::MethodLookupResult::Unique(first),
-            crate::engine::resolution::MethodLookupResult::Unique(cloned),
+            crate::engine::resolution::MethodLookupResult::Found(first),
+            crate::engine::resolution::MethodLookupResult::Found(cloned),
         ) => assert!(
             std::sync::Arc::ptr_eq(first, cloned),
             "a cached method resolution clone must share its immutable MethodFact; deep cloning facts multiplies resolve-pass memory by reference count"
         ),
-        (first, cloned) => panic!(
-            "INVARIANT VIOLATED: method lookup result changed shape while cloning (first={:?}, cloned={:?}). This is a bug because clone must preserve an exact immutable resolution. Fix: clone every MethodLookupResult variant without semantic conversion.",
+        (first, cloned) => unreachable_invariant!(
+            what = "method lookup result changed shape while cloning (first={:?}, cloned={:?})",
+            why = "clone must preserve an exact immutable resolution",
+            fix = "clone every MethodLookupResult variant without semantic conversion",
             std::mem::discriminant(first),
             std::mem::discriminant(cloned),
         ),
@@ -727,9 +778,9 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
     engine.names.reset_fqn_lookup_count_for_test();
     assert!(matches!(
         engine
-            .query()
+            .view()
             .resolve_method_reference_with_chain_cache(&child, &second, &mut cache),
-        crate::engine::resolution::MethodLookupResult::Unique(_)
+        crate::engine::resolution::MethodLookupResult::Found(_)
     ));
     assert_eq!(
         engine.names.fqn_lookup_count_for_test(),
@@ -740,7 +791,7 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
 
 #[test]
 fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/metaclass.rb",
@@ -757,9 +808,9 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
     );
     let method = RubyMethod::new("any_instance").unwrap();
     let range = TextRange::new(file_id, 0, 75);
-    engine.replace_facts(
+    engine.update(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(class.clone(), GraphNodeKind::Class, range),
                 GraphNodeFact::new(alpha.clone(), GraphNodeKind::Class, range),
@@ -780,18 +831,25 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
         let mut cache = MethodLookupChainCache::new();
         [first, second].map(|receiver| {
             let result = engine
-                .query()
+                .view()
                 .resolve_method_reference_with_chain_cache(receiver, &method, &mut cache);
             match result {
                 crate::engine::resolution::MethodLookupResult::Ambiguous { owner, method } => {
                     (owner, method)
                 }
-                crate::engine::resolution::MethodLookupResult::Unique(fact) => panic!(
-                    "INVARIANT VIOLATED: project-defined Class fallback resolved concretely for `{receiver}` through `{}`. This is a bug because indexing the defining file does not prove the runtime monkeypatch was loaded. Fix: keep non-language metaclass fallbacks Unknown.",
+                crate::engine::resolution::MethodLookupResult::Found(fact) => unreachable_invariant!(
+                    what = "project-defined Class fallback resolved concretely for `{receiver}` through `{}`",
+                    why = "indexing the defining file does not prove the runtime monkeypatch was loaded",
+                    fix = "keep non-language metaclass fallbacks Unknown",
                     fact.owner,
+                    receiver = receiver,
                 ),
-                crate::engine::resolution::MethodLookupResult::Missing => panic!(
-                    "INVARIANT VIOLATED: indexed Class fallback became definitely missing for `{receiver}`. This is a bug because the runtime load state is unknown. Fix: retain an ambiguous canonical metaclass candidate."
+                crate::engine::resolution::MethodLookupResult::Missing
+                | crate::engine::resolution::MethodLookupResult::Unknown(_) => unreachable_invariant!(
+                    what = "indexed Class fallback became definitely missing for `{receiver}`",
+                    why = "the runtime load state is unknown",
+                    fix = "retain an ambiguous canonical metaclass candidate",
+                    receiver = receiver,
                 ),
             }
         })

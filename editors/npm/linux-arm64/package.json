@@ -12,6 +12,7 @@
   "files": [
     "bin/ruby-fast-lsp",
     "core-rbs/**",
-    "jruby-decompiler/**"
+    "jruby-decompiler/**",
+    "extensions/**"
   ]
 }

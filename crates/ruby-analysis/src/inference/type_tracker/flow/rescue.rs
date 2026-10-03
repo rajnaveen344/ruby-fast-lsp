@@ -3,6 +3,7 @@ use crate::inference::control_flow;
 use crate::inference::type_tracker::flow::branches::join_branch_types;
 use crate::inference::type_tracker::flow::environment::FlowEnvironment;
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::HashMap;
 
@@ -68,8 +69,10 @@ impl TypeTracker {
             .unwrap_or_else(RubyType::nil_class);
         let body_env = self.environment.clone();
         let rescue_entry_types = has_rescue.then(|| {
-            self.control_flow.rescue_entries.pop().expect(
-                "INVARIANT VIOLATED: a begin/rescue protected-body accumulator disappeared before rescue analysis. This is a bug because only the matching begin frame may pop it. Fix: keep rescue accumulator ownership stack-disciplined.",
+            self.control_flow.rescue_entries.pop().expect_invariant(
+                "a begin/rescue protected-body accumulator disappeared before rescue analysis",
+                "only the matching begin frame may pop it",
+                "keep rescue accumulator ownership stack-disciplined",
             )
         });
 
@@ -92,8 +95,10 @@ impl TypeTracker {
         while let Some(rescue_node) = rescue_clause {
             self.environment = rescue_entry_types
                 .as_ref()
-                .expect(
-                    "INVARIANT VIOLATED: a rescue clause has no protected-body entry evidence. This is a bug because has_rescue and the immutable rescue chain came from the same Prism begin node. Fix: create one accumulator whenever a rescue clause exists.",
+                .expect_invariant(
+                    "a rescue clause has no protected-body entry evidence",
+                    "has_rescue and the immutable rescue chain came from the same Prism begin node",
+                    "create one accumulator whenever a rescue clause exists",
                 )
                 .environment_from(&env_before);
             let diverges = rescue_node
@@ -148,8 +153,10 @@ impl TypeTracker {
             .push(RescueEntryTypes::default());
         let expression_type = self.track_node(&expression);
         let expression_env = self.environment.clone();
-        let rescue_entry_types = self.control_flow.rescue_entries.pop().expect(
-            "INVARIANT VIOLATED: a rescue-modifier protected-expression accumulator disappeared before rescue analysis. This is a bug because only the matching rescue modifier may pop it. Fix: keep rescue accumulator ownership stack-disciplined.",
+        let rescue_entry_types = self.control_flow.rescue_entries.pop().expect_invariant(
+            "a rescue-modifier protected-expression accumulator disappeared before rescue analysis",
+            "only the matching rescue modifier may pop it",
+            "keep rescue accumulator ownership stack-disciplined",
         );
 
         let rescue_expression = rescue_modifier.rescue_expression();

@@ -4,16 +4,18 @@ mod precedence;
 #[cfg(test)]
 mod tests;
 
-use super::AnalysisQuery;
+use super::View;
+use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
+use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, ResolvedMethodCallee, RubyMethod, RubyType,
-    SourceFileId, StoredMethodReferenceCandidate, StoredReferenceCandidateKind, SymbolKind,
-    TextRange,
+    SourceFileId, SymbolKind, TextRange,
 };
+use crate::invariant::ExpectInvariant;
 
 pub(in crate::engine) type DefinitionLookupChains = Vec<Vec<FullyQualifiedName>>;
 
-impl AnalysisQuery<'_> {
+impl View<'_> {
     /// Exact declaration-name targets for a proven type identity. Types may
     /// retain constant-form FQNs; declarations belong to instance namespaces.
     /// Name ranges let clients resolve navigation at the actual Ruby token.
@@ -22,8 +24,7 @@ impl AnalysisQuery<'_> {
             return Vec::new();
         };
         self.preferred_definition_ranges(
-            self.engine
-                .symbol_facts_for(&namespace)
+            self.symbol_facts_for(&namespace)
                 .into_iter()
                 .filter(|fact| matches!(fact.kind, SymbolKind::Class | SymbolKind::Module))
                 .map(|fact| fact.name_range)
@@ -39,7 +40,8 @@ impl AnalysisQuery<'_> {
         let mut candidates = Vec::new();
         for candidate in self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .candidates_in_file(file_id)
             .into_iter()
             .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
@@ -95,18 +97,24 @@ impl AnalysisQuery<'_> {
             .flat_map(|candidate| match candidate.kind {
                 StoredReferenceCandidateKind::Resolved { target, .. } => vec![self
                     .engine
-                    .fqn_for_id(target)
-                    .expect(
-                        "INVARIANT VIOLATED: exact resolved reference points to a missing target FQN. This is a bug because resolved candidates contain only interned target ids. Fix: intern the target before storing the reference candidate and keep the name arena append-only.",
+                    .names.fqn(target)
+                    .expect_invariant(
+                        "resolved reference points to a missing target FQN",
+                        "resolved candidates hold only interned target ids",
+                        "intern the target before storing the candidate; keep the arena append-only",
                     )
                     .clone()],
                 StoredReferenceCandidateKind::Method { .. } => Vec::new(),
                 StoredReferenceCandidateKind::Constant { lookup } => {
-                    let lookup = self.engine.names.const_lookup(lookup).expect(
-                        "INVARIANT VIOLATED: exact constant reference points to a missing lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern constant lookups before storing reference candidates.",
+                    let lookup = self.engine.names.const_lookup(lookup).expect_invariant(
+                        "exact constant reference points to a missing lookup",
+                        "candidates contain only interned lookup ids",
+                        "intern constant lookups before storing reference candidates",
                     );
-                    let context = self.engine.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: exact constant reference lookup points to a missing context FQN. This is a bug because constant lookups must retain their interned lexical context. Fix: intern the context before storing the lookup.",
+                    let context = self.engine.names.fqn(lookup.context).expect_invariant(
+                        "exact constant reference lookup points to a missing context FQN",
+                        "constant lookups must retain their interned lexical context",
+                        "intern the context before storing the lookup",
                     );
                     self.resolve_constant_in_context(
                         lookup.path.as_slice(),
@@ -130,7 +138,7 @@ impl AnalysisQuery<'_> {
         for target in targets {
             let mut ranges = match &target {
                 FullyQualifiedName::Method(_, _) => {
-                    let facts = self.engine.method_facts_for(&target);
+                    let facts = self.method_facts_for(&target);
                     facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
                 }
                 FullyQualifiedName::Namespace(_, _)
@@ -139,7 +147,6 @@ impl AnalysisQuery<'_> {
                 | FullyQualifiedName::InstanceVariable(_)
                 | FullyQualifiedName::ClassVariable(_)
                 | FullyQualifiedName::GlobalVariable(_) => self
-                    .engine
                     .symbol_facts_for(&target)
                     .into_iter()
                     .map(|fact| fact.range)
@@ -263,19 +270,31 @@ impl AnalysisQuery<'_> {
     }
 
     fn definition_source_priority(&self, range: TextRange) -> u8 {
-        self.engine.file(range.file_id).expect(
-            "INVARIANT VIOLATED: a definition destination has no registered source. This is a bug because navigation must retain source ownership. Fix: register sources before publishing definition facts.",
-        ).kind.definition_precedence()
+        self.file(range.file_id)
+            .expect_invariant(
+                "a definition destination has no registered source",
+                "navigation must retain source ownership",
+                "register sources before publishing definition facts",
+            )
+            .kind
+            .definition_precedence()
     }
 
     /// Order already selected destinations independently of source registration.
     /// This is a presentation tie-breaker, never Ruby load order or dispatch priority.
     pub(in crate::engine) fn sort_definition_ranges(&self, ranges: &mut [TextRange]) {
         ranges.sort_by_key(|range| {
-            let file = self.engine.file(range.file_id).expect(
-                "INVARIANT VIOLATED: a definition destination has no registered source. This is a bug because navigation must retain source ownership. Fix: register sources before publishing definition facts.",
+            let file = self.file(range.file_id).expect_invariant(
+                "a definition destination has no registered source",
+                "navigation must retain source ownership",
+                "register sources before publishing definition facts",
             );
-            (file.kind.definition_precedence(), file.path.as_path(), range.start_byte, range.end_byte)
+            (
+                file.kind.definition_precedence(),
+                file.path.as_path(),
+                range.start_byte,
+                range.end_byte,
+            )
         });
     }
 }

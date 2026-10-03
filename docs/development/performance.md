@@ -22,7 +22,7 @@ changes unless there is evidence that they affect a hot path.
 Build once per revision, then run the same executable repeatedly:
 
 ```sh
-cargo build --locked --release --bin profiler
+cargo build --locked --release -p devtools --bin profiler
 mkdir -p target/performance
 ./target/release/profiler --benchmark-iterations 100 --check-budgets \
   > target/performance/budgets.log 2>&1
@@ -38,6 +38,11 @@ workspace explicitly (an absolute path also works):
   --benchmark-iterations 100 > target/performance/queries.log 2>&1
 ```
 
+Counters and timers in the report come from `ruby_analysis::stats` snapshots
+(see the [analysis library guide](../../crates/ruby-analysis/README.md#statistics));
+the profiler merges per-project snapshots and serializes them under their stat
+names, so a new stat in a serialized set appears without new plumbing.
+
 Use `--help` for focused definition/reference probes, diagnostic and semantic
 export manifests, and explicit resource settings. Query probe coordinates are
 zero-based LSP positions. Private workspaces may be inspected read-only; publish
@@ -50,14 +55,16 @@ for example `samply record ./target/release/profiler /path/to/project` if samply
 is installed. Target the phase indicated by the baseline report.
 
 For allocation investigation, build with
-`--no-default-features --features memory-profiling` and run the profiler with
-`--memory`. DHAT changes the allocator and writes `dhat-heap.json`; use it to
-locate allocation cost, not as a directly comparable production timing sample.
+`cargo build --release -p devtools --bin profiler --no-default-features --features memory-profiling`
+and run the profiler with `--memory`. DHAT changes the allocator and writes
+`dhat-heap.json`; use it to locate allocation cost, not as a directly comparable
+production timing sample.
 Rebuild the ordinary release executable before evaluating the candidate.
 
-The narrower `profile_indexer`, `profile_project_collection`, `profile_file_open`,
-`profile_single_file`, and `bench_references` tools remain available for isolated
-questions. They are not additional mandatory gates for every change.
+The profiler and the narrower `profile_indexer`, `profile_project_collection`,
+`profile_file_open`, `profile_single_file`, and `bench_references` tools live in
+the [devtools crate](../../crates/devtools/README.md) and remain available for
+isolated questions. They are not additional mandatory gates for every change.
 
 ## Acceptance
 
@@ -69,6 +76,7 @@ The profiler is the executable source of truth for the fixed built-in budgets:
 | Body-only edit p95 | 100 ms |
 | Completion / references p95 | 50 ms |
 | Hover / definition / semantic diagnostics p95 | 25 ms |
+| Project writer wait p95 under concurrent hover, definition, and references | 50 ms |
 | Estimated engine heap | 32 MiB |
 
 These are regression ceilings for the built-in workload, not latency promises
@@ -97,5 +105,5 @@ decision records keep their original measurements and paths and do not certify
 a new build.
 
 For a release candidate, run the existing
-[simulation release gate](release.md), which already includes the deterministic
+[performance release gate](release.md), which runs the deterministic
 profiler. Do not add a second copy of the same gate to a release procedure.

@@ -1,4 +1,5 @@
-use super::RubyLanguageServer;
+use super::Server;
+use crate::invariant::ExpectInvariant;
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -12,8 +13,10 @@ pub(super) struct WatchedFileChangeBatch {
 
 impl WatchedFileChangeBatch {
     pub(super) fn queue(&mut self, changes: Vec<FileEvent>) -> u64 {
-        self.generation = self.generation.checked_add(1).expect(
-            "INVARIANT VIOLATED: watched-file debounce generation overflowed. This is a bug because one server cannot receive 2^64 watched-file batches. Fix: inspect the client watcher storm that exhausted the generation counter.",
+        self.generation = self.generation.checked_add(1).expect_invariant(
+            "watched-file debounce generation overflowed",
+            "one server cannot receive 2^64 watched-file batches",
+            "inspect the client watcher storm that exhausted the generation counter",
         );
         for change in changes {
             self.changes.insert(change.uri.to_string(), change);
@@ -29,8 +32,10 @@ impl WatchedFileChangeBatch {
     }
 
     pub(super) fn cancel(&mut self) {
-        self.generation = self.generation.checked_add(1).expect(
-            "INVARIANT VIOLATED: watched-file debounce generation overflowed during cancellation. This is a bug because one server cannot cancel 2^64 watcher batches. Fix: inspect the shutdown or workspace lifecycle loop that exhausted the generation counter.",
+        self.generation = self.generation.checked_add(1).expect_invariant(
+            "watched-file debounce generation overflowed during cancellation",
+            "a server cannot cancel 2^64 watcher batches",
+            "inspect the loop that exhausted the generation counter",
         );
         self.changes.clear();
     }
@@ -41,7 +46,7 @@ pub(super) struct WatchedFileChanges {
     batch: Arc<Mutex<WatchedFileChangeBatch>>,
 }
 
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn queue_watched_file_changes(&self, changes: Vec<FileEvent>) -> u64 {
         self.file_changes.queue(changes)
     }

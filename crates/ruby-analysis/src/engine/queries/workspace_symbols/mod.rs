@@ -2,13 +2,13 @@ pub(in crate::engine) mod types;
 
 use crate::core::{FullyQualifiedName, SymbolFact, SymbolKind};
 use crate::engine::queries::workspace_symbols::types::WorkspaceSymbolMatch;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn top_level_symbols(&self, limit: usize) -> Vec<WorkspaceSymbolMatch> {
         let mut symbols = Vec::new();
 
-        for fact in self.engine.all_symbol_facts() {
+        for fact in self.all_symbol_facts() {
             if !fact_is_project(self, &fact) {
                 continue;
             }
@@ -38,7 +38,7 @@ impl<'a> AnalysisQuery<'a> {
         let matcher = SymbolMatcher::new();
         let mut results = Vec::new();
 
-        for fact in self.engine.all_symbol_facts() {
+        for fact in self.all_symbol_facts() {
             if !fact_is_project(self, &fact) {
                 continue;
             }
@@ -69,10 +69,11 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-fn fact_is_project(query: &AnalysisQuery<'_>, fact: &SymbolFact) -> bool {
+fn fact_is_project(query: &View<'_>, fact: &SymbolFact) -> bool {
     !fact.fqn.has_generated_owner()
         && query
             .engine
+            .view()
             .file(fact.range.file_id)
             .is_some_and(|file| file.kind.is_workspace_owned())
 }
@@ -274,26 +275,26 @@ impl SymbolMatcher {
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId, SourceKind,
-        SymbolFact, SymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId,
+        SourceKind, SymbolFact, SymbolKind, TextRange,
     };
-    use crate::engine::AnalysisQuery;
-    use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::View;
+    use crate::engine::{Project, ResolveMode, SourceFileInput};
 
     use super::*;
 
-    fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
+    fn query_with_symbols() -> (Project, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/user.rb".into(),
             content: source.into(),
             kind: SourceKind::Project,
         });
         let user = RubyConstant::new("User").expect("test constant must be valid");
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![
                     SymbolFact::new(
                         FullyQualifiedName::namespace(vec![user.clone()]),
@@ -319,7 +320,7 @@ mod tests {
     #[test]
     fn workspace_symbol_search_returns_domain_matches() {
         let (engine, file_id) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         let symbols = query.search_workspace_symbols("name", 100);
 
@@ -333,7 +334,7 @@ mod tests {
     #[test]
     fn top_level_symbols_return_only_top_level_namespaces() {
         let (engine, _) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         let symbols = query.top_level_symbols(50);
 
@@ -350,9 +351,9 @@ mod tests {
             content: "class ExternalGem\nend".into(),
             kind: SourceKind::Gem,
         });
-        engine.replace_facts(
+        engine.update(
             gem_file,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(
                     FullyQualifiedName::namespace(vec![
                         RubyConstant::new("ExternalGem").expect("test name must be valid")
@@ -364,7 +365,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert!(query
             .search_workspace_symbols("ExternalGem", 100)
@@ -382,9 +383,9 @@ mod tests {
             GeneratedOwnerId::new("rspec-ruby", "file:///tmp/user_spec.rb", "group:0:0")
                 .expect("test generated owner identity must be valid"),
         );
-        engine.replace_facts(
+        engine.update(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(
                     FullyQualifiedName::method(
                         vec![owner],
@@ -397,7 +398,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert!(query
             .search_workspace_symbols("generated_helper", 100)

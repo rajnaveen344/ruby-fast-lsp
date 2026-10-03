@@ -19,15 +19,19 @@ pub(in crate::engine) use chain_methods::{
 pub(in crate::engine) use lookup_chain::method_lookup_chain_for_reference_cached;
 #[cfg(test)]
 pub(crate) use lookup_chain::method_lookup_chain_uncached_construction_count;
-pub(in crate::engine) use lookup_chain::{method_lookup_chain, node_kind};
+pub(in crate::engine) use lookup_chain::{
+    method_lookup_chain, method_lookup_chain_has_unresolved_dependency_from_graph, node_kind,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::core::names::fqn_id::FqnId;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant, RubyMethod,
+    FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant, RubyMethod,
     RubyType, TextRange,
 };
+use crate::engine::lookup::MethodAnswer;
 
 #[derive(Default)]
 pub(crate) struct MethodLookupChainCache {
@@ -62,40 +66,34 @@ pub struct ConstantRenameTarget {
     pub ranges: Vec<TextRange>,
 }
 
-#[derive(Clone)]
-pub enum MethodLookupResult {
-    Unique(Arc<MethodFact>),
-    Ambiguous {
-        owner: FullyQualifiedName,
-        method: RubyMethod,
-    },
-    Missing,
-}
+/// A method reference outcome: the single referenced definition, an
+/// ambiguous owner, proven absence, or absence that cannot be proven.
+pub type MethodLookupResult = MethodAnswer<Arc<MethodFact>>;
 
-impl MethodLookupResult {
+impl MethodAnswer<Arc<MethodFact>> {
+    /// The referenced owner and method, with the fact when it is unique;
+    /// `None` when no definition was selected.
     pub fn reference_parts(
         &self,
     ) -> Option<(&FullyQualifiedName, RubyMethod, Option<&MethodFact>)> {
         match self {
-            MethodLookupResult::Unique(fact) => {
+            MethodAnswer::Found(fact) => {
                 Some((&fact.owner, method_name_from_fact(fact), Some(fact)))
             }
-            MethodLookupResult::Ambiguous { owner, method } => Some((owner, *method, None)),
-            MethodLookupResult::Missing => None,
+            MethodAnswer::Ambiguous { owner, method } => Some((owner, *method, None)),
+            MethodAnswer::Missing | MethodAnswer::Unknown(_) => None,
         }
-    }
-
-    pub fn is_missing(&self) -> bool {
-        matches!(self, MethodLookupResult::Missing)
     }
 }
 
 fn receiver_type_members(receiver_type: &RubyType) -> &[RubyType] {
     match receiver_type {
         RubyType::Union(members) => {
-            assert!(
+            invariant!(
                 members.len() >= 2,
-                "INVARIANT VIOLATED: method resolution received a RubyType::Union with fewer than two members. This is a bug because canonical union construction must collapse empty and singleton inputs. Fix: construct receiver unions only through RubyType::union helpers."
+                what = "method resolution received a RubyType::Union with fewer than two members",
+                why = "canonical union construction must collapse empty and singleton inputs",
+                fix = "construct receiver unions only through RubyType::union helpers",
             );
             members
         }
@@ -113,25 +111,25 @@ fn receiver_type_members(receiver_type: &RubyType) -> &[RubyType] {
 
 pub(in crate::engine) fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
     let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-        panic!(
-            "INVARIANT VIOLATED: method fact has non-method FQN `{}`. \
-             This is a bug because method facts must be keyed by method FQNs. \
-             Fix: only insert MethodFact values built from FullyQualifiedName::Method.",
-            fact.fqn
+        unreachable_invariant!(
+            what = "method fact has non-method FQN `{}`",
+            why = "method facts must be keyed by method FQNs",
+            fix = "only insert MethodFact values built from FullyQualifiedName::Method",
+            fact.fqn,
         );
     };
     *method
 }
 
 pub(in crate::engine) fn namespace_target_exists(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> bool {
     let parts = fqn.namespace_parts_slice();
     if parts.is_empty() {
         return true;
     }
-    if matches!(fqn, FullyQualifiedName::Namespace(_, _)) && engine.has_graph_node(fqn) {
+    if matches!(fqn, FullyQualifiedName::Namespace(_, _)) && engine.view().has_graph_node(fqn) {
         return true;
     }
     if let Some(kind) = fqn.namespace_kind() {
@@ -140,7 +138,7 @@ pub(in crate::engine) fn namespace_target_exists(
             crate::core::NamespaceKind::Singleton => crate::core::NamespaceKind::Instance,
         };
         let other = FullyQualifiedName::namespace_with_kind(parts.to_vec(), other_kind);
-        if engine.has_graph_node(&other) {
+        if engine.view().has_graph_node(&other) {
             return true;
         }
     } else {
@@ -152,28 +150,29 @@ pub(in crate::engine) fn namespace_target_exists(
             parts.to_vec(),
             crate::core::NamespaceKind::Singleton,
         );
-        if engine.has_graph_node(&instance) || engine.has_graph_node(&singleton) {
+        if engine.view().has_graph_node(&instance) || engine.view().has_graph_node(&singleton) {
             return true;
         }
     }
-    engine.has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
+    engine
+        .view()
+        .has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
 }
 
-fn is_module_instance_namespace(
-    engine: &crate::engine::AnalysisEngine,
-    fqn: &FullyQualifiedName,
-) -> bool {
+fn is_module_instance_namespace(engine: &crate::engine::Project, fqn: &FullyQualifiedName) -> bool {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Instance) {
         return false;
     }
-    engine.graph_node_has_kind(fqn, GraphNodeKind::Module)
+    engine
+        .view()
+        .graph_node_has_kind(fqn, GraphNodeKind::Module)
 }
 
 /// Concrete receiver roots reachable through a module's reverse mixin edges.
 /// Share this selection across navigation, references, and return inference;
 /// selecting a method from the module first would hide receiver overrides.
 pub(in crate::engine) fn module_instance_receivers(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     if !is_module_instance_namespace(engine, module_fqn) {
@@ -184,7 +183,7 @@ pub(in crate::engine) fn module_instance_receivers(
     let mut visited = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
 
-    for edge in engine.graph_edges_to(module_fqn) {
+    for edge in engine.view().graph_edges_to(module_fqn) {
         if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
             && visited.insert(edge.source.clone())
         {
@@ -199,7 +198,7 @@ pub(in crate::engine) fn module_instance_receivers(
         }
 
         if node_kind(engine, &current) == Some(GraphNodeKind::Module) {
-            for edge in engine.graph_edges_to(&current) {
+            for edge in engine.view().graph_edges_to(&current) {
                 if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
                     && visited.insert(edge.source.clone())
                 {

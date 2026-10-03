@@ -1,9 +1,14 @@
 use crate::core::{
-    ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind, GraphNodeKind,
-    MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, NamespaceKind,
-    RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
+    ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind,
+    MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, MethodVisibility,
+    NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
-use crate::indexer::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
+use crate::indexer::documents::scope_rules::{
+    method_declaration, namespace_is_proven_class, self_definition_namespace, DefinitionVisibility,
+    MethodDeclaration,
+};
+use crate::indexer::LocalScopeKind as LVScopeKind;
+use crate::invariant::ExpectInvariant;
 use log::warn;
 use ruby_prism::*;
 
@@ -11,7 +16,9 @@ use crate::core::RubyType;
 use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::type_tracker::{LocalReadType, TypeTracker};
 
-use crate::indexer::yard::{YardMethodDoc, YardParser, YardTypeConverter};
+use crate::indexer::yard::converter::YardTypeConverter;
+use crate::indexer::yard::parser::YardParser;
+use crate::indexer::yard::types::YardMethodDoc;
 
 use crate::indexer::fact_collector::inference::method_return::InferredMethodContext;
 use crate::indexer::fact_collector::FactCollector;
@@ -39,32 +46,29 @@ impl FactCollector {
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
 
-        // Determine namespace kind based on receiver and scope. Only support:
-        //   * `def self.foo`            (receiver: self)
-        //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
-        // Otherwise skip indexing.
+        // A nested `def` in this body lands on the owner a receiverless `def`
+        // here would, whatever this method's receiver.
+        let (nested_definition_namespace, nested_definition_kind) =
+            self.scope_tracker.method_definition_context();
+
+        // A receiver must be `self` naming a class or module, or a constant
+        // this walk resolves; otherwise the method is skipped.
         let (definition_namespace, namespace_kind, skip_method) = match node.receiver() {
-            None => {
-                let (namespace, kind) = self.scope_tracker.method_definition_context();
-                (namespace, kind, false)
-            }
+            None => (
+                nested_definition_namespace.clone(),
+                nested_definition_kind,
+                false,
+            ),
             Some(receiver) if receiver.as_self_node().is_some() => {
-                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-                (
-                    namespace,
-                    NamespaceKind::Singleton,
-                    receiver_kind != NamespaceKind::Singleton,
-                )
+                match self_definition_namespace(&self.scope_tracker) {
+                    Some(namespace) => (namespace, NamespaceKind::Singleton, false),
+                    None => (Vec::new(), NamespaceKind::Singleton, true),
+                }
             }
-            Some(_) => {
-                let namespace = self.scope_tracker.get_ns_stack();
-                let (kind, skip) = get_method_namespace_kind(
-                    node.receiver(),
-                    &namespace,
-                    self.scope_tracker.in_singleton(),
-                );
-                (namespace, kind, skip)
-            }
+            Some(receiver) => match self.resolve_constant_receiver_namespace(&receiver) {
+                Some(namespace) => (namespace, NamespaceKind::Singleton, false),
+                None => (Vec::new(), NamespaceKind::Singleton, true),
+            },
         };
 
         if skip_method {
@@ -78,35 +82,33 @@ impl FactCollector {
             return false;
         }
 
-        let mut method = RubyMethod::new(method_name_str.as_ref()).unwrap();
-        let mut actual_namespace_kind = namespace_kind;
+        let source_method = RubyMethod::new(method_name_str.as_ref()).unwrap();
         let definition_fqn = FullyQualifiedName::namespace(definition_namespace.clone());
-        let direct_definition_kinds = self
-            .facts
-            .direct
-            .graph_nodes
-            .iter()
-            .filter(|fact| fact.fqn == definition_fqn)
-            .map(|fact| fact.kind)
-            .collect::<Vec<_>>();
-        let definition_is_proven_class = if direct_definition_kinds.is_empty() {
-            crate::engine::AnalysisQuery::new(&self.semantics.engine.read())
-                .namespace_node_kind(&definition_fqn)
-                == Some(GraphNodeKind::Class)
-        } else {
-            direct_definition_kinds
+        let definition_is_proven_class = namespace_is_proven_class(
+            self.facts
+                .analysis
+                .graph_nodes
                 .iter()
-                .all(|kind| *kind == GraphNodeKind::Class)
-        };
-        let is_constructor = method.as_str() == "initialize"
-            && node.receiver().is_none()
-            && namespace_kind == NamespaceKind::Instance
-            && definition_is_proven_class;
-
-        if is_constructor {
-            method = RubyMethod::new("new").unwrap();
-            actual_namespace_kind = NamespaceKind::Singleton;
-        }
+                .filter(|fact| fact.fqn == definition_fqn)
+                .map(|fact| fact.kind),
+            || self.semantics.project.namespace_node_kind(&definition_fqn),
+        );
+        let MethodDeclaration {
+            method,
+            kind: actual_namespace_kind,
+            visibility,
+            module_function_copy,
+        } = method_declaration(
+            source_method,
+            node.receiver().is_none(),
+            namespace_kind,
+            definition_is_proven_class,
+            DefinitionVisibility {
+                default: self.scope_tracker.current_visibility(),
+                module_function_mode: self.scope_tracker.module_function_mode_enabled(),
+            },
+        );
+        let is_constructor = method != source_method;
 
         let name_location = node.name_loc();
         // Use full method body range (def to end) for entry.location, consistent with class/module
@@ -141,7 +143,8 @@ impl FactCollector {
         let namespace_parts = definition_namespace;
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method);
-        self.scope_tracker.push_method_fqn(Some(fqn.clone()));
+        self.scope_tracker
+            .push_method_fqn(fqn.clone(), actual_namespace_kind);
 
         // Owner FQN uses Namespace variant with kind to distinguish instance vs singleton methods
         let owner_fqn =
@@ -168,10 +171,11 @@ impl FactCollector {
                     reason: reason.clone(),
                 },
                 (None, None) => MethodAvailability::Available,
-                (Some(_), Some(_)) => panic!(
-                    "INVARIANT VIOLATED: method `{method}` is marked both @unavailable and @absent. \
-                     This is a bug because a runtime API cannot simultaneously exist-but-fail and not exist. \
-                     Fix: retain exactly one availability annotation in the owning stub."
+                (Some(_), Some(_)) => unreachable_invariant!(
+                    what = "method `{method}` is marked both @unavailable and @absent",
+                    why = "a runtime API cannot simultaneously exist-but-fail and not exist",
+                    fix = "retain exactly one availability annotation in the owning stub",
+                    method = method,
                 ),
             },
             None => MethodAvailability::Available,
@@ -188,11 +192,9 @@ impl FactCollector {
                 .as_ref()
                 .and_then(YardMethodDoc::format_return_type),
             availability.clone(),
+            visibility,
         );
-        if node.receiver().is_none()
-            && actual_namespace_kind == NamespaceKind::Instance
-            && self.scope_tracker.module_function_mode_enabled()
-        {
+        if module_function_copy {
             self.direct_push_method_fact_with_signature_name_range_and_availability(
                 namespace_parts.clone(),
                 NamespaceKind::Singleton,
@@ -217,6 +219,7 @@ impl FactCollector {
                     .as_ref()
                     .and_then(YardMethodDoc::format_return_type),
                 availability,
+                MethodVisibility::Public,
             );
         }
 
@@ -226,7 +229,7 @@ impl FactCollector {
             let definition_range = self.direct_range(&full_location);
             for fact in self
                 .facts
-                .direct
+                .analysis
                 .methods
                 .iter_mut()
                 .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
@@ -240,7 +243,7 @@ impl FactCollector {
             let definition_range = self.direct_range(&full_location);
             for fact in self
                 .facts
-                .direct
+                .analysis
                 .methods
                 .iter_mut()
                 .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
@@ -259,15 +262,13 @@ impl FactCollector {
         self.scope_tracker.push_method_execution_context(
             namespace_parts.clone(),
             namespace_kind,
-            namespace_parts.clone(),
-            namespace_kind,
+            nested_definition_namespace,
+            nested_definition_kind,
         );
 
-        self.document.variable_scopes_mut().enter_scope(
-            scope_kind,
-            body_range,
-            Some(method_name_str.to_string()),
-        );
+        self.document
+            .variable_scopes_mut()
+            .enter_scope(scope_kind, body_range);
 
         // Convert YARD types to RubyType for type inference
         // Use namespace-aware conversion to resolve relative type names
@@ -303,14 +304,20 @@ impl FactCollector {
             (None, Vec::new())
         };
         let rbs_param_types = {
-            let engine = self.semantics.engine.read();
-            let query = crate::engine::AnalysisQuery::new(&engine);
+            let parameter_names = params
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>();
+            let contracts = self.semantics.project.rbs_parameter_contract_types(
+                &fqn,
+                &owner_fqn,
+                &parameter_names,
+            );
             params
                 .iter()
-                .filter_map(|parameter| {
-                    query
-                        .rbs_parameter_contract_type(&fqn, &owner_fqn, &parameter.name)
-                        .map(|ruby_type| (parameter.name.clone(), ruby_type, parameter.range))
+                .zip(contracts)
+                .filter_map(|(parameter, contract)| {
+                    contract.map(|ruby_type| (parameter.name.clone(), ruby_type, parameter.range))
                 })
                 .collect::<Vec<_>>()
         };
@@ -347,10 +354,10 @@ impl FactCollector {
         // Project RBS facts use the same isolated engine as Ruby source and
         // outrank the process-wide bundled core signatures. Owner identity is
         // required so instance/singleton homonyms cannot exchange contracts.
-        let project_rbs_return_type = {
-            let engine = self.semantics.engine.read();
-            crate::engine::AnalysisQuery::new(&engine).rbs_return_contract_type(&fqn, &owner_fqn)
-        };
+        let project_rbs_return_type = self
+            .semantics
+            .project
+            .rbs_return_contract_type(&fqn, &owner_fqn);
         let rbs_return_type = project_rbs_return_type.or_else(|| {
             let class_name = namespace_parts
                 .iter()
@@ -458,7 +465,7 @@ impl FactCollector {
         }
 
         if let Some(return_type) = &return_type {
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::MethodReturn(fqn.clone()),
                 return_type.clone(),
                 self.document.prism_location_to_text_range(&full_location),
@@ -469,7 +476,7 @@ impl FactCollector {
             if *param_type == RubyType::Unknown {
                 continue;
             }
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::Parameter {
                     method: fqn.clone(),
                     name: param_name.clone(),
@@ -497,9 +504,15 @@ impl FactCollector {
         if reads.is_empty() {
             return;
         }
-        let scope_id = self.document.variable_scopes().current_scope().expect(
-            "INVARIANT VIOLATED: TypeTracker local-read results have no active method scope. This is a bug because process_def_node_entry enters the scope before collecting its return equation. Fix: install flow evidence before exiting the definition.",
-        );
+        let scope_id = self
+            .document
+            .variable_scopes()
+            .current_scope()
+            .expect_invariant(
+                "TypeTracker local-read results have no active method scope",
+                "process_def_node_entry enters the scope before collecting its return equation",
+                "install flow evidence before exiting the definition",
+            );
         let mut installed_reads = Vec::with_capacity(reads.len());
         let mut replace_reasons = HashMap::new();
         let mut remove_reasons = HashSet::new();
@@ -527,10 +540,13 @@ impl FactCollector {
                     installed_reads.push((read.name, range, ruby_type));
                 }
                 (ruby_type, Some(reason)) => {
-                    assert!(
+                    invariant!(
                         RubyType::contains_unknown(&ruby_type),
-                        "INVARIANT VIOLATED: fully proven local-read type `{ruby_type}` carried Unknown reason `{}`. This is a bug because only a partially known outer container may coexist with a nested proof failure. Fix: synchronize FlowEnvironment type and unknown_reasons atomically.",
-                        reason.code()
+                        what = "fully proven local-read type `{ruby_type}` carried Unknown reason `{}`",
+                        why = "only a partially known outer container may coexist with a nested proof failure",
+                        fix = "synchronize FlowEnvironment type and unknown_reasons atomically",
+                        reason.code(),
+                        ruby_type = ruby_type,
                     );
                     replace_reasons.insert(range, reason);
                     installed_reads.push((read.name, range, ruby_type));
@@ -595,8 +611,7 @@ impl FactCollector {
         pending: &InferredMethodContext,
     ) -> MethodReturnEquation {
         let mut tracker = TypeTracker::new();
-        tracker = tracker.with_analysis_engine(self.semantics.engine.clone());
-        tracker = tracker.with_analysis_query_cache(self.semantics.query_cache.clone());
+        tracker = tracker.with_semantics(self.semantics.project.clone());
         tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
         tracker = tracker
             .with_local_public_method_candidates(self.local_public_method_candidates_for_tracker());
@@ -639,7 +654,7 @@ impl FactCollector {
             .entry(pending.namespace_parts)
             .or_default()
             .push(equation);
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(pending.fqn),
             immediate.into_ruby_type(),
             pending.definition_range,
@@ -837,7 +852,7 @@ impl FactCollector {
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, RubyType> {
         self.facts
-            .types
+            .flow_types
             .method_return_types()
             .map(|(fqn, ruby_type)| (fqn.clone(), ruby_type.clone()))
             .collect()
@@ -859,7 +874,7 @@ impl FactCollector {
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, FullyQualifiedName> {
         self.facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .filter(|edge| edge.kind == GraphEdgeKind::Superclass)

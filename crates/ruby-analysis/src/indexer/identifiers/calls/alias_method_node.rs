@@ -1,5 +1,6 @@
+use crate::core::MethodReceiver;
 use crate::core::{NamespaceKind, RubyMethod};
-use crate::indexer::{Identifier, LVScopeKind, MethodReceiver};
+use crate::indexer::{Identifier, LVScopeKind};
 use ruby_prism::{AliasMethodNode, Node};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};

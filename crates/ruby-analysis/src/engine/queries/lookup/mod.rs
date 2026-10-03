@@ -9,12 +9,12 @@ use crate::core::{
 use crate::engine::queries::lookup::types::{
     ConstantLookupRequest, ConstantMatch, MethodMatch, MixinUsage, MixinUsageKind,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::resolution::{
     execution_context_application_targets, method_lookup_chain, namespace_target_exists,
 };
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn method_facts_matching(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -33,7 +33,7 @@ impl<'a> AnalysisQuery<'a> {
         ));
         for root in lookup_roots {
             for ancestor in method_lookup_chain(self.engine, &root) {
-                for fact in self.engine.method_facts_matching_owner(&ancestor, partial) {
+                for fact in self.method_facts_matching_owner(&ancestor, partial) {
                     let FullyQualifiedName::Method(_, method) = &fact.fqn else {
                         continue;
                     };
@@ -51,7 +51,6 @@ impl<'a> AnalysisQuery<'a> {
     pub fn constant_matches(&self, request: &ConstantLookupRequest) -> Vec<ConstantMatch> {
         let mut seen = HashSet::new();
         let mut candidates = self
-            .engine
             .all_symbol_facts()
             .into_iter()
             .filter(|fact| {
@@ -81,8 +80,10 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Vec<MethodMatch> {
         if let RubyType::Union(members) = receiver_type {
             let Some((first, rest)) = members.split_first() else {
-                panic!(
-                    "INVARIANT VIOLATED: completion received an empty RubyType::Union. This is a bug because RubyType::union collapses empty inputs to Unknown. Fix: construct receiver unions only through the canonical RubyType helpers."
+                unreachable_invariant!(
+                    what = "completion received an empty RubyType::Union",
+                    why = "RubyType::union collapses empty inputs to Unknown",
+                    fix = "construct receiver unions only through the canonical RubyType helpers",
                 );
             };
             let mut common = self
@@ -138,7 +139,7 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn module_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
         let mut usages = Vec::new();
-        for edge in self.engine.all_graph_edges() {
+        for edge in self.all_graph_edges() {
             if edge.target.namespace_parts() != module_fqn.namespace_parts() {
                 continue;
             }
@@ -173,7 +174,7 @@ impl<'a> AnalysisQuery<'a> {
             }
             visited.push(target.clone());
 
-            for edge in self.engine.all_graph_edges() {
+            for edge in self.all_graph_edges() {
                 if !matches!(
                     edge.kind,
                     GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
@@ -189,7 +190,7 @@ impl<'a> AnalysisQuery<'a> {
                     continue;
                 }
 
-                let nodes = self.engine.graph_nodes_for(&edge.source);
+                let nodes = self.graph_nodes_for(&edge.source);
                 if nodes.iter().any(|node| node.kind == GraphNodeKind::Class) {
                     result.extend(
                         nodes
@@ -212,7 +213,7 @@ impl<'a> AnalysisQuery<'a> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        for fact in self.engine.all_method_facts() {
+        for fact in self.all_method_facts() {
             if !fact.owner.namespace_parts().is_empty() {
                 continue;
             }
@@ -236,11 +237,11 @@ impl<'a> AnalysisQuery<'a> {
 
     fn method_match(&self, fact: &MethodFact) -> MethodMatch {
         let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-            panic!(
-                "INVARIANT VIOLATED: analysis method match fact has non-method FQN: {}. \
-                 This is a bug because MethodStore must only contain method facts. \
-                 Fix: reject non-method FQNs in MethodFact construction.",
-                fact.fqn
+            unreachable_invariant!(
+                what = "analysis method match fact has non-method FQN: {}",
+                why = "MethodStore must only contain method facts",
+                fix = "reject non-method FQNs in MethodFact construction",
+                fact.fqn,
             );
         };
 
@@ -301,40 +302,6 @@ impl<'a> AnalysisQuery<'a> {
                 .flat_map(|ty| Self::receiver_type_to_namespaces(ty, kind))
                 .collect(),
             RubyType::Unknown => Vec::new(),
-        }
-    }
-
-    pub fn receiver_type_to_method_namespaces(ruby_type: &RubyType) -> Vec<FullyQualifiedName> {
-        match ruby_type {
-            RubyType::Class(fqn) | RubyType::Module(fqn) => {
-                let mut namespaces = vec![FullyQualifiedName::namespace_with_kind(
-                    fqn.namespace_parts(),
-                    NamespaceKind::Instance,
-                )];
-                if fqn.name() == "Object" {
-                    namespaces.push(FullyQualifiedName::namespace_with_kind(
-                        Vec::new(),
-                        NamespaceKind::Instance,
-                    ));
-                }
-                namespaces
-            }
-            RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-                vec![FullyQualifiedName::namespace_with_kind(
-                    fqn.namespace_parts(),
-                    NamespaceKind::Singleton,
-                )]
-            }
-            RubyType::Union(types) => types
-                .iter()
-                .flat_map(Self::receiver_type_to_method_namespaces)
-                .collect(),
-            RubyType::Literal(value) => {
-                Self::receiver_type_to_method_namespaces(&value.widened_type())
-            }
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) | RubyType::Unknown => {
-                Vec::new()
-            }
         }
     }
 

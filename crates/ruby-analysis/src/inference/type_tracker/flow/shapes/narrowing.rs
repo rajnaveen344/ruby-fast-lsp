@@ -132,9 +132,11 @@ impl TypeTracker {
         literals: &[LiteralValue],
         require_match: bool,
     ) -> bool {
-        assert!(
+        invariant!(
             !literals.is_empty(),
-            "INVARIANT VIOLATED: shape discriminator narrowing received an empty literal set. This is a bug because an empty Ruby when clause cannot reach this helper. Fix: require at least one supported literal condition before narrowing."
+            what = "shape discriminator narrowing received an empty literal set",
+            why = "an empty Ruby when clause cannot reach this helper",
+            fix = "require at least one supported literal condition before narrowing",
         );
         let identities = self.environment.shape_identities(name);
         if identities.is_empty() {
@@ -192,12 +194,18 @@ impl TypeTracker {
         let mut retained = BTreeSet::new();
         let mut updates = Vec::new();
         for identity in identities {
-            let state = self.environment.shape_states.get(identity).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: shape guard references absent identity {:?}. This is a bug because a local binding and its identity states must be joined atomically. Fix: preserve the complete FlowEnvironment across branches.",
-                    identity
-                )
-            });
+            let state = self
+                .environment
+                .shape_states
+                .get(identity)
+                .unwrap_or_else(|| {
+                    unreachable_invariant!(
+                        what = "shape guard references absent identity {:?}",
+                        why = "a local binding and its identity states must be joined atomically",
+                        fix = "preserve the complete FlowEnvironment across branches",
+                        identity,
+                    )
+                });
             match state {
                 ShapeIdentityState::Invalidated(_) => {
                     retained.insert(*identity);
@@ -253,8 +261,10 @@ pub(in crate::inference::type_tracker) fn narrow_shape_literal_type(
     let mut retained = Vec::new();
     for alternative in shape_alternatives(ruby_type)? {
         let RubyType::Shape(shape) = alternative else {
-            panic!(
-                "INVARIANT VIOLATED: discriminator narrowing received a non-shape alternative. This is a bug because shape_alternatives guarantees Shape members. Fix: keep discriminator inputs restricted to complete shape identities."
+            unreachable_invariant!(
+                what = "discriminator narrowing received a non-shape alternative",
+                why = "shape_alternatives guarantees Shape members",
+                fix = "keep discriminator inputs restricted to complete shape identities",
             );
         };
         let relationship = shape_literal_relationship(&shape, key, literal);
@@ -289,8 +299,10 @@ pub(in crate::inference::type_tracker) fn narrow_shape_literal_set_type(
     let mut retained = Vec::new();
     for alternative in shape_alternatives(ruby_type)? {
         let RubyType::Shape(shape) = alternative else {
-            panic!(
-                "INVARIANT VIOLATED: case discriminator narrowing received a non-shape alternative. This is a bug because shape_alternatives guarantees Shape members. Fix: keep case narrowing inputs restricted to complete shape identities."
+            unreachable_invariant!(
+                what = "case discriminator narrowing received a non-shape alternative",
+                why = "shape_alternatives guarantees Shape members",
+                fix = "keep case narrowing inputs restricted to complete shape identities",
             );
         };
         let relationships = literals
@@ -423,8 +435,10 @@ pub(in crate::inference::type_tracker) fn narrow_shape_pattern_type(
     let mut retained = Vec::new();
     for alternative in shape_alternatives(ruby_type)? {
         let RubyType::Shape(shape) = alternative else {
-            panic!(
-                "INVARIANT VIOLATED: Hash pattern narrowing received a non-shape alternative. This is a bug because shape_alternatives guarantees Shape members. Fix: keep pattern inputs restricted to complete shape identities."
+            unreachable_invariant!(
+                what = "Hash pattern narrowing received a non-shape alternative",
+                why = "shape_alternatives guarantees Shape members",
+                fix = "keep pattern inputs restricted to complete shape identities",
             );
         };
         let relationships = requirements
@@ -482,8 +496,10 @@ pub(in crate::inference::type_tracker) fn narrow_shape_presence_type(
     let mut retained = Vec::new();
     for alternative in shape_alternatives(ruby_type)? {
         let RubyType::Shape(shape) = alternative else {
-            panic!(
-                "INVARIANT VIOLATED: presence narrowing received a non-shape alternative. This is a bug because shape_alternatives guarantees Shape members. Fix: keep the narrowing input filter exhaustive."
+            unreachable_invariant!(
+                what = "presence narrowing received a non-shape alternative",
+                why = "shape_alternatives guarantees Shape members",
+                fix = "keep the narrowing input filter exhaustive",
             );
         };
         match (shape.field(key), truth) {

@@ -2,9 +2,10 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType, TypeInferenceOutcome,
     UnknownReason,
 };
-use crate::engine::AnalysisQuery;
+use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
+use crate::inference::semantics::ReceiverAccess;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::returns::dependencies::call_is_direct_recursive;
 use crate::inference::type_tracker::TypeTracker;
@@ -64,13 +65,13 @@ impl TypeTracker {
                         String::from_utf8_lossy(const_read.name().as_slice()).to_string();
                     if let Ok(constant) = RubyConstant::new(&class_name) {
                         let fqn = FullyQualifiedName::constant(vec![constant]);
-                        return RubyType::Class(fqn);
+                        return seed_constructor_type(&fqn).unwrap_or(RubyType::Unknown);
                     }
                 }
                 // Handle namespaced constant like Foo::Bar.new
                 if let Some(const_path) = receiver.as_constant_path_node() {
                     if let Some(fqn) = Self::resolve_constant_path(&const_path) {
-                        return RubyType::Class(fqn);
+                        return seed_constructor_type(&fqn).unwrap_or(RubyType::Unknown);
                     }
                 }
             }
@@ -197,7 +198,7 @@ impl TypeTracker {
         method_name: &str,
         allow_private: bool,
     ) -> Option<RubyType> {
-        let analysis_engine = self.analysis.engine.as_ref()?;
+        let project = self.analysis.project.as_ref()?;
         let method = crate::core::RubyMethod::new(method_name).ok()?;
         if let Some(return_type) =
             self.local_method_return_type_for_receiver(receiver_type, &method, !allow_private)
@@ -228,43 +229,20 @@ impl TypeTracker {
         };
         let namespace =
             FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
-        let engine = analysis_engine.read();
-        let query = AnalysisQuery::new(&engine);
-        if allow_private {
-            self.analysis.query_cache.as_ref().map_or_else(
-                || query.method_return_type_for_receiver(&namespace, &method),
-                |cache| query.method_return_type_for_receiver_cached(&namespace, &method, cache),
-            )
-        } else if let Some(current_class) = self.context.class.as_ref() {
-            let caller_namespace = FullyQualifiedName::namespace_with_kind(
+        let caller_namespace = self.context.class.as_ref().map(|current_class| {
+            FullyQualifiedName::namespace_with_kind(
                 current_class.namespace_parts(),
                 crate::core::NamespaceKind::Instance,
-            );
-            self.analysis.query_cache.as_ref().map_or_else(
-                || {
-                    query.method_return_type_for_protected_receiver(
-                        &namespace,
-                        &method,
-                        &caller_namespace,
-                    )
-                },
-                |cache| {
-                    query.method_return_type_for_protected_receiver_cached(
-                        &namespace,
-                        &method,
-                        &caller_namespace,
-                        cache,
-                    )
-                },
             )
+        });
+        let access = if allow_private {
+            ReceiverAccess::Any
+        } else if let Some(caller) = caller_namespace.as_ref() {
+            ReceiverAccess::Protected { caller }
         } else {
-            self.analysis.query_cache.as_ref().map_or_else(
-                || query.method_return_type_for_public_receiver(&namespace, &method),
-                |cache| {
-                    query.method_return_type_for_public_receiver_cached(&namespace, &method, cache)
-                },
-            )
-        }
+            ReceiverAccess::Public
+        };
+        project.receiver_method_return_type(&namespace, &method, access)
     }
 
     pub(in crate::inference::type_tracker) fn local_method_return_type_for_receiver(
@@ -310,21 +288,13 @@ impl TypeTracker {
             }
         }
 
-        let Some(analysis_engine) = self.analysis.engine.as_ref() else {
+        let Some(project) = self.analysis.project.as_ref() else {
             return RubyType::Unknown;
         };
-        let engine = analysis_engine.read();
-        let query = AnalysisQuery::new(&engine);
-        let Some(callee) = query.resolve_super_method_callee(&namespace, method) else {
-            return RubyType::Unknown;
-        };
-        let super_method =
-            FullyQualifiedName::method(callee.owner.namespace_parts(), method.clone());
-        if let Some(return_type) = self.analysis.method_returns.get(&super_method) {
-            return return_type.clone();
-        }
-        query
-            .method_return_type_for_callee(&callee)
+        project
+            .super_method_return_type(&namespace, method, &|super_method| {
+                self.analysis.method_returns.get(super_method).cloned()
+            })
             .unwrap_or(RubyType::Unknown)
     }
 

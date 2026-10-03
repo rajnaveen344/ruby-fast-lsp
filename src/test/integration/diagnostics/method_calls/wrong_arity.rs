@@ -9,7 +9,7 @@
 //! Skip if method can't be strictly resolved on owner+ancestors (avoid double-warning
 //! with `unresolved-method`).
 
-use crate::test::harness::check;
+use crate::test::harness::{check, check_project};
 
 #[tokio::test]
 async fn too_few_positional_warns() {
@@ -677,5 +677,28 @@ xs = []
 <warn none code="wrong-arity">greet("a", "b", "c", *xs)</warn>
 "#,
     )
+    .await;
+}
+
+/// An implicit-self call resolves through the class's own ancestors first: an
+/// included module's method wins over the same name on `Kernel`.
+#[tokio::test]
+async fn implicit_self_call_prefers_an_included_module_over_kernel() {
+    check_project(&[(
+        "bag.rb",
+        r#"
+class Bag
+  include Enumerable
+
+  def each(&block)
+    [1, 2].each(&block)
+  end
+
+  def small
+    <warn none>select</warn> { |value| value < 2 }
+  end
+end
+"#,
+    )])
     .await;
 }

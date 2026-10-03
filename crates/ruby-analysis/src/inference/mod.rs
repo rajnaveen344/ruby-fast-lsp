@@ -23,14 +23,21 @@
 //!    candidates, local-flow evidence, and compact value-constant and
 //!    method-return equations.
 //! 2. This module derives expression, flow, method-return, block/proc, and RBS
-//!    types. It may ask semantic questions through domain query APIs, but it
-//!    does not own a workspace, parse files, or use editor protocol types.
+//!    types. It asks project questions only through [`semantics::Semantics`],
+//!    which the engine implements; it does not own a workspace, parse files,
+//!    or use editor protocol types.
 //! 3. [`crate::engine`] owns the complete project graph, the sole Ruby
 //!    method/MRO/visibility/ambiguity policy, file replacement, cross-file
 //!    resolution, and stored solved outcomes.
 //! 4. Root LSP and CLI adapters project those same engine-owned domain results
 //!    into hover, inlay, completion, navigation, diagnostics, or terminal/JSON
 //!    output.
+//!
+//! The list is pipeline order. Code dependencies point the other way:
+//! `core` <- `inference` <- `indexer` <- `engine`. Outside tests this module
+//! names neither the indexer nor the engine, and the crate's
+//! `architecture_tests::analysis_layers_depend_only_downward` enforces that;
+//! the doc links above are the only mentions.
 //!
 //! This direction is intentional. Moving AST traversal into the engine would
 //! couple persistent semantic state to Prism. Moving lookup into inference or
@@ -113,8 +120,9 @@
 //! Unknown rather than widening a result.
 //!
 //! [`rbs`] performs supported RBS conversion and generic substitution.
-//! [`completion`] exposes reusable receiver/type probing; editor trigger
-//! routing and snippet construction remain outside this crate.
+//! Completion receiver/type probing reads documents and lives with the engine
+//! queries (`crate::engine::completion`); editor trigger routing and snippet
+//! construction remain outside this crate.
 //!
 //! # Determinism and lifecycle
 //!
@@ -128,7 +136,7 @@
 //! - bounding loop and recursive solving rather than depending on traversal
 //!   luck;
 //! - storing evidence with its owning file and removing it through the same
-//!   `register_file -> replace_facts -> resolve` lifecycle as other facts; and
+//!   `register_file -> update -> resolve` lifecycle as other facts; and
 //! - reusing compact bindings/equations instead of reparsing or walking Prism
 //!   once per consumer.
 //!
@@ -166,8 +174,9 @@
 //! block-result union variants. The solver never truncates a candidate set or
 //! union and never widens an incomplete result to `Object`.
 //!
-//! The internal `callable_body` module evaluates the one AST-free summary emitted during the
-//! indexer's ordinary Prism traversal. Direct `.call` and `&callable` bind
+//! The internal `callable_body` module lowers a static callable literal to one
+//! AST-free summary during the indexer's ordinary Prism traversal and evaluates
+//! that summary. Direct `.call` and `&callable` bind
 //! their proven inputs through that same evaluator. Local identities and
 //! aliases remain bounded flow state; only capture-free constant summaries
 //! become file-owned engine facts and persistent dependency products. Capture
@@ -213,18 +222,17 @@
 //!    path or retained-memory change with the release profiler.
 
 pub(crate) mod callable_body;
-pub mod completion;
 pub(crate) mod constant;
 pub mod control_flow;
 pub(crate) mod higher_order;
 pub mod method;
 pub mod rbs;
+pub mod semantics;
+
+/// Opaque higher-order preparation result returned through `Semantics`.
+pub use higher_order::PreparedCallableSet;
 pub mod r#type;
 pub mod type_tracker;
-
-pub use method::{MethodSignature, MethodSignatureContext, MethodVisibility, Parameter};
-pub use r#type::{ArrayTypeInfo, CollectionAnalyzer, HashTypeInfo, LiteralAnalyzer};
-pub use rbs::{get_rbs_method_return_type, has_rbs_class, rbs_declaration_count, rbs_method_count};
 
 #[cfg(test)]
 mod architecture_tests {
@@ -236,15 +244,21 @@ mod architecture_tests {
         let mut pending = vec![inference_dir];
         while let Some(directory) = pending.pop() {
             let entries = std::fs::read_dir(&directory).unwrap_or_else(|error| {
-                panic!(
-                    "INVARIANT VIOLATED: inference source directory `{}` could not be read: {error}. This is a bug because the architecture boundary test must inspect every inference module. Fix: keep inference sources under crates/ruby-analysis/src/inference or update the boundary root deliberately.",
+                unreachable_invariant!(
+                    what = "inference source directory `{}` could not be read: {error}",
+                    why = "the boundary test must inspect every inference module",
+                    fix = "keep sources under ruby-analysis/src/inference or move the boundary root deliberately",
                     directory.display(),
+                    error = error,
                 )
             });
             for entry in entries {
                 let entry = entry.unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: an inference source entry could not be read: {error}. This is a bug because skipping a source file could hide an editor-protocol dependency. Fix: repair the source tree before running architecture tests."
+                    unreachable_invariant!(
+                        what = "an inference source entry could not be read: {error}",
+                        why = "skipping a source file could hide an editor-protocol dependency",
+                        fix = "repair the source tree before running architecture tests",
+                        error = error,
                     )
                 });
                 let path = entry.path();
@@ -256,16 +270,21 @@ mod architecture_tests {
                     continue;
                 }
                 let source = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: inference source `{}` could not be decoded as UTF-8: {error}. This is a bug because Rust source must be UTF-8 and the boundary test cannot inspect unreadable code. Fix: restore valid Rust source text.",
+                    unreachable_invariant!(
+                        what = "inference source `{}` could not be decoded as UTF-8: {error}",
+                        why = "rust source must be UTF-8 and the boundary test cannot inspect unreadable code",
+                        fix = "restore valid Rust source text",
                         path.display(),
+                        error = error,
                     )
                 });
                 let tower_protocol = ["tower", "_lsp"].concat();
                 let protocol_types = ["lsp", "_types"].concat();
-                assert!(
+                invariant!(
                     !source.contains(&tower_protocol) && !source.contains(&protocol_types),
-                    "INVARIANT VIOLATED: inference source `{}` imports editor protocol types. This is a bug because ruby-analysis inference must be reusable by the standalone checker without an LSP data model. Fix: accept SourceFileId, TextRange, or byte offsets and convert protocol positions in the root adapter.",
+                    what = "inference source `{}` imports editor protocol types",
+                    why = "the standalone checker reuses inference without an LSP data model",
+                    fix = "take SourceFileId, TextRange, or offsets; convert positions in the adapter",
                     path.display(),
                 );
             }

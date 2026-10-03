@@ -1,0 +1,22 @@
+//! Document and indexing lifecycle contracts: deterministic schedules around
+//! background collection, commit, dependency refresh, and diagnostic
+//! publication, plus exact results across edit recovery.
+
+// Cold coordinator commit and publication paused around editor operations.
+mod coordinator_schedules;
+// Background collection/commit ordering over the production snapshot guard.
+mod commit_interleavings;
+// Dependency refresh interleaved with edits, roots, and workspace changes.
+mod dependency_refresh;
+// Consumer diagnostics after a definition is deleted and restored.
+mod diagnostic_edits;
+// Extension discovery, workspace reconfiguration, and watched-file routing.
+mod extension_workspaces;
+// Deleted watched files leave diagnostics, navigation, and fingerprints.
+mod file_removal;
+// Method targets across ancestor edits, partial opens, and closed buffers.
+mod hierarchy_edits;
+// Complete navigation and rename results that survive edit recovery.
+mod exact_results;
+// Observation helpers that report, never repair, published and semantic state.
+mod observations;

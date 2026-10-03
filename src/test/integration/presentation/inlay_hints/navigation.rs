@@ -106,14 +106,14 @@ async fn compact_inlay_navigation_retains_abbreviated_identity_after_provider_ed
 
 #[tokio::test]
 async fn compact_inlay_navigation_retains_external_project_context() {
-    use crate::indexer::file_processor::FileProcessor;
+    use crate::loader::file_processor::FileProcessor;
     use ruby_analysis::core::SourceKind;
 
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("workspace_a");
     editor.add_workspace("workspace_b");
     let processor =
-        FileProcessor::with_extension_registry(editor.server().extensions.registry().clone());
+        FileProcessor::with_extension_registry(editor.server().extension_registry().clone());
     let entry_uri = crate::test::harness::fixture_uri("/external/catalog/lib/entry.rb");
     let source = "module Catalog\n  class Entry\n    Inner\n  end\nend\n";
     for project in ["workspace_a", "workspace_b"] {
@@ -129,12 +129,12 @@ async fn compact_inlay_navigation_retains_external_project_context() {
                 .collect_file_facts_as_deferred_resolution_in_engine(
                     &uri,
                     content,
-                    workspace.analysis_engine.clone(),
+                    workspace.handle().load_target(),
                     SourceKind::Gem,
                 )
                 .unwrap();
         }
-        workspace.analysis_engine.write().resolve();
+        workspace.handle().test_write().resolve();
     }
     editor
         .open("workspace_a/app.rb", "item = Catalog::Entry.new\n")

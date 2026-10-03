@@ -24,38 +24,22 @@ run the checks below locally before manually cutting a tag or dispatching
 publication. The `Release` workflow starts with native builds and retains native
 tests and installed-package checks.
 
-The checks need Rust, Node, Python, Java, and Ruby for oracle execution. Install
-the editor's test dependencies first:
+The checks need Rust, Node, Python, Java, and Ruby. Install the editor's test
+dependencies first:
 
 ```sh
 npm ci --prefix editors/vscode/vsix
 node editors/scripts/release_checks.js correctness
-node editors/scripts/release_checks.js simulation
+node editors/scripts/release_checks.js performance
 ```
 
 `correctness` runs structure-policy checks, package-version consistency, workspace
 Rust tests, editor/package tests, and explicit inference/precision reports.
-`simulation` runs Ruby oracle controls, release-mode simulations, both explicit
-synthetic campaigns through the `simulation` binary, and the deterministic performance budgets. Set
-`SIM_REAL_CORPUS_ROOT` only for a deliberately selected read-only corpus; otherwise
-that check remains recorded as not run.
+`performance` runs the deterministic profiler budgets.
 
 Logs and machine-readable summaries go to `target/release-evidence/` (override
-with `RUBY_FAST_LSP_EVIDENCE_DIR`). The runner rejects failures, every ignored Rust test, and missing or mismatched
-simulation completion reports. Explicit campaigns are separate from the ordinary
-workspace suite; an unselected real corpus is never counted as passed.
-
-The separate fault-detection campaign proves that reviewed injected defects fail
-their intended assertions:
-
-```sh
-python3 -B -m unittest discover -s support/simulation -p 'test_fault_campaign.py'
-python3 -B support/simulation/run_fault_campaign.py --run
-```
-
-This campaign belongs to release acceptance or simulator changes. It is not
-required for every documentation edit. See [simulation](simulation.md) for replay
-and for the distinction between consistency and independent semantic evidence.
+with `RUBY_FAST_LSP_EVIDENCE_DIR`). The runner rejects failures, every ignored
+Rust test, and suites that prove no passing test.
 
 ## 3. Validate the installed artifacts
 

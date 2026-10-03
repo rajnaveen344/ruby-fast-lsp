@@ -52,10 +52,9 @@ impl FactCollector {
     }
 
     fn process_direct_call_facts(&mut self, node: &CallNode) -> bool {
-        if node.receiver().is_none() && !self.scope_tracker.implicit_receiver_context_is_proven() {
-            return false;
-        }
-
+        // A receiverless declaration call in an ordinary block acts on the
+        // block's definition owner, as a `def` there does, whether or not the
+        // block's `self` is proven; the seed walk applies the same rule.
         self.push_direct_included_hook_mixin_edges(node);
 
         if node.receiver().is_some() && node.name().as_slice() == b"class_attribute" {

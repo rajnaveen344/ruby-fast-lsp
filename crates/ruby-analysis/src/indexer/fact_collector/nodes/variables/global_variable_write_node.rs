@@ -57,7 +57,7 @@ impl FactCollector {
         let range = self.document.prism_location_to_text_range(&name_loc);
         self.direct_push_assignment_type(subject.clone(), inferred_type.clone(), &name_loc);
 
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             subject,
             inferred_type,
             range,

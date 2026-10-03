@@ -1,6 +1,7 @@
 //! In-place Ruby type updates for solved equation and inferred method-return targets.
 
 use crate::core::{FullyQualifiedName, RubyType};
+use crate::invariant::ExpectInvariant;
 
 use super::{SourceFileId, TextRange, TypeProvenance, TypeStore, TypeSubject};
 
@@ -28,27 +29,27 @@ impl TypeStore {
             };
             for fact_id in fact_ids {
                 let fact = self.facts.get_mut(fact_id.index()).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: method-return type index points outside the fact arena. \
-                         This is a bug because indexed type ids must reference allocated slots. \
-                         Fix: update every TypeStore index when facts are removed or reused."
+                    unreachable_invariant!(
+                        what = "method-return type index points outside the fact arena",
+                        why = "indexed type ids must reference allocated slots",
+                        fix = "update every TypeStore index when facts are removed or reused",
                     )
                 });
                 let fact = fact.as_mut().unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: method-return type index points to a vacant fact slot. \
-                         This is a bug because removed type facts must be removed from every index. \
-                         Fix: keep TypeStore subject indexes synchronized with the fact arena."
+                    unreachable_invariant!(
+                        what = "method-return type index points to a vacant fact slot",
+                        why = "removed type facts must be removed from every index",
+                        fix = "keep TypeStore subject indexes synchronized with the fact arena",
                     )
                 });
                 if fact.range.file_id != file_id || fact.provenance != TypeProvenance::Inferred {
                     continue;
                 }
                 fact.ruby_type = ruby_type;
-                updated = updated.checked_add(1).expect(
-                    "INVARIANT VIOLATED: inferred method-return update count overflowed usize. \
-                     This is a bug because the count cannot exceed the bounded fact arena. \
-                     Fix: keep TypeStore fact counts within addressable memory.",
+                updated = updated.checked_add(1).expect_invariant(
+                    "inferred method-return update count overflowed usize",
+                    "the count cannot exceed the bounded fact arena",
+                    "keep TypeStore fact counts within addressable memory",
                 );
             }
         }
@@ -72,14 +73,20 @@ impl TypeStore {
         let mut updated = 0usize;
         for fact_id in fact_ids {
             let fact = self.facts[fact_id.index()].as_mut().unwrap_or_else(|| {
-                panic!("INVARIANT VIOLATED: a constant-equation target points to a vacant type fact. This is a bug because file replacement must update every type index atomically. Fix: remove stale ids from facts_by_subject when a file is replaced.")
+                unreachable_invariant!(
+                    what = "a constant-equation target points to a vacant type fact",
+                    why = "file replacement must update every type index atomically",
+                    fix = "remove stale ids from facts_by_subject when a file is replaced",
+                )
             });
             if fact.range != range {
                 continue;
             }
             fact.ruby_type = ruby_type;
-            updated = updated.checked_add(1).expect(
-                "INVARIANT VIOLATED: constant-equation update count overflowed usize. This is a bug because it cannot exceed the bounded type arena. Fix: bound retained type facts by addressable memory.",
+            updated = updated.checked_add(1).expect_invariant(
+                "constant-equation update count overflowed usize",
+                "it cannot exceed the bounded type arena",
+                "bound retained type facts by addressable memory",
             );
         }
         updated
@@ -120,12 +127,16 @@ impl TypeStore {
             }
             self.facts[fact_id.index()]
                 .as_mut()
-                .expect(
-                    "INVARIANT VIOLATED: a selected local-assignment equation target became vacant. This is a bug because resolution owns the type-store write lock. Fix: keep target selection and update in one atomic pass.",
+                .expect_invariant(
+                    "a selected local-assignment equation target became vacant",
+                    "resolution owns the type-store write lock",
+                    "keep target selection and update in one atomic pass",
                 )
                 .ruby_type = ruby_type;
-            updated = updated.checked_add(1).expect(
-                "INVARIANT VIOLATED: local-assignment equation update count overflowed usize. This is a bug because it cannot exceed the bounded type arena. Fix: bound retained type facts by addressable memory.",
+            updated = updated.checked_add(1).expect_invariant(
+                "local-assignment equation update count overflowed usize",
+                "it cannot exceed the bounded type arena",
+                "bound retained type facts by addressable memory",
             );
         }
         updated

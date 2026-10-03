@@ -38,7 +38,7 @@ frame = true
     let targets =
         parse_manifest_method_targets(&manifest).expect("test semantic targets must parse");
     assert_eq!(targets.len(), 1);
-    assert_eq!(
+    invariant_eq!(
         targets[0],
         ExtensionMethodTarget {
             owner: vec![RubyConstant::new("RSpec").expect("test constant is valid")],
@@ -46,23 +46,47 @@ frame = true
             method: RubyMethod::new("describe").expect("test method is valid"),
             frame: true,
         },
-        "INVARIANT VIOLATED: extension semantic target parsing changed. \
-         This is a bug because extension dispatch must be gated by resolved method target. \
-         Fix: preserve owner, owner_kind, method, and frame fields."
+        what = "extension semantic target parsing changed",
+        why = "extension dispatch must be gated by resolved method target",
+        fix = "preserve owner, owner_kind, method, and frame fields",
     );
 }
 
+/// The seed the registry hands over for `engine`, or `None` when the engine
+/// already holds the seed for this applicability.
+fn produced_seed(
+    registry: &ExtensionRegistryHandle,
+    engine: &Arc<RwLock<ruby_analysis::engine::Project>>,
+    project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+) -> Option<ExtensionSemanticSeed> {
+    let mut produced = None;
+    let identity: Arc<dyn Send + Sync> = engine.clone();
+    registry.with_semantic_seed(&identity, project, |seed| produced = Some(seed));
+    produced
+}
+
+fn seeds_rspec_describe(seed: &ExtensionSemanticSeed) -> bool {
+    seed.analysis(SourceFileId(0)).methods.iter().any(|fact| {
+        matches!(
+            &fact.fqn,
+            FullyQualifiedName::Method(namespace, method)
+                if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
+                    && method.as_str() == "describe"
+        )
+    })
+}
+
 #[test]
-fn semantic_seed_facts_are_installed_only_in_every_applicable_isolated_project_engine() {
+fn semantic_seed_facts_are_produced_for_every_applicable_isolated_project_engine() {
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
     let config = RubyFastLspConfig {
         extension_packages: vec![package.to_string_lossy().into_owned()],
         ..RubyFastLspConfig::default()
     };
     let registry = ExtensionRegistryHandle::from_config(&config);
-    let first = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
-    let second = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
-    let ineligible = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+    let first = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
+    let second = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
+    let ineligible = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
     let project = |project_uri: &str, version: &str| ruby_fast_lsp_extension_api::ProjectContext {
         project_uri: project_uri.to_string(),
         source_uri: format!("{project_uri}/spec/example_spec.rb"),
@@ -81,28 +105,31 @@ fn semantic_seed_facts_are_installed_only_in_every_applicable_isolated_project_e
     let second_project = project("file:///umbrella/second", "3.13.5");
     let ineligible_project = project("file:///umbrella/future", "4.0.0");
 
-    registry.ensure_semantic_seed_facts(&first, Some(&first_project));
-    registry.ensure_semantic_seed_facts(&second, Some(&second_project));
-    registry.ensure_semantic_seed_facts(&ineligible, Some(&ineligible_project));
-
-    for engine in [first, second] {
-        let engine = engine.read();
+    for (engine, context) in [(&first, &first_project), (&second, &second_project)] {
+        let seed = produced_seed(&registry, engine, Some(context))
+            .expect("an unseeded applicable engine must receive a seed");
         assert!(
-            engine.all_method_facts().iter().any(|fact| {
-                matches!(
-                    &fact.fqn,
-                    FullyQualifiedName::Method(namespace, method)
-                        if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
-                            && method.as_str() == "describe"
-                )
-            }),
+            seeds_rspec_describe(&seed),
             "every applicable isolated project engine must receive the RSpec.describe semantic target"
         );
+        assert_eq!(
+            produced_seed(&registry, engine, Some(context)),
+            None,
+            "an engine that already holds the seed for this applicability must not be seeded again"
+        );
     }
+    let ineligible_seed = produced_seed(&registry, &ineligible, Some(&ineligible_project))
+        .expect("an unseeded engine always receives its seed, even an empty one");
     assert!(
-        ineligible.read().all_method_facts().is_empty(),
+        ineligible_seed.analysis(SourceFileId(0)).methods.is_empty(),
         "an isolated project with an unsupported RSpec version must not receive semantic targets"
     );
+    for engine in [&first, &second, &ineligible] {
+        assert!(
+            engine.read().view().all_method_facts().is_empty(),
+            "the registry produces seed facts and never writes the engine itself"
+        );
+    }
 }
 
 #[test]
@@ -156,22 +183,16 @@ fn cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh() {
         true,
         Some("3.3.0".to_string()),
     );
-    let engine = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+    let engine: Arc<dyn Send + Sync> = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
 
     let eligible = seed.context_snapshot(
         "file:///umbrella/app/spec/example_spec.rb".to_string(),
         SourceKind::Project,
     );
-    registry.ensure_semantic_seed_facts_for_snapshot(&engine, &eligible);
+    let mut eligible_seed = None;
+    registry.with_semantic_seed_for_snapshot(&engine, &eligible, |seed| eligible_seed = Some(seed));
     assert!(
-        engine.read().all_method_facts().iter().any(|fact| {
-            matches!(
-                &fact.fqn,
-                FullyQualifiedName::Method(namespace, method)
-                    if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
-                        && method.as_str() == "describe"
-            )
-        }),
+        eligible_seed.as_ref().is_some_and(seeds_rspec_describe),
         "the eligible cached snapshot must seed RSpec.describe"
     );
 
@@ -185,11 +206,13 @@ fn cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh() {
         "file:///umbrella/app/spec/example_spec.rb".to_string(),
         SourceKind::Project,
     );
-    registry.ensure_semantic_seed_facts_for_snapshot(&engine, &ineligible);
+    let mut ineligible_seed = None;
+    registry
+        .with_semantic_seed_for_snapshot(&engine, &ineligible, |seed| ineligible_seed = Some(seed));
 
     assert!(
-        engine.read().all_method_facts().is_empty(),
-        "dependency refresh must replace stale extension semantic targets"
+        ineligible_seed.is_some_and(|seed| seed.analysis(SourceFileId(0)).methods.is_empty()),
+        "dependency refresh must produce a replacement seed without stale semantic targets"
     );
 }
 
@@ -372,11 +395,11 @@ wasm = "missing.wasm"
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: invalid extension manifest loaded successfully. \
-         This is a bug because package validation must reject mismatched ABI or missing wasm. \
-         Fix: keep manifest validation in the recoverable load path."
+        what = "invalid extension manifest loaded successfully",
+        why = "package validation must reject mismatched ABI or missing wasm",
+        fix = "keep manifest validation in the recoverable load path",
     );
 }
 
@@ -397,11 +420,11 @@ fn initialization_option_package_without_manifest_is_skipped() {
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: initialization option package without manifest loaded. \
-         This is a bug because editor-installed extension packages must have extension.toml. \
-         Fix: keep extensionPackages stricter than extensionDirs."
+        what = "initialization option package without manifest loaded",
+        why = "editor-installed extension packages must have extension.toml",
+        fix = "keep extensionPackages stricter than extensionDirs",
     );
 }
 
@@ -439,11 +462,11 @@ permissions = []
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: incompatible server_version manifest loaded. \
-         This is a bug because extension packages must be gated by host compatibility. \
-         Fix: validate manifest server_version before wasm instantiation."
+        what = "incompatible server_version manifest loaded",
+        why = "extension packages must be gated by host compatibility",
+        fix = "validate manifest server_version before wasm instantiation",
     );
 }
 
@@ -482,10 +505,119 @@ permissions = []
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: checksum mismatch manifest loaded. \
-         This is a bug because extension packages must bind manifest metadata to wasm bytes. \
-         Fix: validate checksum_sha256 before wasm instantiation."
+        what = "checksum mismatch manifest loaded",
+        why = "extension packages must bind manifest metadata to wasm bytes",
+        fix = "validate checksum_sha256 before wasm instantiation",
     );
+}
+
+#[test]
+fn bundled_extension_directory_sits_beside_the_executable_or_its_bin_directory() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    let package_root = temp_dir.path().join("platform-package");
+    let executable = package_root.join("bin").join("ruby-fast-lsp");
+    fs::create_dir_all(executable.parent().unwrap()).expect("bin directory must be created");
+    assert_eq!(bundled_extension_directory(&executable), None);
+
+    fs::create_dir_all(package_root.join("extensions")).expect("extensions must be created");
+    assert_eq!(
+        bundled_extension_directory(&executable),
+        Some(package_root.join("extensions"))
+    );
+
+    fs::create_dir_all(package_root.join("bin/extensions")).expect("extensions must be created");
+    assert_eq!(
+        bundled_extension_directory(&executable),
+        Some(package_root.join("bin/extensions")),
+        "a directory beside the executable wins over one beside `bin`"
+    );
+}
+
+#[test]
+fn bundled_package_loads_when_no_other_source_provides_its_id() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    copy_rspec_package(&temp_dir.path().join("rspec-ruby"), "0.1.0-bundled");
+    let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+        package_paths: Vec::new(),
+        directory_paths: vec![ConfiguredExtensionPath {
+            path: temp_dir.path().to_path_buf(),
+            source: ExtensionPathSource::Bundled,
+        }],
+        project_package_paths: Vec::new(),
+        settings: BTreeMap::new(),
+    });
+
+    let reports = registry.status_reports();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "rspec-ruby");
+    assert_eq!(reports[0].version.as_deref(), Some("0.1.0-bundled"));
+    assert_eq!(reports[0].status, "loaded");
+}
+
+#[test]
+fn configured_package_replaces_bundled_package_with_the_same_id() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    let bundled = temp_dir.path().join("bundled");
+    let configured = temp_dir.path().join("configured");
+    copy_rspec_package(&bundled.join("rspec-ruby"), "0.1.0-bundled");
+    copy_rspec_package(&configured, "0.1.0-configured");
+    for source in [
+        ExtensionPathSource::InitializationOptions,
+        ExtensionPathSource::ProjectLocal,
+        ExtensionPathSource::Environment,
+    ] {
+        let config = ExtensionLoadConfig {
+            package_paths: vec![ConfiguredExtensionPath {
+                path: configured.clone(),
+                source,
+            }],
+            directory_paths: vec![ConfiguredExtensionPath {
+                path: bundled.clone(),
+                source: ExtensionPathSource::Bundled,
+            }],
+            project_package_paths: Vec::new(),
+            settings: BTreeMap::new(),
+        };
+
+        let reports = ExtensionRegistry::load(&config).status_reports();
+        assert_eq!(reports.len(), 1, "{source:?}");
+        assert_eq!(
+            reports[0].version.as_deref(),
+            Some("0.1.0-configured"),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn bundled_package_loads_when_the_configured_package_with_its_id_fails() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    let bundled = temp_dir.path().join("bundled");
+    let configured = temp_dir.path().join("configured");
+    copy_rspec_package(&bundled.join("rspec-ruby"), "0.1.0-bundled");
+    copy_rspec_package(&configured, "0.1.0-configured");
+    fs::write(
+        configured.join("target/wasm32-wasip1/release/rspec-ruby.wasm"),
+        b"\0asm\x01\0\0\0",
+    )
+    .expect("configured Wasm must be replaced");
+    let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+        package_paths: vec![ConfiguredExtensionPath {
+            path: configured,
+            source: ExtensionPathSource::InitializationOptions,
+        }],
+        directory_paths: vec![ConfiguredExtensionPath {
+            path: bundled,
+            source: ExtensionPathSource::Bundled,
+        }],
+        project_package_paths: Vec::new(),
+        settings: BTreeMap::new(),
+    });
+
+    let reports = registry.status_reports();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!(reports[0].version.as_deref(), Some("0.1.0-bundled"));
+    assert_eq!(reports[0].status, "loaded");
 }

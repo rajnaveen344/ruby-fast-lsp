@@ -19,6 +19,7 @@
 //!    defining scope ID.
 
 use crate::core::{SourceFileId, TextRange};
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{
     visit_block_node, visit_block_parameter_node, visit_class_node, visit_def_node,
     visit_lambda_node, visit_local_variable_and_write_node,
@@ -134,11 +135,15 @@ impl RenameVisitor {
                     if name.as_ref() == target_name.as_str() && defining_scope == target_scope {
                         let range = TextRange::new(
                             self.file_id,
-                            u32::try_from(name_range_location.start_offset()).expect(
-                                "INVARIANT VIOLATED: rename start offset exceeded u32. This is a bug because TextRange stores u32 offsets. Fix: widen TextRange before accepting larger source files.",
+                            u32::try_from(name_range_location.start_offset()).expect_invariant(
+                                "rename start offset exceeded u32",
+                                "TextRange stores u32 offsets",
+                                "widen TextRange before accepting larger source files",
                             ),
-                            u32::try_from(name_range_location.end_offset()).expect(
-                                "INVARIANT VIOLATED: rename end offset exceeded u32. This is a bug because TextRange stores u32 offsets. Fix: widen TextRange before accepting larger source files.",
+                            u32::try_from(name_range_location.end_offset()).expect_invariant(
+                                "rename end offset exceeded u32",
+                                "TextRange stores u32 offsets",
+                                "widen TextRange before accepting larger source files",
                             ),
                         );
                         self.rename_ranges.push(range);

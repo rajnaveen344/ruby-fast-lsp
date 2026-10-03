@@ -1,12 +1,15 @@
 //! Inferred types at a point.
 
-use ruby_analysis::core::{FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeSubject};
-use ruby_analysis::engine::{AnalysisQuery, TypeQuery};
-use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use crate::invariant::ExpectInvariant;
+use ruby_analysis::core::MethodReceiver;
+use ruby_analysis::core::{
+    FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeResolution, TypeSubject,
+};
+use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use ruby_prism::{DefNode, Visit};
 use tower_lsp::lsp_types::Url;
 
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::fixture::Tag;
 use crate::utils::lsp::source_position;
 
@@ -32,15 +35,12 @@ impl TypeKind {
 /// `<type label="T" kind="...">`: the type inferred for the identifier at the
 /// point displays exactly as `T`. `kind` additionally asserts what the
 /// identifier is.
-pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str, tags: &[&Tag]) {
+pub(super) fn check_types(server: &Server, uri: &Url, content: &str, tags: &[&Tag]) {
     let document = server
-        .documents
-        .read()
-        .get(uri)
-        .map(|document| document.read().clone())
+        .get_doc(uri)
         .unwrap_or_else(|| panic!("<type> fixture {uri} is not open"));
-    let engine_handle = server.analysis_engine_for_uri(uri);
-    let engine = engine_handle.read();
+    let engine_handle = server.project_for_uri(uri);
+    let engine = engine_handle.test_read();
 
     for tag in tags {
         let expected = tag.attr("label").expect("<type> requires `label`");
@@ -57,21 +57,31 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                     .find_scope_for_variable_at(name, source_position(position))
                     .or_else(|| document.scope_at_position(source_position(position)));
                 let inferred = scope.and_then(|scope| {
-                    let scope = u32::try_from(scope).expect(
-                        "INVARIANT VIOLATED: local variable scope id exceeded u32. This is a bug because TypeSubject::Local stores u32 scope ids. Fix: widen TypeSubject::Local scope_id.",
+                    let scope = u32::try_from(scope).expect_invariant(
+                        "local variable scope id exceeded u32",
+                        "TypeSubject::Local stores u32 scope ids",
+                        "widen TypeSubject::Local scope_id",
                     );
-                    TypeQuery::new(&engine, document.analysis_file_id())
-                        .get_local_variable_type_at(name, scope, byte_offset)
+                    engine.view().local_variable_type_at(
+                        name,
+                        scope,
+                        document.analysis_file_id(),
+                        byte_offset,
+                    )
                 });
                 (TypeKind::Var, inferred)
             }
             Identifier::RubyConstant { iden, .. } => {
                 let constant = FullyQualifiedName::constant(iden.clone());
-                let inferred = TypeQuery::new(&engine, document.analysis_file_id())
-                    .get_constant_type_at(&constant, byte_offset)
-                    .unwrap_or_else(|| {
-                        RubyType::Class(FullyQualifiedName::namespace(iden.clone()))
-                    });
+                let inferred = match engine.view().type_at(
+                    &TypeSubject::Constant(constant),
+                    document.analysis_file_id(),
+                    byte_offset,
+                ) {
+                    TypeResolution::Resolved(fact) => Some(fact.ruby_type),
+                    TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
+                }
+                .unwrap_or_else(|| RubyType::Class(FullyQualifiedName::namespace(iden.clone())));
                 (TypeKind::Const, Some(inferred))
             }
             Identifier::RubyMethod {
@@ -79,13 +89,13 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                 receiver,
                 namespace,
             } => {
-                let query = AnalysisQuery::new(&engine);
+                let query = engine.view();
                 let method = RubyMethod::new(&iden.to_string()).ok();
                 let inferred = if is_def_name_at(content, byte_offset as usize) {
                     method.and_then(|method| {
                         let fqn = FullyQualifiedName::method(namespace.clone(), method);
                         let returns: Vec<RubyType> = query
-                            .methods_for_fqn(&fqn)
+                            .method_facts_for(&fqn)
                             .iter()
                             .filter_map(|fact| query.method_return_type(fact))
                             .collect();
@@ -119,7 +129,13 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                                 fqn.namespace_parts(),
                                 kind,
                             );
-                            query.method_return_type_for_receiver(&receiver, &method)
+                            let request = ruby_analysis::engine::lookup::MethodRequest::new(
+                                ruby_analysis::engine::lookup::LookupReceiver::Namespace(&receiver),
+                                method,
+                                ruby_analysis::engine::lookup::MethodWant::Return,
+                            );
+                            ruby_analysis::engine::lookup::method(&query, request)
+                                .into_return_type()
                         })
                 };
                 (TypeKind::Return, inferred)
@@ -166,11 +182,11 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
 }
 
 fn latest_variable_type(
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::Project,
     subject_matches: impl Fn(&TypeSubject) -> bool,
 ) -> Option<RubyType> {
     engine
-        .query()
+        .view()
         .all_type_facts()
         .into_iter()
         .filter(|fact| fact.ruby_type != RubyType::Unknown && subject_matches(&fact.subject))

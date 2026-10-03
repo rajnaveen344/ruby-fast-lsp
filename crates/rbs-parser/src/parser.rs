@@ -1,6 +1,6 @@
 //! RBS parser using tree-sitter-rbs grammar.
 
-use tree_sitter::{Node, Tree};
+use tree_sitter::Tree;
 
 use crate::types::*;
 use crate::visitor::Visitor;
@@ -60,42 +60,6 @@ impl Default for Parser {
     }
 }
 
-/// Debug helper to print the tree-sitter AST
-#[allow(dead_code)]
-pub fn debug_print_tree(source: &str) {
-    let mut parser = Parser::new();
-    if let Ok(tree) = parser.parse_raw(source) {
-        print_node(&tree.root_node(), source, 0);
-    }
-}
-
-#[allow(dead_code)]
-fn print_node(node: &Node, source: &str, indent: usize) {
-    let indent_str = "  ".repeat(indent);
-    let text = node.utf8_text(source.as_bytes()).unwrap_or("");
-    let text_preview = if text.len() > 50 {
-        format!("{}...", &text[..50])
-    } else {
-        text.to_string()
-    };
-
-    if node.is_named() {
-        println!(
-            "{}{} [{}-{}] {:?}",
-            indent_str,
-            node.kind(),
-            node.start_position().row,
-            node.end_position().row,
-            text_preview.replace('\n', "\\n")
-        );
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        print_node(&child, source, indent + 1);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,18 +105,28 @@ mod tests {
         );
     }
 
+    fn assert_parses_without_syntax_errors(source: &str) {
+        let tree = Parser::new()
+            .parse_raw(source)
+            .expect("tree-sitter must produce a tree for RBS source");
+        assert!(
+            !tree.root_node().has_error(),
+            "valid RBS must parse without tree-sitter error nodes"
+        );
+    }
+
     #[test]
-    fn test_debug_print() {
+    fn test_raw_parse_class_method() {
         let source = r#"
 class String
   def length: () -> Integer
 end
 "#;
-        debug_print_tree(source);
+        assert_parses_without_syntax_errors(source);
     }
 
     #[test]
-    fn test_debug_print_method_types() {
+    fn test_raw_parse_overloaded_method_types() {
         let source = r#"
 class String
   def length: () -> Integer
@@ -160,7 +134,7 @@ class String
                | () { (String char) -> void } -> self
 end
 "#;
-        debug_print_tree(source);
+        assert_parses_without_syntax_errors(source);
     }
 
     #[test]

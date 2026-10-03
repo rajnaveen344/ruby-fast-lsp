@@ -305,3 +305,57 @@ Net::SMTP.new.tls?$0
     )
     .await;
 }
+
+#[tokio::test]
+async fn self_define_singleton_method_defines_on_enclosing_class() {
+    check(
+        r#"
+class Widget
+  self.define_singleton_method(:<def>build</def>) do
+    "built"
+  end
+end
+
+Widget.build$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn self_send_define_method_defines_on_enclosing_instance() {
+    check(
+        r#"
+class Widget
+  self.send(:define_method, :<def>label</def>) do
+    "label"
+  end
+end
+
+Widget.new.label$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn self_send_define_method_block_uses_instance_receiver() {
+    check(
+        r#"
+class Widget
+  <def>def caption
+    "instance"
+  end</def>
+
+  def self.caption
+    "singleton"
+  end
+
+  self.send(:define_method, :label) do
+    caption$0
+  end
+end
+"#,
+    )
+    .await;
+}

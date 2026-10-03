@@ -9,7 +9,8 @@ impl FactCollector {
         &mut self,
         node: &CallNode<'_>,
     ) {
-        if !self.options.diagnostics_enabled {
+        // `&.` never sends the message to nil.
+        if !self.options.diagnostics_enabled || node.is_safe_navigation() {
             return;
         }
         let Some(receiver) = node.receiver() else {
@@ -22,6 +23,7 @@ impl FactCollector {
             return;
         };
         self.facts
+            .analysis
             .diagnostic_candidates
             .push(DiagnosticCandidate::new(
                 self.document.prism_location_to_text_range(&message),

@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::BTreeMap;
 
 use ruby_analysis::core::{
@@ -31,42 +32,49 @@ pub(super) fn apply_execution_context(
             project_identity,
             "execution-context owner",
         );
-        let generated = GeneratedOwnerId::new(
-            &context.source.extension_id,
-            identity,
-            &owner.local_id,
-        )
-        .expect(
-            "INVARIANT VIOLATED: invalid generated owner reached extension context application. This is a bug because execution contexts must be validated before fact conversion. Fix: keep validation before apply_execution_context.",
-        );
+        let generated =
+            GeneratedOwnerId::new(&context.source.extension_id, identity, &owner.local_id)
+                .expect_invariant(
+                    "invalid generated owner reached extension context application",
+                    "execution contexts must be validated before fact conversion",
+                    "keep validation before apply_execution_context",
+                );
         let namespace = vec![RubyConstant::generated_owner(generated)];
         let previous = owners.insert(
             (owner.scope, owner.local_id.clone()),
             (namespace, namespace_kind_from_abi(owner.owner_kind)),
         );
-        assert!(
+        invariant!(
             previous.is_none(),
-            "INVARIANT VIOLATED: duplicate generated owner reached extension context application. This is a bug because duplicate local identities must be rejected at the extension boundary. Fix: keep owner uniqueness validation before fact conversion."
+            what = "duplicate generated owner reached extension context application",
+            why = "duplicate local identities must be rejected at the extension boundary",
+            fix = "keep owner uniqueness validation before fact conversion",
         );
     }
 
     for owner in &context.generated_owners {
-        let (namespace, owner_kind) = owners.get(&(owner.scope, owner.local_id.clone())).expect(
-            "INVARIANT VIOLATED: validated generated owner is absent during context application. This is a bug because the owner map is built from the same context. Fix: keep context conversion atomic.",
-        );
+        let (namespace, owner_kind) = owners
+            .get(&(owner.scope, owner.local_id.clone()))
+            .expect_invariant(
+                "validated generated owner is absent during context application",
+                "the owner map is built from the same context",
+                "keep context conversion atomic",
+            );
         let instance_fqn = FullyQualifiedName::namespace(namespace.clone());
         let graph_kind = match owner.declaration_kind {
             ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Class => GraphNodeKind::Class,
             ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Module => GraphNodeKind::Module,
         };
-        let singleton_fqn = instance_fqn.to_singleton_namespace().expect(
-            "INVARIANT VIOLATED: generated owner could not convert to a singleton namespace. This is a bug because generated owners are namespace segments. Fix: construct generated owner graph nodes through FullyQualifiedName::namespace.",
+        let singleton_fqn = instance_fqn.to_singleton_namespace().expect_invariant(
+            "generated owner could not convert to a singleton namespace",
+            "generated owners are namespace segments",
+            "construct generated owner graph nodes through FullyQualifiedName::namespace",
         );
         for node in [
             GraphNodeFact::new(instance_fqn.clone(), graph_kind, range),
             GraphNodeFact::new(singleton_fqn, graph_kind, range),
         ] {
-            if !visitor.direct_facts().graph_nodes.contains(&node) {
+            if !visitor.analysis().graph_nodes.contains(&node) {
                 visitor.add_graph_node_fact(node);
             }
         }
@@ -125,9 +133,11 @@ fn resolve_execution_context_target(
             let (namespace, declared_kind) = owners
                 .get(&(GeneratedOwnerScope::Source, local_id.clone()))
                 .cloned()
-                .expect(
-                "INVARIANT VIOLATED: undeclared generated target reached context application. This is a bug because every context target must be validated before conversion. Fix: reject undeclared local IDs at the extension boundary.",
-            );
+                .expect_invariant(
+                    "undeclared generated target reached context application",
+                    "every context target must be validated before conversion",
+                    "reject undeclared local IDs at the extension boundary",
+                );
             (
                 namespace,
                 owner_kind
@@ -142,8 +152,10 @@ fn resolve_execution_context_target(
             let (namespace, declared_kind) = owners
                 .get(&(GeneratedOwnerScope::Project, local_id.clone()))
                 .cloned()
-                .expect(
-                    "INVARIANT VIOLATED: undeclared project-generated target reached context application. This is a bug because every context target must be validated before conversion. Fix: declare the project-scoped owner in the same execution context.",
+                .expect_invariant(
+                    "undeclared project-generated target reached context application",
+                    "every context target must be validated before conversion",
+                    "declare the project-scoped owner in the same execution context",
                 );
             (
                 namespace,
@@ -164,8 +176,11 @@ pub(super) fn generated_owner_scope_identity<'a>(
     match scope {
         GeneratedOwnerScope::Source => source_identity,
         GeneratedOwnerScope::Project => project_identity.unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: {label} requested project-scoped identity without an owning project. This is a host validation bug because project-generated owners require ProjectContext. Fix: reject the patch before semantic application."
+            unreachable_invariant!(
+                what = "{label} requested project-scoped identity without an owning project",
+                why = "project-generated owners require ProjectContext",
+                fix = "reject the patch before semantic application",
+                label = label,
             )
         }),
     }
@@ -176,8 +191,13 @@ pub(super) fn extension_ruby_constants(parts: &[String], label: &str) -> Vec<Rub
         .iter()
         .map(|part| {
             RubyConstant::new(part).unwrap_or_else(|err| {
-                panic!(
-                    "INVARIANT VIOLATED: validated {label} component `{part}` failed fact conversion: {err}. This is a bug because validation and conversion use the same RubyConstant contract. Fix: keep extension context validation before application."
+                unreachable_invariant!(
+                    what = "validated {label} component `{part}` failed fact conversion: {err}",
+                    why = "validation and conversion use the same RubyConstant contract",
+                    fix = "keep extension context validation before application",
+                    label = label,
+                    part = part,
+                    err = err,
                 )
             })
         })

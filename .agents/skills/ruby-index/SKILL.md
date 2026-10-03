@@ -13,7 +13,7 @@ description: "Debug Ruby Index tree projections, namespace identity, include/pre
 3. Check class/module/singleton kind identity, lexical constant resolution,
    include/prepend/extend direction, ancestor order, and unresolved dependency
    edges. Incomplete lookup evidence must not produce a missing-method claim.
-4. Check `src/lsp/query/navigation/namespace_tree.rs` and `src/lsp/capabilities/navigation/namespace_tree.rs`
+4. Check `src/features/navigation/namespace_tree.rs`
    for protocol projection, then `editors/vscode/vsix/client/ruby_index/ruby_index_tree.js` for
    editor display. External-type filtering is a projection policy; it must not
    delete reusable semantic facts.

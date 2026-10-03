@@ -1,16 +1,20 @@
 //! Union-receiver (grouped) method dispatch: callee resolution, references, and
 //! diagnostics across every receiver member.
 
-use std::collections::{HashMap, HashSet};
+use crate::invariant::ExpectInvariant;
+use std::collections::HashMap;
 
-use super::MethodChainCompletenessCache;
+use super::policy::{MethodAbsenceClaims, UNRESOLVED_METHOD};
+use crate::core::names::fqn_id::FqnId;
 use crate::core::{
-    DiagnosticFact, FqnId, FullyQualifiedName, MethodCalleeResolution, MethodFact,
-    MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, MethodFact, MethodReferenceAccess,
+    ResolvedMethodCallee, RubyMethod, RubyType, SourceFileId,
 };
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
+use crate::engine::{Project, View};
+use crate::inference::semantics::ReceiverAccess;
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn resolve_grouped_method_callees(
         &self,
         receiver_type: &RubyType,
@@ -18,23 +22,29 @@ impl AnalysisEngine {
         access: MethodReferenceAccess,
         caller: Option<FqnId>,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        assert!(
+        invariant!(
             matches!(receiver_type, RubyType::Union(_)),
-            "INVARIANT VIOLATED: grouped method dispatch received a non-union receiver. This is a bug because scalar receivers must use the compact single-owner resolution path. Fix: enter grouped resolution only after validating a canonical RubyType::Union."
+            what = "grouped method dispatch received a non-union receiver",
+            why = "scalar receivers must use the compact single-owner resolution path",
+            fix = "enter grouped resolution only after validating a canonical RubyType::Union",
         );
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
+        let callees = |access: ReceiverAccess<'_>| {
+            let request = MethodRequest::new(
+                LookupReceiver::Type(receiver_type),
+                method,
+                MethodWant::Callees,
+            );
+            lookup::method(&query, request.with_access(access)).into_callees()
+        };
         match access {
             MethodReferenceAccess::Normal
             | MethodReferenceAccess::VisibilityBypass
-            | MethodReferenceAccess::InstanceMethodReflection => {
-                query.resolve_method_callees_for_type(receiver_type, &method)
-            }
+            | MethodReferenceAccess::InstanceMethodReflection => callees(ReceiverAccess::Any),
             MethodReferenceAccess::ExplicitReceiver => caller
                 .and_then(|caller| self.call_expression_caller_namespace(caller))
-                .and_then(|caller| {
-                    query.resolve_protected_method_callees_for_type(receiver_type, &method, &caller)
-                })
-                .or_else(|| query.resolve_public_method_callees_for_type(receiver_type, &method)),
+                .and_then(|caller| callees(ReceiverAccess::Protected { caller: &caller }))
+                .or_else(|| callees(ReceiverAccess::Public)),
         }
     }
 
@@ -46,13 +56,16 @@ impl AnalysisEngine {
         let mut facts = Vec::new();
         for callee in callees {
             let mut matching = self
+                .view()
                 .method_facts_matching_owner_name(&callee.owner, &method)
                 .into_iter()
                 .filter(|fact| callee.definition_ranges.contains(&fact.range))
                 .collect::<Vec<_>>();
             if matching.len() == 1 {
-                facts.push(matching.pop().expect(
-                    "INVARIANT VIOLATED: one grouped method fact disappeared after length validation. This is a bug because the local fact vector is not mutated between the check and pop. Fix: keep grouped fact selection atomic.",
+                facts.push(matching.pop().expect_invariant(
+                    "one grouped method fact disappeared after length validation",
+                    "the local fact vector is not mutated between the check and pop",
+                    "keep grouped fact selection atomic",
                 ));
             }
         }
@@ -123,31 +136,30 @@ impl AnalysisEngine {
         receiver_type: &RubyType,
         method: RubyMethod,
         diagnostics: &crate::core::MethodReferenceDiagnostics,
-        unresolved_method_edge_sources: &HashSet<Vec<RubyConstant>>,
-        completeness_cache: &mut MethodChainCompletenessCache,
+        absence_claims: &mut MethodAbsenceClaims,
         diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
     ) {
         if !diagnostics.diagnose_unresolved {
             return;
         }
-        let namespaces = AnalysisQuery::receiver_type_to_method_namespaces(receiver_type);
+        let namespaces = crate::core::receiver_type_to_method_namespaces(receiver_type);
         if namespaces.is_empty()
             || namespaces.iter().any(|owner| {
                 !self.method_namespace_target_exists(owner)
-                    || (!self.method_absence_has_explicit_contract(owner, method)
-                        && self.method_lookup_chain_is_incomplete_cached(
-                            owner,
-                            unresolved_method_edge_sources,
-                            completeness_cache,
-                        ))
+                    || absence_claims.suppresses(self, owner, method)
             })
         {
             return;
         }
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         if namespaces.iter().any(|owner| {
-            query
-                .resolve_method_callees(owner, &method)
+            let request = MethodRequest::new(
+                LookupReceiver::Namespace(owner),
+                method,
+                MethodWant::Callees,
+            );
+            lookup::method(&query, request)
+                .into_callees()
                 .is_some_and(|callees| {
                     callees
                         .iter()
@@ -163,12 +175,7 @@ impl AnalysisEngine {
         diagnostics_by_file
             .entry(diagnostics.diagnostic_range.file_id)
             .or_default()
-            .push(DiagnosticFact::new(
-                diagnostics.diagnostic_range,
-                crate::core::DiagnosticSeverity::Warning,
-                "unresolved-method",
-                message,
-            ));
+            .push(UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message));
     }
 }
 
@@ -179,9 +186,11 @@ pub(super) fn grouped_method_targets(
     let mut targets = callees
         .iter()
         .map(|callee| {
-            assert!(
+            invariant!(
                 callee.method == method && !callee.definition_ranges.is_empty(),
-                "INVARIANT VIOLATED: complete grouped dispatch contains a non-exact method callee. This is a bug because resolve_method_callees_for_type must return Some only after every receiver member resolves to an exact declaration. Fix: retain exact-callee filtering in the shared type resolver."
+                what = "complete grouped dispatch contains a non-exact method callee",
+                why = "type-receiver callee lookups answer Found only when every member resolves exactly",
+                fix = "keep exact-callee filtering in the shared type resolver",
             );
             FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method)
         })

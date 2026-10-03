@@ -1,9 +1,9 @@
 //! Constant resolution in context and definition ranges for symbols.
 
 use crate::core::{FullyQualifiedName, RubyConstant, SymbolKind, TextRange, TypeSubject};
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn resolve_constant_receiver(
         &self,
         path: &[RubyConstant],
@@ -38,7 +38,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn constant_definition_ranges(
         &self,
         parts: &[RubyConstant],
@@ -48,7 +48,6 @@ impl<'a> AnalysisQuery<'a> {
             .resolve_constant_in_context(parts, context)
             .unwrap_or_else(|| FullyQualifiedName::constant(parts.to_vec()));
         let mut runtime_targets = self
-            .engine
             .type_facts_for(&TypeSubject::Constant(fqn.clone()))
             .into_iter()
             .filter(|fact| fact.provenance == crate::core::TypeProvenance::Runtime)
@@ -162,14 +161,13 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn symbol_definition_ranges(
         &self,
         fqn: &FullyQualifiedName,
         allowed_kinds: &[SymbolKind],
     ) -> Vec<TextRange> {
         let ranges = self
-            .engine
             .symbol_facts_for(fqn)
             .into_iter()
             .filter(|fact| allowed_kinds.contains(&fact.kind))
@@ -189,7 +187,7 @@ impl<'a> AnalysisQuery<'a> {
 }
 
 fn resolve_constant_fqn(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     parts: &[RubyConstant],
     absolute: bool,
     context_fqn: &FullyQualifiedName,

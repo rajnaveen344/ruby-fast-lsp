@@ -146,3 +146,70 @@ Foo.<ref>new</ref>
     )
     .await;
 }
+
+/// A method declared in a class reopened through a constant alias is found
+/// from calls on the aliased class.
+#[tokio::test]
+async fn references_method_declared_in_class_reopened_through_alias() {
+    check(
+        r#"
+class Engine
+end
+
+Motor = Engine
+
+class Motor
+  def start$0
+  end
+end
+
+Engine.new.<ref>start</ref>
+"#,
+    )
+    .await;
+}
+
+/// A method declared in a module reopened through a constant alias is found
+/// from calls on the aliased module.
+#[tokio::test]
+async fn references_method_declared_in_module_reopened_through_alias() {
+    check(
+        r#"
+module Toolkit
+end
+
+Kit = Toolkit
+
+module Kit
+  def self.version$0
+  end
+end
+
+Toolkit.<ref>version</ref>
+"#,
+    )
+    .await;
+}
+
+/// A method defined on a qualified constant receiver belongs to that
+/// constant, not to the enclosing class.
+#[tokio::test]
+async fn references_singleton_method_defined_with_qualified_constant_receiver() {
+    check(
+        r#"
+module Catalog
+  class Registry
+  end
+end
+
+class Loader
+  def (Catalog::Registry).lookup$0
+    "found"
+  end
+end
+
+Catalog::Registry.<ref>lookup</ref>
+"#,
+    )
+    .await;
+}

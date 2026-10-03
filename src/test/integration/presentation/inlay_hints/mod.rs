@@ -7,5 +7,6 @@
 pub mod method;
 mod navigation;
 mod presentation;
+mod requests;
 mod tooltip;
 pub mod variable_type;

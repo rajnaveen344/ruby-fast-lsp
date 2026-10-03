@@ -3,20 +3,21 @@
 //! This module owns filesystem discovery and terminal/JSON-ready projection.
 //! Runtime/project loading, parsing, fact collection, method lookup, inference,
 //! and semantic diagnostics remain in the same `IndexingCoordinator`,
-//! `FileProcessor`, and `AnalysisEngine` used by the LSP.
+//! `FileProcessor`, and `Project` used by the LSP.
 
 use crate::environment::config::{IndexingConfig, RubyFastLspConfig};
-use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::file_processor::analysis_source;
-use crate::lsp::capabilities::diagnostics::generate_diagnostics;
-use crate::server::RubyLanguageServer;
-use crate::utils::should_index_file;
+use crate::invariant::ExpectInvariant;
+use crate::loader::coordinator::IndexingCoordinator;
+use crate::loader::file_processor::analysis_source;
+use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
+use crate::server::Server;
+use crate::utils::file_ops::should_index_file;
 use anyhow::{anyhow, Context, Result};
 use ruby_analysis::core::{
     DiagnosticSeverity, InferenceTelemetry, SourceKind, TextRange, TypeInferenceOutcome,
     TypeSubject, UnknownReason,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::View;
 use ruby_analysis::indexer::RubyDocument;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -276,8 +277,8 @@ impl CheckSession {
                 config.indexing.included_patterns.push(pattern);
             }
         }
-        let server = RubyLanguageServer::default();
-        *server.config.lock() = config.clone();
+        let server = Server::default();
+        server.replace_configuration(config.clone());
 
         let workspaces = if input.is_dir() {
             let root_uri = Url::from_directory_path(&root)
@@ -292,9 +293,11 @@ impl CheckSession {
         for workspace in &workspaces {
             let mut coordinator =
                 IndexingCoordinator::new(workspace.root_path.clone(), config.clone());
-            coordinator.set_analysis_engine(workspace.analysis_engine.clone());
+            coordinator.set_load_target(workspace.handle().load_target());
             coordinator
-                .run_complete_indexing(&server)
+                .run_complete_indexing(
+                    &server.load_context_for_project(coordinator.workspace_root()),
+                )
                 .await
                 .with_context(|| {
                     format!(
@@ -309,22 +312,22 @@ impl CheckSession {
         let mut files_checked = 0usize;
         let mut inference = InferenceTelemetry::default();
         for workspace in &workspaces {
-            let engine = workspace.analysis_engine.read();
-            for file in engine.files() {
+            workspace.handle().view(|view| -> Result<()> {
+            for file in view.files() {
                 if !matches!(file.kind, SourceKind::Project | SourceKind::Signature)
                     || !source_is_selected(&file.path, selected_file.as_deref(), &root)
                 {
                     continue;
                 }
-                files_checked = files_checked.checked_add(1).expect(
-                    "INVARIANT VIOLATED: checked file count exhausted usize. This is a bug \
-                     because one process cannot retain more files than addressable memory. \
-                     Fix: bound project discovery below usize::MAX.",
+                files_checked = files_checked.checked_add(1).expect_invariant(
+                    "checked file count exhausted usize",
+                    "one process cannot retain more files than addressable memory",
+                    "bound project discovery below usize::MAX",
                 );
-                if let Some(file_telemetry) = engine.inference_telemetry_in_file(file.id) {
+                if let Some(file_telemetry) = view.inference_telemetry_in_file(file.id) {
                     inference.merge(file_telemetry);
                 }
-                inferred_types.extend(solved_types_in_file(&engine, &root, file.id)?);
+                inferred_types.extend(solved_types_in_file(view, &root, file.id)?);
                 if file.kind == SourceKind::Project {
                     let source = match file.source_text() {
                         Some(source) => source.to_string(),
@@ -335,7 +338,7 @@ impl CheckSession {
                             )
                         })?,
                     };
-                    if !engine.file_content_matches(file.id, &source) {
+                    if !view.file_content_matches(file.id, &source) {
                         return Err(anyhow!(
                             "check source {} changed while analysis was running; rerun the check \
                              so syntax and semantic diagnostics use one byte-identical input",
@@ -360,10 +363,12 @@ impl CheckSession {
                 }
             }
             diagnostics.extend(domain_diagnostics(
-                &engine,
+                view,
                 &root,
                 selected_file.as_deref(),
             )?);
+            Ok(())
+            })?;
         }
         if let Some(selected_file) = selected_file.as_deref() {
             if files_checked != 1 {
@@ -394,15 +399,15 @@ impl CheckSession {
 }
 
 fn solved_types_in_file(
-    engine: &AnalysisEngine,
+    view: &View<'_>,
     root: &Path,
     file_id: ruby_analysis::core::SourceFileId,
 ) -> Result<Vec<CheckInferredType>> {
-    let file = engine
+    let file = view
         .file(file_id)
         .ok_or_else(|| anyhow!("inferred types reference unknown file id {file_id:?}"))?;
-    let query = AnalysisQuery::new(engine);
-    let exact_outcomes = engine.method_return_outcomes_in_file(file_id);
+    let query = view;
+    let exact_outcomes = view.method_return_outcomes_in_file(file_id);
     let mut inferred = Vec::new();
 
     for method in query.method_facts_in_file(file_id) {
@@ -420,8 +425,10 @@ fn solved_types_in_file(
                 type_label: ruby_type.to_string(),
             },
             None => CheckTypeOutcome::Unknown {
-                reason: outcome.unknown_reason().expect(
-                    "INVARIANT VIOLATED: a non-proven inference outcome has no Unknown reason. This is a bug because TypeInferenceOutcome must make unproven states explicit. Fix: construct every failed proof through TypeInferenceOutcome::unknown.",
+                reason: outcome.unknown_reason().expect_invariant(
+                    "a non-proven inference outcome has no Unknown reason",
+                    "TypeInferenceOutcome must make unproven states explicit",
+                    "construct every failed proof through TypeInferenceOutcome::unknown",
                 ),
             },
         };
@@ -512,8 +519,10 @@ fn solved_types_in_file(
                     type_label: ruby_type.to_string(),
                 },
                 None => CheckTypeOutcome::Unknown {
-                    reason: outcome.unknown_reason().expect(
-                        "INVARIANT VIOLATED: an unproven call expression has no Unknown reason. This is a bug because call outcomes must preserve why a concrete type was withheld. Fix: construct deferred failures through TypeInferenceOutcome::unknown.",
+                    reason: outcome.unknown_reason().expect_invariant(
+                        "an unproven call expression has no Unknown reason",
+                        "call outcomes must preserve why a concrete type was withheld",
+                        "construct deferred failures through TypeInferenceOutcome::unknown",
                     ),
                 },
             };
@@ -530,9 +539,12 @@ fn solved_types_in_file(
 }
 
 fn check_range(file: &ruby_analysis::engine::SourceFile, range: TextRange) -> Result<CheckRange> {
-    assert_eq!(
-        file.id, range.file_id,
-        "INVARIANT VIOLATED: inferred-type range belongs to a different file. This is a bug because per-file method facts must retain their owning SourceFileId. Fix: reject or rehome the fact during file replacement."
+    invariant_eq!(
+        file.id,
+        range.file_id,
+        what = "inferred-type range belongs to a different file",
+        why = "per-file method facts must retain their owning SourceFileId",
+        fix = "reject or rehome the fact during file replacement",
     );
     let start = file
         .byte_offset_to_line_character(range.start_byte)
@@ -573,13 +585,13 @@ fn source_is_selected(path: &Path, selected_file: Option<&Path>, root: &Path) ->
 }
 
 fn domain_diagnostics(
-    engine: &AnalysisEngine,
+    view: &View<'_>,
     root: &Path,
     selected_file: Option<&Path>,
 ) -> Result<Vec<CheckDiagnostic>> {
     let mut diagnostics = Vec::new();
-    for diagnostic in engine.all_diagnostic_facts() {
-        let file = engine.file(diagnostic.range.file_id).ok_or_else(|| {
+    for diagnostic in view.all_diagnostic_facts() {
+        let file = view.file(diagnostic.range.file_id).ok_or_else(|| {
             anyhow!(
                 "diagnostic references unknown file id {:?}",
                 diagnostic.range.file_id
@@ -636,15 +648,15 @@ fn report_path(root: &Path, path: &Path) -> PathBuf {
 
 fn one_based_position((line, character): (u32, u32)) -> CheckPosition {
     CheckPosition {
-        line: line.checked_add(1).expect(
-            "INVARIANT VIOLATED: check diagnostic line exhausted u32. This is a bug because \
-             source line indexes must fit the domain range representation. Fix: widen check \
-             positions before admitting a source with u32::MAX lines.",
+        line: line.checked_add(1).expect_invariant(
+            "check diagnostic line exhausted u32",
+            "source line indexes must fit the domain range representation",
+            "widen check positions before admitting a source with u32::MAX lines",
         ),
-        column: character.checked_add(1).expect(
-            "INVARIANT VIOLATED: check diagnostic column exhausted u32. This is a bug because \
-             source UTF-16 columns must fit the domain range representation. Fix: widen check \
-             positions before admitting a line with u32::MAX UTF-16 code units.",
+        column: character.checked_add(1).expect_invariant(
+            "check diagnostic column exhausted u32",
+            "source UTF-16 columns must fit the domain range representation",
+            "widen check positions before admitting a line with u32::MAX UTF-16 code units",
         ),
     }
 }
@@ -665,10 +677,11 @@ fn lsp_severity(severity: Option<LspSeverity>) -> CheckSeverity {
         Some(LspSeverity::INFORMATION) => CheckSeverity::Information,
         Some(LspSeverity::HINT) => CheckSeverity::Hint,
         None => CheckSeverity::Error,
-        Some(value) => panic!(
-            "INVARIANT VIOLATED: unsupported LSP diagnostic severity {value:?}. This is a bug \
-             because every protocol severity must map to a stable check severity. Fix: add the \
-             new protocol severity to lsp_severity."
+        Some(value) => unreachable_invariant!(
+            what = "unsupported LSP diagnostic severity {value:?}",
+            why = "every protocol severity must map to a stable check severity",
+            fix = "add the new protocol severity to lsp_severity",
+            value = value,
         ),
     }
 }

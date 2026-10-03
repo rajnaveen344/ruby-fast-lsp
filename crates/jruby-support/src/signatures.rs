@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use crate::{JavaClassName, JavaNameError};
 use ruby_fast_lsp_jvm_metadata::{
     ClassFile, ClassKind, JvmType, MemberInfo, MethodDescriptor, Visibility,
@@ -18,14 +19,28 @@ pub fn generate_ruby_signature(class: &ClassFile) -> Result<String, SignatureErr
         "# Generated from JVM metadata for {}. Method bodies are intentionally unavailable.",
         class.name
     )
-    .expect("INVARIANT VIOLATED: writing to String cannot fail");
-    writeln!(output, "module Java").expect("INVARIANT VIOLATED: writing to String cannot fail");
-    writeln!(output, "  module {}", name.package_proxy_module())
-        .expect("INVARIANT VIOLATED: writing to String cannot fail");
+    .expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
+    writeln!(output, "module Java").expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
+    writeln!(output, "  module {}", name.package_proxy_module()).expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     let mut indent = 4usize;
     for outer in &name.classes()[..name.classes().len() - 1] {
-        writeln!(output, "{:indent$}class {outer}", "")
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
+        writeln!(output, "{:indent$}class {outer}", "").expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
         indent += 2;
     }
     let declaration = match class.kind() {
@@ -45,13 +60,20 @@ pub fn generate_ruby_signature(class: &ClassFile) -> Result<String, SignatureErr
         "{:indent$}{declaration} {class_name}{superclass}",
         ""
     )
-    .expect("INVARIANT VIOLATED: writing to String cannot fail");
+    .expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     indent += 2;
 
     for interface in &class.interfaces {
         if let Ok(interface) = JavaClassName::parse(interface) {
-            writeln!(output, "{:indent$}include {}", "", interface.ruby_fqn())
-                .expect("INVARIANT VIOLATED: writing to String cannot fail");
+            writeln!(output, "{:indent$}include {}", "", interface.ruby_fqn()).expect_invariant(
+                "writing RBS text to a String failed",
+                "fmt::Write for String is infallible",
+                "check the Display impls used by the writer",
+            );
         }
     }
     for field in &class.fields {
@@ -73,20 +95,34 @@ pub fn generate_ruby_signature(class: &ClassFile) -> Result<String, SignatureErr
                 "",
                 visibility_keyword(current_visibility)
             )
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
+            .expect_invariant(
+                "writing RBS text to a String failed",
+                "fmt::Write for String is infallible",
+                "check the Display impls used by the writer",
+            );
         }
         write_method(&mut output, method, class.kind(), indent)?;
     }
 
     indent -= 2;
-    writeln!(output, "{:indent$}end", "")
-        .expect("INVARIANT VIOLATED: writing to String cannot fail");
+    writeln!(output, "{:indent$}end", "").expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     for _ in &name.classes()[..name.classes().len() - 1] {
         indent -= 2;
-        writeln!(output, "{:indent$}end", "")
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
+        writeln!(output, "{:indent$}end", "").expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
     }
-    writeln!(output, "  end\nend").expect("INVARIANT VIOLATED: writing to String cannot fail");
+    writeln!(output, "  end\nend").expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     Ok(output)
 }
 
@@ -106,11 +142,21 @@ fn write_field(
                 "{:indent$}# @ruby_fast_lsp_navigation declaration-only: JVM fields and enum constants have no executable implementation body.",
                 ""
             )
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
-            writeln!(output, "{:indent$}# @type [{ruby_type}]", "")
-                .expect("INVARIANT VIOLATED: writing to String cannot fail");
-            writeln!(output, "{:indent$}{} = nil", "", field.name)
-                .expect("INVARIANT VIOLATED: writing to String cannot fail");
+            .expect_invariant(
+                "writing RBS text to a String failed",
+                "fmt::Write for String is infallible",
+                "check the Display impls used by the writer",
+            );
+            writeln!(output, "{:indent$}# @type [{ruby_type}]", "").expect_invariant(
+                "writing RBS text to a String failed",
+                "fmt::Write for String is infallible",
+                "check the Display impls used by the writer",
+            );
+            writeln!(output, "{:indent$}{} = nil", "", field.name).expect_invariant(
+                "writing RBS text to a String failed",
+                "fmt::Write for String is infallible",
+                "check the Display impls used by the writer",
+            );
         }
         return Ok(());
     }
@@ -121,19 +167,36 @@ fn write_field(
             "{:indent$}# @ruby_fast_lsp_navigation declaration-only: generated field access has no Java method body.",
             ""
         )
-        .expect("INVARIANT VIOLATED: writing to String cannot fail");
-        writeln!(output, "{:indent$}# @return [{ruby_type}]", "")
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
-        writeln!(output, "{:indent$}def {receiver}{}; end", "", field.name)
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
-        writeln!(output, "{:indent$}# @param value [{ruby_type}]", "")
-            .expect("INVARIANT VIOLATED: writing to String cannot fail");
+        .expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
+        writeln!(output, "{:indent$}# @return [{ruby_type}]", "").expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
+        writeln!(output, "{:indent$}def {receiver}{}; end", "", field.name).expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
+        writeln!(output, "{:indent$}# @param value [{ruby_type}]", "").expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
         writeln!(
             output,
             "{:indent$}def {receiver}{}=(value); end",
             "", field.name
         )
-        .expect("INVARIANT VIOLATED: writing to String cannot fail");
+        .expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
     }
     let _ = owner;
     Ok(())
@@ -154,7 +217,11 @@ fn write_method(
         "",
         method_navigation_fallback_reason(method, class_kind)
     )
-    .expect("INVARIANT VIOLATED: writing to String cannot fail");
+    .expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     let name = java_method_name(method);
     let receiver = if method.name == "<init>" || method.is_static() {
         "self."
@@ -180,7 +247,11 @@ fn write_method(
         "{:indent$}def {receiver}{name}({parameters}); end",
         ""
     )
-    .expect("INVARIANT VIOLATED: writing to String cannot fail");
+    .expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     Ok(())
 }
 
@@ -214,7 +285,11 @@ fn write_method_docs(
             "",
             ruby_type_for_jvm_type(parameter)
         )
-        .expect("INVARIANT VIOLATED: writing to String cannot fail");
+        .expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
     }
     writeln!(
         output,
@@ -222,7 +297,11 @@ fn write_method_docs(
         "",
         ruby_type_for_jvm_type(&descriptor.returns)
     )
-    .expect("INVARIANT VIOLATED: writing to String cannot fail");
+    .expect_invariant(
+        "writing RBS text to a String failed",
+        "fmt::Write for String is infallible",
+        "check the Display impls used by the writer",
+    );
     if !method.exceptions.is_empty() {
         writeln!(
             output,
@@ -236,7 +315,11 @@ fn write_method_docs(
                 .collect::<Vec<_>>()
                 .join(", ")
         )
-        .expect("INVARIANT VIOLATED: writing to String cannot fail");
+        .expect_invariant(
+            "writing RBS text to a String failed",
+            "fmt::Write for String is infallible",
+            "check the Display impls used by the writer",
+        );
     }
 }
 

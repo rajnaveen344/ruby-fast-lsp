@@ -3,6 +3,7 @@ use crate::core::{
     FullyQualifiedName, LiteralKey, LiteralValue, ShapeConstructionError, ShapeExactness,
     ShapeField, ShapeStability, ShapeType, UnknownReason,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::BTreeMap;
 
@@ -272,8 +273,10 @@ pub(crate) fn infer_array_literal_type(
     infer_array_literal_type_fallible(array_node, |element| {
         Ok::<RubyType, ShapeConstructionError>(infer_value(element))
     })
-    .expect(
-        "INVARIANT VIOLATED: infallible Array literal inference returned a shape construction error. This is a bug because the wrapper converts every element to Ok. Fix: keep error creation inside the caller-provided fallible resolver.",
+    .expect_invariant(
+        "infallible Array literal inference returned a shape construction error",
+        "the wrapper converts every element to Ok",
+        "keep error creation inside the caller-provided fallible resolver",
     )
 }
 
@@ -376,8 +379,10 @@ pub(crate) fn infer_hash_literal_type_fallible(
                         fields.insert(field.key().clone(), field.clone());
                     }
                     let RubyType::Hash(keys, values) = shape.generic_hash_type() else {
-                        panic!(
-                            "INVARIANT VIOLATED: ShapeType::generic_hash_type did not return RubyType::Hash. This is a bug because literal splat inference relies on the canonical Hash projection. Fix: keep ShapeType projection exhaustive."
+                        unreachable_invariant!(
+                            what = "ShapeType::generic_hash_type did not return RubyType::Hash",
+                            why = "literal splat inference relies on the canonical Hash projection",
+                            fix = "keep ShapeType projection exhaustive",
                         );
                     };
                     key_types.extend(keys);
@@ -390,8 +395,10 @@ pub(crate) fn infer_hash_literal_type_fallible(
                 }
                 RubyType::Shape(shape) => {
                     let RubyType::Hash(keys, values) = shape.generic_hash_type() else {
-                        panic!(
-                            "INVARIANT VIOLATED: ShapeType::generic_hash_type did not return RubyType::Hash. This is a bug because literal splat inference relies on the canonical Hash projection. Fix: keep ShapeType projection exhaustive."
+                        unreachable_invariant!(
+                            what = "ShapeType::generic_hash_type did not return RubyType::Hash",
+                            why = "literal splat inference relies on the canonical Hash projection",
+                            fix = "keep ShapeType projection exhaustive",
                         );
                     };
                     key_types.extend(keys);
@@ -452,20 +459,28 @@ pub(crate) fn literal_shape_construction_unknown_reason(
 ) -> UnknownReason {
     match error {
         ShapeConstructionError::FieldBoundExceeded { .. }
-        | ShapeConstructionError::DepthBoundExceeded { .. } => {
-            UnknownReason::ShapeBoundExceeded
-        }
-        ShapeConstructionError::DuplicateField(key) => panic!(
-            "INVARIANT VIOLATED: canonical Hash literal inference produced duplicate field `{key}`. This is a bug because Ruby overwrite order is resolved in a BTreeMap before ShapeType construction. Fix: canonicalize every literal field before constructing the shape."
+        | ShapeConstructionError::DepthBoundExceeded { .. } => UnknownReason::ShapeBoundExceeded,
+        ShapeConstructionError::DuplicateField(key) => unreachable_invariant!(
+            what = "canonical Hash literal inference produced duplicate field `{key}`",
+            why = "ruby overwrite order is resolved in a BTreeMap before ShapeType construction",
+            fix = "canonicalize every literal field before constructing the shape",
+            key = key,
         ),
-        ShapeConstructionError::ExactShapeHasRest => panic!(
-            "INVARIANT VIOLATED: exact Hash literal inference produced a rest contract. This is a bug because a complete literal has no unlisted key contract. Fix: pass no rest type when constructing exact literal shapes."
+        ShapeConstructionError::ExactShapeHasRest => unreachable_invariant!(
+            what = "exact Hash literal inference produced a rest contract",
+            why = "a complete literal has no unlisted key contract",
+            fix = "pass no rest type when constructing exact literal shapes",
         ),
-        ShapeConstructionError::UnprovenField(key) => panic!(
-            "INVARIANT VIOLATED: complete Hash literal inference retained unproven field `{key}`. This is a bug because any Unknown value must select the generic incomplete-Hash path before ShapeType construction. Fix: reject incomplete field evidence before constructing the shape."
+        ShapeConstructionError::UnprovenField(key) => unreachable_invariant!(
+            what = "complete Hash literal inference retained unproven field `{key}`",
+            why = "any Unknown value selects the incomplete-Hash path",
+            fix = "reject incomplete field evidence before building the shape",
+            key = key,
         ),
-        ShapeConstructionError::UnprovenRest => panic!(
-            "INVARIANT VIOLATED: exact Hash literal inference retained an unproven rest contract. This is a bug because literal shapes are constructed without a rest contract. Fix: keep generic splat evidence out of exact ShapeType construction."
+        ShapeConstructionError::UnprovenRest => unreachable_invariant!(
+            what = "exact Hash literal inference retained an unproven rest contract",
+            why = "literal shapes are constructed without a rest contract",
+            fix = "keep generic splat evidence out of exact ShapeType construction",
         ),
     }
 }
@@ -590,8 +605,10 @@ mod tests {
             assert!(analyzer.is_literal(node));
             let ruby_type = analyzer.analyze_literal(node).unwrap();
             let RubyType::Shape(shape) = ruby_type else {
-                panic!(
-                    "INVARIANT VIOLATED: a complete Symbol-keyed Hash literal did not infer an exact shape. This is a bug because Phase 2 requires local literal construction to preserve fields. Fix: keep infer_hash_literal_type on the complete path."
+                unreachable_invariant!(
+                    what = "a complete Symbol-keyed Hash literal did not infer an exact shape",
+                    why = "phase 2 requires local literal construction to preserve fields",
+                    fix = "keep infer_hash_literal_type on the complete path",
                 );
             };
             assert_eq!(shape.to_string(), "{ a: Integer, b: Integer }");

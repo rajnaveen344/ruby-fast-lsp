@@ -1,6 +1,7 @@
 use crate::core::{
     FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use log::{error, trace};
 use ruby_prism::{
     ConstantAndWriteNode, ConstantOperatorWriteNode, ConstantOrWriteNode, ConstantTargetNode,
@@ -30,7 +31,7 @@ impl FactCollector {
         full_location: &Location<'_>,
         name_location: &Location<'_>,
     ) {
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
                 .with_name_range(self.direct_range(name_location)),
         );
@@ -53,7 +54,7 @@ impl FactCollector {
             name_location,
             provenance,
         );
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Constant(fqn.clone()),
             inferred_type,
             full_range,
@@ -64,7 +65,15 @@ impl FactCollector {
         }
     }
 
-    fn record_constant_value_type_explicit(
+    pub(in crate::indexer::fact_collector) fn current_assignment_target_type(&self) -> RubyType {
+        self.flow
+            .assignment_target_types
+            .last()
+            .cloned()
+            .unwrap_or(RubyType::Unknown)
+    }
+
+    pub(in crate::indexer::fact_collector) fn record_constant_value_type_explicit(
         &mut self,
         fqn: FullyQualifiedName,
         inferred_type: RubyType,
@@ -78,7 +87,7 @@ impl FactCollector {
             name_location,
             provenance,
         );
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Constant(fqn),
             inferred_type,
             self.document.prism_location_to_text_range(full_location),
@@ -107,16 +116,22 @@ impl FactCollector {
             return;
         };
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
-        if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
+        if let Ok(summary) = crate::inference::callable_body::lower_callable_literal(&node.value())
+        {
             if summary.is_capture_free() {
-                self.constants.callable_bodies
-                    .push(crate::core::ConstantCallableBodyFact {
+                self.constants.callable_bodies.push(
+                    crate::core::callables::callable_body::ConstantCallableBodyFact {
                         constant: self
                             .constant_fqn_from_name(&constant_name)
-                            .expect("INVARIANT VIOLATED: a validated constant name stopped producing its FQN. This is a bug because callable and type facts use the same declaration identity. Fix: construct both facts from one retained FQN."),
+                            .expect_invariant(
+                                "a validated constant name stopped producing its FQN",
+                                "callable and type facts use the same declaration identity",
+                                "construct both facts from one retained FQN",
+                            ),
                         summary,
                         range: self.direct_range(&node.location()),
-                    });
+                    },
+                );
             }
         }
     }
@@ -197,18 +212,7 @@ impl FactCollector {
         };
         self.record_constant_symbol(fqn.clone(), &node.location(), &node.location());
 
-        let inferred_type = self
-            .flow
-            .assignment_elements
-            .last_mut()
-            .and_then(|types| {
-                if types.is_empty() {
-                    None
-                } else {
-                    Some(types.remove(0))
-                }
-            })
-            .unwrap_or(RubyType::Unknown);
+        let inferred_type = self.current_assignment_target_type();
         self.record_constant_value_type_explicit(
             fqn,
             inferred_type,

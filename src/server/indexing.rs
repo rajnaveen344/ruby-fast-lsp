@@ -1,12 +1,12 @@
 //! Indexing admission and process-wide status publication; no semantic store.
-use super::RubyLanguageServer;
-use crate::indexer::scheduling::resources::IndexingResourceGovernor;
-use crate::indexer::scheduling::scheduler::IndexingScheduler;
-use crate::indexer::scheduling::status::{
-    IndexingAggregateSnapshot, IndexingPersistentProductReuseSnapshot, IndexingPhase,
-    IndexingReuseSnapshot, IndexingSingleFlightReuseSnapshot, IndexingStatusNotification,
+use super::Server;
+use crate::invariant::ExpectInvariant;
+use crate::loader::scheduling::scheduler::IndexingScheduler;
+use crate::loader::scheduling::status::{
+    IndexingAggregateSnapshot, IndexingPhase, IndexingReuseSnapshot, IndexingStatusNotification,
     IndexingStatusParams, IndexingStatusSnapshot,
 };
+use crate::utils::admission::IndexingResourceGovernor;
 use log::warn;
 #[cfg(test)]
 use parking_lot::Mutex;
@@ -121,7 +121,7 @@ pub(crate) struct IndexingServices {
     resources: IndexingResourceGovernor,
     pub(super) status: IndexingStatusPublisher,
     #[cfg(test)]
-    pub(crate) schedule: Arc<crate::indexer::scheduling::test_schedule::TestSchedule>,
+    pub(super) schedule: Arc<crate::loader::scheduling::test_schedule::TestSchedule>,
     #[cfg(test)]
     pub(super) progress_reports: Arc<Mutex<Vec<(PathBuf, u64, u64)>>>,
 }
@@ -156,22 +156,22 @@ impl Default for IndexingServices {
 }
 
 impl IndexingServices {
-    pub(crate) fn scheduler(&self) -> &IndexingScheduler {
+    pub(super) fn scheduler(&self) -> &IndexingScheduler {
         &self.scheduler
     }
-    pub(crate) fn resources(&self) -> &IndexingResourceGovernor {
+    pub(super) fn resources(&self) -> &IndexingResourceGovernor {
         &self.resources
     }
-    /// Select admission policy before starting work (also used by the profiler).
-    pub(crate) fn set_scheduler(&mut self, scheduler: IndexingScheduler) {
+    /// Select admission policy before starting work.
+    pub(super) fn set_scheduler(&mut self, scheduler: IndexingScheduler) {
         self.scheduler = scheduler;
     }
-    pub(crate) fn set_resources(&mut self, resources: IndexingResourceGovernor) {
+    pub(super) fn set_resources(&mut self, resources: IndexingResourceGovernor) {
         self.resources = resources;
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     /// Select scheduling concurrency before starting work or sharing the server.
     pub fn set_indexing_concurrency(&mut self, concurrency: usize) {
         self.indexing
@@ -181,27 +181,23 @@ impl RubyLanguageServer {
     /// Select the resource budget before starting work or sharing the server.
     pub fn set_indexing_resource_policy(
         &mut self,
-        policy: crate::indexer::scheduling::resources::IndexingResourcePolicy,
+        policy: crate::utils::admission::IndexingResourcePolicy,
     ) {
         self.indexing
             .set_resources(IndexingResourceGovernor::new(policy));
     }
 
-    pub fn indexing_resource_policy(
-        &self,
-    ) -> crate::indexer::scheduling::resources::IndexingResourcePolicy {
+    pub fn indexing_resource_policy(&self) -> crate::utils::admission::IndexingResourcePolicy {
         self.indexing.resources().policy()
     }
 
-    pub fn indexing_resource_snapshot(
-        &self,
-    ) -> crate::indexer::scheduling::resources::IndexingResourceSnapshot {
+    pub fn indexing_resource_snapshot(&self) -> crate::utils::admission::IndexingResourceSnapshot {
         self.indexing.resources().snapshot()
     }
 
     pub fn indexing_scheduler_snapshot(
         &self,
-    ) -> crate::indexer::scheduling::scheduler::IndexingSchedulerSnapshot {
+    ) -> crate::loader::scheduling::scheduler::IndexingSchedulerSnapshot {
         self.indexing.scheduler().snapshot()
     }
 
@@ -209,12 +205,27 @@ impl RubyLanguageServer {
     pub fn register_indexing_run(
         &self,
         project_root: std::path::PathBuf,
-        priority: crate::indexer::scheduling::scheduler::IndexingPriority,
-        run: &crate::indexer::scheduling::status::IndexingRun,
-    ) -> crate::indexer::scheduling::scheduler::IndexingAdmission {
+        priority: crate::loader::scheduling::scheduler::IndexingPriority,
+        run: &crate::loader::scheduling::status::IndexingRun,
+    ) -> crate::loader::scheduling::scheduler::IndexingAdmission {
         self.indexing
             .scheduler()
             .register_cancellable(project_root, priority, run.cancellation())
+    }
+
+    /// The shared admission governor that every load and worker acquires through.
+    pub(crate) fn indexing_resources(&self) -> &IndexingResourceGovernor {
+        self.indexing.resources()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn indexing_scheduler(&self) -> &IndexingScheduler {
+        self.indexing.scheduler()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_schedule(&self) -> &crate::loader::scheduling::test_schedule::TestSchedule {
+        &self.indexing.schedule
     }
 
     #[cfg(test)]
@@ -289,56 +300,18 @@ impl RubyLanguageServer {
                 | IndexingPhase::PublishingDiagnostics => {}
             }
         }
-        let persistent_gem_products = self.products.persistent().gem_product_snapshot();
-        let persistent_java_artifacts = self.products.persistent().java_artifact_snapshot();
-        let persistent_compiled_wasm = self.products.persistent().compiled_wasm_snapshot();
-        let gem_single_flight = self.products.gem_dependencies().snapshot();
-        let classpath_file_single_flight = self.products.classpath_files().snapshot();
-        let java_artifact_single_flight = self.products.java_artifacts().snapshot();
+        let persistent = self.products.persistent();
         IndexingStatusSnapshot {
             sequence: self.indexing.status.sequence.load(Ordering::Acquire),
             projects,
             aggregate,
             reuse: IndexingReuseSnapshot {
-                persistent_gem_products: IndexingPersistentProductReuseSnapshot {
-                    lookups: persistent_gem_products.lookups,
-                    hits: persistent_gem_products.hits,
-                    producers: persistent_gem_products.producers,
-                    corruptions: persistent_gem_products.corruptions,
-                },
-                persistent_java_artifacts: IndexingPersistentProductReuseSnapshot {
-                    lookups: persistent_java_artifacts.lookups,
-                    hits: persistent_java_artifacts.hits,
-                    producers: persistent_java_artifacts.producers,
-                    corruptions: persistent_java_artifacts.corruptions,
-                },
-                persistent_compiled_wasm: IndexingPersistentProductReuseSnapshot {
-                    lookups: persistent_compiled_wasm.lookups,
-                    hits: persistent_compiled_wasm.hits,
-                    producers: persistent_compiled_wasm.producers,
-                    corruptions: persistent_compiled_wasm.corruptions,
-                },
-                gem_single_flight: IndexingSingleFlightReuseSnapshot {
-                    lookups: gem_single_flight.lookups,
-                    hits: gem_single_flight.hits,
-                    joined_flights: gem_single_flight.joined_flights,
-                    producers: gem_single_flight.producers,
-                    failures: gem_single_flight.failures,
-                },
-                classpath_file_single_flight: IndexingSingleFlightReuseSnapshot {
-                    lookups: classpath_file_single_flight.lookups,
-                    hits: classpath_file_single_flight.hits,
-                    joined_flights: classpath_file_single_flight.joined_flights,
-                    producers: classpath_file_single_flight.producers,
-                    failures: classpath_file_single_flight.failures,
-                },
-                java_artifact_single_flight: IndexingSingleFlightReuseSnapshot {
-                    lookups: java_artifact_single_flight.lookups,
-                    hits: java_artifact_single_flight.hits,
-                    joined_flights: java_artifact_single_flight.joined_flights,
-                    producers: java_artifact_single_flight.producers,
-                    failures: java_artifact_single_flight.failures,
-                },
+                persistent_gem_products: (&persistent.gem_product_snapshot()).into(),
+                persistent_java_artifacts: (&persistent.java_artifact_snapshot()).into(),
+                persistent_compiled_wasm: (&persistent.compiled_wasm_snapshot()).into(),
+                gem_single_flight: (&self.products.gem_dependencies().snapshot()).into(),
+                classpath_file_single_flight: (&self.products.classpath_files().snapshot()).into(),
+                java_artifact_single_flight: (&self.products.java_artifacts().snapshot()).into(),
             },
         }
     }
@@ -393,7 +366,7 @@ impl RubyLanguageServer {
 impl IndexingStatusPublisher {
     pub(super) async fn next_indexing_status_snapshot(
         &self,
-        server: &RubyLanguageServer,
+        server: &Server,
     ) -> IndexingStatusSnapshot {
         let _publication = self.publication.lock().await;
         self.sequence_indexing_status_snapshot(server.indexing_status_snapshot())
@@ -403,17 +376,20 @@ impl IndexingStatusPublisher {
         &self,
         mut snapshot: IndexingStatusSnapshot,
     ) -> IndexingStatusSnapshot {
-        let sequence = self.sequence
+        let sequence = self
+            .sequence
             .fetch_add(1, Ordering::AcqRel)
             .checked_add(1)
-            .expect(
-                "INVARIANT VIOLATED: global indexing status sequence overflowed. This is a bug because one server cannot publish 2^64 snapshots. Fix: inspect the status publication loop.",
+            .expect_invariant(
+                "global indexing status sequence overflowed",
+                "one server cannot publish 2^64 snapshots",
+                "inspect the status publication loop",
             );
         snapshot.sequence = sequence;
         snapshot
     }
 
-    pub(super) fn schedule_publish_indexing_status(&self, server: &RubyLanguageServer) {
+    pub(super) fn schedule_publish_indexing_status(&self, server: &Server) {
         if self.wakeup.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -445,7 +421,7 @@ impl IndexingStatusPublisher {
         }
     }
 
-    pub async fn publish_indexing_status(&self, server: &RubyLanguageServer) {
+    pub async fn publish_indexing_status(&self, server: &Server) {
         let schedule_sender;
         let schedule_counter_flush;
         {
@@ -478,7 +454,7 @@ impl IndexingStatusPublisher {
         }
     }
 
-    pub(super) async fn flush_indexing_counter_status(&self, server: &RubyLanguageServer) {
+    pub(super) async fn flush_indexing_counter_status(&self, server: &Server) {
         let schedule_sender;
         {
             let mut publication = self.publication.lock().await;
@@ -528,7 +504,7 @@ impl IndexingStatusPublisher {
     }
 }
 
-impl RubyLanguageServer {
+impl Server {
     async fn next_indexing_status_snapshot(&self) -> IndexingStatusSnapshot {
         self.indexing
             .status

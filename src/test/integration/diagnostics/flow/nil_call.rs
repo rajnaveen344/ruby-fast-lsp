@@ -5,7 +5,7 @@
 //! for definite `NilClass`; Unknown and nilable unions remain silent.
 //! Diagnostic observations only read the output published by the handlers.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
 use ruby_analysis::core::{DiagnosticFact, SourceKind, TextRange};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
@@ -112,12 +112,16 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
             SourceKind::Project,
         )
         .expect("cold nil-call collection succeeds");
-    let engine = editor.server().analysis_engine_for_uri(&uri);
+    let engine = editor.server().project_for_uri(&uri);
     let file_id = {
-        let mut engine = engine.write();
+        let mut engine = engine.test_write();
         engine.resolve();
-        let file_id = engine.file_id(&path).expect("cold source registered");
+        let file_id = engine
+            .view()
+            .file_id(&path)
+            .expect("cold source registered");
         let diagnostics = engine
+            .view()
             .diagnostic_facts_in_file(file_id)
             .into_iter()
             .filter(|diagnostic| diagnostic.code == "nil-call")
@@ -134,7 +138,7 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
         file_id
     };
     editor.open(filename, source).await;
-    assert_eq!(engine.read().file_id(&path), Some(file_id));
+    assert_eq!(engine.test_read().view().file_id(&path), Some(file_id));
     assert_eq!(
         nil_calls(&editor, filename).await,
         vec![expected_nil_call()]
@@ -191,6 +195,19 @@ async fn nil_reassignment_clears_the_warn() {
 x = nil
 x = "hello"
 <warn none code="nil-call">x.upcase</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn safe_navigation_on_a_nil_local_is_not_a_nil_call() {
+    // `&.` never sends the message to nil, so neither the call nor the chained
+    // safe call on its nil result is a nil call or a missing method.
+    check(
+        r#"
+x = nil
+x&.<warn none>upcase</warn>&.<warn none>reverse</warn>
 "#,
     )
     .await;

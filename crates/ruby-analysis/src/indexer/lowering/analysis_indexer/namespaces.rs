@@ -5,12 +5,15 @@ use crate::core::{
     GraphNodeKind, RubyConstant, RubyType, SymbolFact, SymbolKind, TextRange, TypeFact,
     TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
-use super::syntax::{
-    attr_name_and_range, constant_parts_and_absolute, included_hook_mixin_call_kind,
+use super::syntax::{constant_parts_and_absolute, included_hook_mixin_call_kind};
+use super::AnalysisIndexer;
+use crate::indexer::documents::scope_rules::{
+    class_methods_block, edge_admission, implicit_singleton_namespace, resolve_lexical_namespace,
+    resolve_receiver_namespace, BlockExecution, EdgeAdmission,
 };
-use super::{AnalysisIndexer, ScopeKind};
 
 impl AnalysisIndexer {
     pub(super) fn push_namespace_facts(
@@ -46,10 +49,10 @@ impl AnalysisIndexer {
             TypeProvenance::Inferred,
         ));
 
-        let singleton_fqn = fqn.to_singleton_namespace().expect(
-            "INVARIANT VIOLATED: namespace fact could not convert to singleton namespace. \
-             This is a bug because class/module graph nodes must be namespace FQNs. \
-             Fix: only call push_namespace_facts with Namespace facts.",
+        let singleton_fqn = fqn.to_singleton_namespace().expect_invariant(
+            "namespace fact could not convert to singleton namespace",
+            "class/module graph nodes must be namespace FQNs",
+            "only call push_namespace_facts with Namespace facts",
         );
         self.known_namespaces.insert(singleton_fqn.clone());
         self.facts
@@ -62,7 +65,7 @@ impl AnalysisIndexer {
         parts: &[RubyConstant],
         absolute: bool,
     ) -> Option<FullyQualifiedName> {
-        self.resolve_namespace_from(parts, absolute, &self.namespace_stack)
+        self.resolve_namespace_from(parts, absolute, &self.scope.get_ns_stack())
     }
 
     pub(super) fn resolve_namespace_from(
@@ -71,27 +74,9 @@ impl AnalysisIndexer {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(probe);
-            if self.known_namespaces.contains(&fqn) {
-                return Some(fqn);
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.known_namespaces.contains(&fqn).then_some(fqn)
+        resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
+            self.known_namespaces.contains(fqn)
+        })
     }
 
     pub(super) fn push_edge(
@@ -127,7 +112,7 @@ impl AnalysisIndexer {
                     source,
                     parts.to_vec(),
                     absolute,
-                    FullyQualifiedName::namespace(self.namespace_stack.clone()),
+                    FullyQualifiedName::namespace(self.scope.get_ns_stack()),
                     kind,
                     range,
                 )
@@ -135,6 +120,23 @@ impl AnalysisIndexer {
             );
             return;
         };
+        self.push_resolved_edge_with_provenance(source, target, kind, provenance, range);
+    }
+
+    /// Record a resolved edge the file's ancestry admits. Duplicate,
+    /// conflicting-superclass, and cyclic edges are left to the collector,
+    /// which reports them.
+    pub(super) fn push_resolved_edge_with_provenance(
+        &mut self,
+        source: FullyQualifiedName,
+        target: FullyQualifiedName,
+        kind: GraphEdgeKind,
+        provenance: GraphEdgeProvenance,
+        range: TextRange,
+    ) {
+        if edge_admission(&self.facts.graph_edges, &source, &target, kind) != EdgeAdmission::Admit {
+            return;
+        }
         self.facts
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));
@@ -156,7 +158,7 @@ impl AnalysisIndexer {
             return;
         };
 
-        let source = FullyQualifiedName::namespace(self.namespace_stack.clone());
+        let source = FullyQualifiedName::namespace(self.owner_namespace());
         let range = self.range(&node.location());
         for arg in arguments.arguments().iter().skip(first_mixin_index) {
             let Some((parts, absolute)) = constant_parts_and_absolute(&arg) else {
@@ -170,147 +172,31 @@ impl AnalysisIndexer {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        if let Some(namespace) = self.resolve_const_get_receiver_namespace(receiver) {
-            return Some(namespace);
-        }
-
-        let (parts, absolute) = constant_parts_and_absolute(receiver)?;
-        if absolute {
-            let fqn = FullyQualifiedName::namespace(parts.clone());
-            return self.known_namespaces.contains(&fqn).then_some(parts);
-        }
-
-        let mut search = self.namespace_stack.clone();
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.known_namespaces.contains(&fqn) {
-                return Some(candidate);
-            }
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.clone());
-        self.known_namespaces.contains(&fqn).then_some(parts)
+        resolve_receiver_namespace(
+            receiver,
+            implicit_singleton_namespace(&self.scope).as_deref(),
+            &self.scope.get_ns_stack(),
+            &|fqn| self.known_namespaces.contains(fqn),
+        )
     }
 
-    fn resolve_const_get_receiver_namespace(
-        &self,
-        receiver: &Node<'_>,
-    ) -> Option<Vec<RubyConstant>> {
-        let call = receiver.as_call_node()?;
-        if call.name().as_slice() != b"const_get" {
-            return None;
-        }
-        let Some(base_receiver) = call.receiver() else {
-            return None;
-        };
-        let arguments = call.arguments()?;
-        let first = arguments.arguments().iter().next()?;
-        let (name, _) = attr_name_and_range(&first, self.file_id)?;
-        let Ok(constant) = RubyConstant::new(&name) else {
-            return None;
-        };
-        let mut namespace = self.resolve_constant_receiver_namespace(&base_receiver)?;
-        namespace.push(constant);
-        let fqn = FullyQualifiedName::namespace(namespace.clone());
-        self.known_namespaces.contains(&fqn).then_some(namespace)
-    }
-
-    pub(super) fn static_eval_block_context(
-        &self,
-        node: &CallNode<'_>,
-    ) -> Option<(Vec<RubyConstant>, ScopeKind)> {
-        let definition_scope = match node.name().as_slice() {
-            b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => ScopeKind::Instance,
-            b"instance_eval" | b"instance_exec" => ScopeKind::Singleton,
-            _ => return None,
-        };
-        node.block()?;
-        let namespace = match node.receiver() {
-            None => (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
-                .then(|| self.namespace_stack.clone())?,
-            Some(receiver) if receiver.as_self_node().is_some() => {
-                (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
-                    .then(|| self.namespace_stack.clone())?
-            }
-            Some(receiver) => {
-                let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
-                self.resolve_static_eval_namespace(&parts, absolute)?
-            }
-        };
-        Some((namespace, definition_scope))
-    }
-
-    fn resolve_static_eval_namespace(
-        &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-    ) -> Option<Vec<RubyConstant>> {
-        if parts.is_empty() {
-            return None;
-        }
-        if absolute {
-            let fqn = FullyQualifiedName::namespace(parts.to_vec());
-            return self.known_namespaces.contains(&fqn).then(|| parts.to_vec());
-        }
-
-        let mut search = self.namespace_stack.clone();
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.known_namespaces.contains(&fqn) {
-                return Some(candidate);
-            }
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.known_namespaces.contains(&fqn).then(|| parts.to_vec())
-    }
-
+    /// A Concern `class_methods` block: declares the `ClassMethods` module,
+    /// extends its owner with it, and returns where its methods land.
     pub(super) fn push_concern_class_methods_block(
         &mut self,
         node: &CallNode<'_>,
-    ) -> Option<Vec<RubyConstant>> {
-        if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
-            return None;
-        }
-        node.block()?;
-        if self.namespace_stack.is_empty() {
-            return None;
-        }
-
-        let class_methods = RubyConstant::new("ClassMethods").expect(
-            "INVARIANT VIOLATED: static Concern ClassMethods constant is invalid. \
-             This is a bug because `ClassMethods` is a valid Ruby constant. \
-             Fix: inspect RubyConstant validation.",
-        );
-        let mut target_namespace = self.namespace_stack.clone();
-        target_namespace.push(class_methods);
+    ) -> Option<BlockExecution> {
+        let execution = class_methods_block(node, implicit_singleton_namespace(&self.scope))?;
+        let target = execution.definition_namespace.clone();
+        let owner = FullyQualifiedName::namespace(target[..target.len() - 1].to_vec());
         let range = self.range(&node.location());
         self.push_namespace_facts(
-            FullyQualifiedName::namespace(target_namespace),
+            FullyQualifiedName::namespace(target.clone()),
             GraphNodeKind::Module,
             range,
             range,
         );
-        self.push_edge(
-            FullyQualifiedName::namespace(self.namespace_stack.clone()),
-            &[class_methods],
-            false,
-            GraphEdgeKind::Extend,
-            range,
-        );
-
-        Some(vec![class_methods])
+        self.push_edge(owner, &target, true, GraphEdgeKind::Extend, range);
+        Some(execution)
     }
 }

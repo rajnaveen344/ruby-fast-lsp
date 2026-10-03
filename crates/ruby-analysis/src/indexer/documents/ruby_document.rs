@@ -1,4 +1,5 @@
 use crate::core::{RubyType, SourceFileId, SourcePosition, SourceRange, TextRange};
+use crate::invariant::ExpectInvariant;
 use ruby_prism::Location as PrismLocation;
 use url::Url;
 
@@ -111,10 +112,10 @@ impl RubyDocument {
     }
 
     pub fn position_to_analysis_offset(&self, position: SourcePosition) -> u32 {
-        u32::try_from(self.position_to_offset(position)).expect(
-            "INVARIANT VIOLATED: source position offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        u32::try_from(self.position_to_offset(position)).expect_invariant(
+            "source position offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen TextRange offsets before indexing files larger than u32::MAX bytes",
         )
     }
 
@@ -139,12 +140,12 @@ impl RubyDocument {
     }
 
     pub fn text_range_to_source_range(&self, range: TextRange) -> SourceRange {
-        assert_eq!(
+        invariant_eq!(
             range.file_id,
             self.analysis_file_id(),
-            "INVARIANT VIOLATED: text range belongs to a different source file. \
-             This is a bug because RubyDocument can only convert ranges from its own file. \
-             Fix: route cross-file ranges through the owning document."
+            what = "text range belongs to a different source file",
+            why = "RubyDocument can only convert ranges from its own file",
+            fix = "route cross-file ranges through the owning document",
         );
         SourceRange::new(
             self.offset_to_position(range.start_byte as usize),

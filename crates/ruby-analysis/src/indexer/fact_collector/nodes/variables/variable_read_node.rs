@@ -1,5 +1,5 @@
+use crate::core::VariableTypeKind;
 use crate::core::{FullyQualifiedName, TypeFact, TypeProvenance, TypeSubject};
-use crate::engine::VariableTypeKind;
 use ruby_prism::{ClassVariableReadNode, GlobalVariableReadNode, InstanceVariableReadNode};
 
 use crate::indexer::fact_collector::FactCollector;
@@ -24,7 +24,7 @@ impl FactCollector {
         }
         let ruby_type = outcome.into_ruby_type();
 
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Expression(range),
             ruby_type,
             range,

@@ -1,13 +1,19 @@
 //! Current-source diagnostic projection and latest-per-document publication.
 use super::projects::ProjectRegistry;
-use super::{RubyLanguageServer, Workspace};
-use crate::indexer::scheduling::status::IndexingPhase;
+use super::{Server, Workspace};
+use crate::invariant::ExpectInvariant;
+use crate::loader::context::{IndexingRunState, LoadSink, LoadTarget, SourceReader};
+use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
+use crate::utils::lsp::lsp_file_range;
 use log::{info, warn};
 use parking_lot::Mutex;
+use ruby_analysis::core::DiagnosticSeverity as AnalysisDiagnosticSeverity;
+use ruby_analysis::engine::View;
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tower_lsp::lsp_types::{Diagnostic, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 use tower_lsp::Client;
 
 #[derive(Debug, Default)]
@@ -53,15 +59,14 @@ pub(super) struct DiagnosticPublisher {
     submitted: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
 }
 
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn diagnostic_source_snapshot(
         &self,
         uri: &Url,
     ) -> Option<ruby_analysis::engine::SourceFileSnapshot> {
         let path = uri.to_file_path().ok()?;
-        self.analysis_engine_for_uri(uri)
-            .read()
-            .source_snapshot_for_path(path)
+        self.project_for_uri(uri)
+            .view(|view| view.source_snapshot_for_path(path))
     }
 
     pub(crate) fn retain_external_linter_diagnostics(
@@ -86,23 +91,21 @@ impl RubyLanguageServer {
         true
     }
 
-    pub(crate) fn append_current_external_linter_diagnostics(
+    /// The one composition of a document's published diagnostics: `syntax`,
+    /// then the engine's facts, then linter output retained for the exact
+    /// current source. Everything is read through the caller's single view,
+    /// whose engine guard the caller keeps through the synchronous enqueue.
+    pub(crate) fn compose_diagnostics(
         &self,
+        view: &View<'_>,
         uri: &Url,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        let snapshot = self.diagnostic_source_snapshot(uri);
-        self.append_external_linter_diagnostics_for_snapshot(uri, snapshot, diagnostics);
-    }
-
-    /// Reuse presentation output while the caller holds the source engine read
-    /// lock, without recursively acquiring that lock to capture its snapshot.
-    pub(crate) fn append_external_linter_diagnostics_for_snapshot(
-        &self,
-        uri: &Url,
-        snapshot: Option<ruby_analysis::engine::SourceFileSnapshot>,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
+        mut diagnostics: Vec<Diagnostic>,
+    ) -> Vec<Diagnostic> {
+        diagnostics.extend(engine_diagnostics(view, uri));
+        let snapshot = uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| view.source_snapshot_for_path(path));
         let mut publication = self.diagnostics.state.lock();
         if let Some((retained_snapshot, retained)) = publication.external_linter_results.get(uri) {
             if Some(*retained_snapshot) == snapshot {
@@ -111,6 +114,16 @@ impl RubyLanguageServer {
                 publication.external_linter_results.remove(uri);
             }
         }
+        diagnostics
+    }
+
+    /// Compose `syntax` with the document's engine and linter diagnostics and
+    /// enqueue the result while holding one engine read guard.
+    pub(crate) fn publish_document_diagnostics(&self, uri: Url, syntax: Vec<Diagnostic>) {
+        self.project_for_uri(&uri).view(|view| {
+            let diagnostics = self.compose_diagnostics(view, &uri, syntax);
+            self.queue_diagnostics(uri, diagnostics);
+        });
     }
 
     pub(crate) fn clear_external_linter_diagnostics(&self, uri: &Url) {
@@ -130,8 +143,15 @@ impl RubyLanguageServer {
         self.queue_diagnostics(uri, diagnostics);
     }
 
-    /// Enqueue without yielding so a producer can retain its document/source
-    /// guards through publication. Only the dedicated sender performs client IO.
+    /// Test observation of retained linter output, which close releases.
+    #[cfg(test)]
+    pub fn has_retained_linter_diagnostics(&self, uri: &Url) -> bool {
+        self.diagnostics
+            .state
+            .lock()
+            .external_linter_results
+            .contains_key(uri)
+    }
 
     #[cfg(test)]
     pub fn last_published_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
@@ -156,13 +176,12 @@ impl RubyLanguageServer {
         &self,
         workspace: &Workspace,
     ) {
-        use crate::indexer::require_paths::{
+        use crate::loader::require_paths::{
             require_diagnostic_candidates, reresolve_unresolved_require_diagnostics,
-            UNRESOLVED_REQUIRE_CODE,
         };
-        use crate::lsp::query::EngineQuery;
+        use ruby_analysis::engine::UNRESOLVED_REQUIRE_CODE;
 
-        let feature_index = workspace.require_feature_index();
+        let feature_index = workspace.handle().require_feature_index();
         let generation = workspace.indexing_status.snapshot().generation;
         let load_paths = self
             .config
@@ -183,37 +202,45 @@ impl RubyLanguageServer {
         let refresh_started = Instant::now();
         let mut open_files = 0usize;
         let mut closed_files = 0usize;
-        let mut updates = {
-            let engine = workspace.analysis_engine.read();
-            engine
-                .files()
+        let mut updates = workspace.handle().view(|view| {
+            view.files()
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
-                    let candidates = engine.diagnostic_facts_in_file(file.id).into_iter()
+                    let candidates = view
+                        .diagnostic_facts_in_file(file.id)
+                        .into_iter()
                         .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
                         .collect::<Vec<_>>();
                     if open_paths.contains(&file.path) {
-                        open_files = open_files.checked_add(1).expect(
-                            "INVARIANT VIOLATED: unresolved-require open-file refresh counter overflowed usize. This is a bug because the document cache must fit addressable memory. Fix: inspect corrupt document-cache iteration.",
+                        open_files = open_files.checked_add(1).expect_invariant(
+                            "unresolved-require open-file refresh counter overflowed usize",
+                            "the document cache must fit addressable memory",
+                            "inspect corrupt document-cache iteration",
                         );
                     } else {
                         if candidates.is_empty() {
                             return None;
                         }
-                        closed_files = closed_files.checked_add(1).expect(
-                            "INVARIANT VIOLATED: unresolved-require closed-file refresh counter overflowed usize. This is a bug because project files must fit addressable memory. Fix: inspect corrupt file-store iteration.",
+                        closed_files = closed_files.checked_add(1).expect_invariant(
+                            "unresolved-require closed-file refresh counter overflowed usize",
+                            "project files must fit addressable memory",
+                            "inspect corrupt file-store iteration",
                         );
                     }
-                    let snapshot = engine.source_snapshot_for_path(&file.path).expect(
-                        "INVARIANT VIOLATED: a registered project file has no source snapshot. This is a bug because delayed facts require exact source identity. Fix: keep file registration and snapshot lookup aligned.",
+                    let snapshot = view.source_snapshot_for_path(&file.path).expect_invariant(
+                        "a registered project file has no source snapshot",
+                        "delayed facts require exact source identity",
+                        "keep file registration and snapshot lookup aligned",
                     );
-                    let uri = Url::from_file_path(&file.path).expect(
-                        "INVARIANT VIOLATED: a project source cannot form a file URI. This is a bug because registered project paths must be absolute. Fix: normalize paths before file registration.",
+                    let uri = Url::from_file_path(&file.path).expect_invariant(
+                        "a project source cannot form a file URI",
+                        "registered project paths must be absolute",
+                        "normalize paths before file registration",
                     );
                     Some((file.path.clone(), uri, file.id, snapshot, candidates))
                 })
                 .collect::<Vec<_>>()
-        };
+        });
         updates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
 
         for (path, uri, file_id, snapshot, candidates) in updates {
@@ -221,7 +248,7 @@ impl RubyLanguageServer {
             self.indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::scheduling::test_schedule::Point::RequireRefreshCollected,
+                    crate::loader::scheduling::test_schedule::Point::RequireRefreshCollected,
                     &path,
                 )
                 .await;
@@ -230,9 +257,11 @@ impl RubyLanguageServer {
                 let semantic_lock = self.document_semantic_lock(&uri);
                 let _semantic_guard = semantic_lock.lock().await;
                 let document = self.get_doc(&uri);
-                let mut diagnostics = document.as_ref().map(|document| {
+                let syntax = document.as_ref().map(|document| {
                     let parse = document.parse();
-                    crate::lsp::capabilities::diagnostics::generate_diagnostics(&parse, document)
+                    crate::loader::file_processor::syntax_diagnostics::generate_diagnostics(
+                        &parse, document,
+                    )
                 });
                 // An initially closed file may have opened while collection
                 // waited. Open documents provide all static requires, including
@@ -247,12 +276,12 @@ impl RubyLanguageServer {
                 let Some(owner) = ProjectRegistry::workspace_for_path(&workspaces, &path) else {
                     break 'commit;
                 };
-                if !Arc::ptr_eq(&workspace.analysis_engine, &owner.analysis_engine) {
+                if !workspace.handle().is_same(owner.handle()) {
                     break 'commit;
                 }
                 // Retain the immutable root identity through commit/publication:
                 // a newer dependency refresh must never be overwritten by this one.
-                let current_features = workspace.require_feature_guard();
+                let current_features = workspace.handle().require_feature_guard();
                 if !Arc::ptr_eq(&current_features, &feature_index)
                     || self
                         .config
@@ -264,65 +293,53 @@ impl RubyLanguageServer {
                 {
                     break 'commit;
                 }
-                let mut engine = workspace.analysis_engine.write();
-                let status = workspace.indexing_status.snapshot();
-                if status.generation != generation
-                    || matches!(
-                        status.phase,
-                        IndexingPhase::Cancelled | IndexingPhase::Failed
-                    )
-                    || engine.source_snapshot_for_path(&path) != Some(snapshot)
-                {
-                    break 'commit;
-                }
-                let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
-                    break 'commit;
-                };
-                if !file.kind.contributes_project_diagnostics()
-                    || document
-                        .as_ref()
-                        .is_some_and(|doc| !engine.file_content_matches(file.id, &doc.content))
-                {
-                    break 'commit;
-                }
-                // Project targets can change without changing the consumer's
-                // source or dependency roots. Resolve candidates against the
-                // current engine only after acquiring the commit guard.
-                let requires = reresolve_unresolved_require_diagnostics(
+                workspace.handle().refresh_require_diagnostics_if_snapshot(
                     &path,
-                    project_root,
-                    &load_paths,
-                    &feature_index,
-                    Some(&engine),
-                    &candidates,
+                    snapshot,
+                    |view, file| {
+                        let status = workspace.indexing_status.snapshot();
+                        if status.generation != generation
+                            || matches!(
+                                status.phase,
+                                IndexingPhase::Cancelled | IndexingPhase::Failed
+                            )
+                            || !file.kind.contributes_project_diagnostics()
+                            || document.as_ref().is_some_and(|doc| {
+                                !view.file_content_matches(file.id, &doc.content)
+                            })
+                        {
+                            return None;
+                        }
+                        // Project targets can change without changing the
+                        // consumer's source or dependency roots. Resolve
+                        // candidates against the current engine only inside
+                        // the commit.
+                        Some(reresolve_unresolved_require_diagnostics(
+                            &path,
+                            project_root,
+                            &load_paths,
+                            &feature_index,
+                            Some(view),
+                            &candidates,
+                        ))
+                    },
+                    |view| {
+                        // Closed files retain engine facts but receive no
+                        // publication. Enqueueing under the commit's guard
+                        // keeps edits and resolution outside the
+                        // projection-to-publication interval.
+                        if let Some(syntax) = syntax {
+                            let diagnostics = self.compose_diagnostics(view, &uri, syntax);
+                            self.queue_diagnostics(uri, diagnostics);
+                        }
+                    },
                 );
-                if !engine
-                    .replace_unresolved_require_diagnostics_if_source_snapshot(snapshot, requires)
-                {
-                    break 'commit;
-                }
-                if let Some(diagnostics) = diagnostics.as_mut() {
-                    diagnostics.extend(EngineQuery::unresolved_diagnostics_from_engine(
-                        &engine, &uri,
-                    ));
-                    self.append_external_linter_diagnostics_for_snapshot(
-                        &uri,
-                        Some(snapshot),
-                        diagnostics,
-                    );
-                }
-                if let Some(diagnostics) = diagnostics {
-                    // Closed files retain engine facts but receive no publication.
-                    // Synchronous enqueue keeps edits and resolution outside the
-                    // projection-to-publication interval.
-                    self.queue_diagnostics(uri, diagnostics);
-                }
             }
             #[cfg(test)]
             self.indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::scheduling::test_schedule::Point::RequireRefreshAttempted,
+                    crate::loader::scheduling::test_schedule::Point::RequireRefreshAttempted,
                     &path,
                 )
                 .await;
@@ -331,6 +348,154 @@ impl RubyLanguageServer {
             "[PERF][unresolved-require refresh] project={} open_files={} closed_files={} elapsed={:?}",
             project_root.display(), open_files, closed_files, refresh_started.elapsed()
         );
+    }
+}
+
+/// The single engine-to-LSP diagnostic projection for one document, read
+/// through the caller's one view. A source that cannot form a file URI, or a
+/// document the engine does not know, has no engine diagnostics.
+pub fn engine_diagnostics(view: &View<'_>, uri: &Url) -> Vec<Diagnostic> {
+    let path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+    let Some(file_id) = view.file_id(&path) else {
+        return Vec::new();
+    };
+    // Most documents have no facts; skip the source lookup and URI check.
+    let facts = view.diagnostic_facts_in_file(file_id);
+    if facts.is_empty() {
+        return Vec::new();
+    }
+    let Some(file) = view
+        .file(file_id)
+        .filter(|file| Url::from_file_path(&file.path).is_ok())
+    else {
+        return Vec::new();
+    };
+    facts
+        .into_iter()
+        .filter_map(|fact| {
+            Some(Diagnostic {
+                range: lsp_file_range(file, fact.range)?,
+                severity: Some(lsp_diagnostic_severity(fact.severity)),
+                code: Some(NumberOrString::String(fact.code)),
+                source: Some("ruby-fast-lsp".to_string()),
+                message: fact.message,
+                ..Diagnostic::default()
+            })
+        })
+        .collect()
+}
+
+fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSeverity {
+    match severity {
+        AnalysisDiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+        AnalysisDiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+        AnalysisDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+        AnalysisDiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
+    }
+}
+
+impl Server {
+    /// Publish a current, complete diagnostic projection for every open
+    /// document that `target`, the engine of the project at `root`, owns.
+    ///
+    /// Documents publish in URI order. Each projection is read under the
+    /// document's semantic lock and enqueued while the engine read lock is
+    /// held, so edits and cross-file resolution cannot interleave. Stops with
+    /// the run's state as soon as `run` is no longer current; a load without
+    /// a run publishes unconditionally.
+    pub(super) async fn publish_project_facts_diagnostics(
+        &self,
+        root: &Path,
+        target: &Arc<dyn LoadTarget>,
+        run: Option<&IndexingRun>,
+    ) -> IndexingRunState {
+        let run_state = || {
+            run.map_or(IndexingRunState::Current, |run| {
+                LoadSink::indexing_run_state(self, root, run)
+            })
+        };
+        let mut open_uris = self.documents.open_uris();
+        open_uris.retain(|uri| self.project_for_uri(uri).is_target(target));
+        open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
+
+        for uri in open_uris {
+            let state = run_state();
+            if state != IndexingRunState::Current {
+                return state;
+            }
+            #[cfg(test)]
+            let publication_path = uri
+                .to_file_path()
+                .expect("coordinator diagnostics must target a file URI");
+            #[cfg(test)]
+            self.indexing
+                .schedule
+                .checkpoint(
+                    crate::loader::scheduling::test_schedule::Point::ColdDiagnosticsPending,
+                    &publication_path,
+                )
+                .await;
+
+            {
+                // Edits and close may complete while this producer waits. Read
+                // diagnostics only after acquiring the same document lock used
+                // by those handlers, and recheck the indexing generation then.
+                let semantic_lock = self.document_semantic_lock(&uri);
+                let _semantic_guard = semantic_lock.lock().await;
+                let state = run_state();
+                if state != IndexingRunState::Current {
+                    return state;
+                }
+                let project = self.project_for_uri(&uri);
+                if !project.is_target(target) {
+                    continue;
+                }
+                let Some(document) = self.documents.open_document(&uri) else {
+                    continue;
+                };
+                let Ok(path) = uri.to_file_path() else {
+                    continue;
+                };
+                let syntax = {
+                    let parse = document.parse();
+                    crate::loader::file_processor::syntax_diagnostics::generate_diagnostics(
+                        &parse, &document,
+                    )
+                };
+                // Keep one project view through the synchronous enqueue:
+                // cross-file resolution cannot invalidate this projection in
+                // between. Empty results must clear errors resolved at startup.
+                let stopped = project.view(|view| {
+                    let file = view.file_id(&path).and_then(|id| view.file(id))?;
+                    if !file.kind.contributes_project_diagnostics()
+                        || !view.file_content_matches(file.id, &document.content)
+                    {
+                        return None;
+                    }
+                    let diagnostics = self.compose_diagnostics(view, &uri, syntax);
+                    let state = run_state();
+                    if state != IndexingRunState::Current {
+                        return Some(state);
+                    }
+                    self.queue_diagnostics(uri.clone(), diagnostics);
+                    None
+                });
+                if let Some(state) = stopped {
+                    return state;
+                }
+            }
+            #[cfg(test)]
+            self.indexing
+                .schedule
+                .checkpoint(
+                    crate::loader::scheduling::test_schedule::Point::ColdDiagnosticsAttempted,
+                    &publication_path,
+                )
+                .await;
+        }
+        IndexingRunState::Current
     }
 }
 
@@ -382,7 +547,7 @@ impl DiagnosticPublisher {
         }
     }
 }
-impl RubyLanguageServer {
+impl Server {
     pub(crate) fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
         self.diagnostics
             .enqueue(self.client.clone(), uri, diagnostics);

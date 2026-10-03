@@ -13,6 +13,7 @@ use crate::core::{ExecutionContextFact, RubyConstant, SourceFileId, SourcePositi
 use crate::indexer::{
     is_erb_path, mask_erb, Identifier, IdentifierType, IdentifierVisitor, LVScopeId,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use url::Url;
 
@@ -28,7 +29,7 @@ pub struct RubyPrismAnalyzer {
 pub struct SignatureHelpTarget {
     pub namespace: Vec<RubyConstant>,
     pub namespace_kind: crate::core::NamespaceKind,
-    pub receiver: crate::indexer::MethodReceiver,
+    pub receiver: crate::core::MethodReceiver,
     pub receiver_range: Option<(u32, u32)>,
     pub method: crate::core::RubyMethod,
     pub active_parameter: u32,
@@ -134,8 +135,10 @@ impl RubyPrismAnalyzer {
         let root_node = parse_result.node();
         let identifier = self.get_identifier_from_root(byte_offset, &root_node);
         let mut finder = ShapeKeyCompletionTargetFinder {
-            cursor_offset: usize::try_from(byte_offset).expect(
-                "INVARIANT VIOLATED: a completion byte offset did not fit usize. This is a bug because the offset came from the current in-memory source. Fix: keep document position conversion and analysis coordinates aligned.",
+            cursor_offset: usize::try_from(byte_offset).expect_invariant(
+                "a completion byte offset did not fit usize",
+                "the offset came from the current in-memory source",
+                "keep document position conversion and analysis coordinates aligned",
             ),
             best: None,
             best_receiver: None,
@@ -164,8 +167,10 @@ impl RubyPrismAnalyzer {
             position.line,
             position.character,
         ))
-        .expect(
-            "INVARIANT VIOLATED: analyzer source position exceeded u32 byte offsets. This is a bug because TextRange stores u32 offsets. Fix: widen domain offsets before accepting larger source files.",
+        .expect_invariant(
+            "analyzer source position exceeded u32 byte offsets",
+            "TextRange stores u32 offsets",
+            "widen domain offsets before accepting larger source files",
         );
         self.get_identifier(byte_offset)
     }
@@ -177,9 +182,12 @@ impl RubyPrismAnalyzer {
         finder.visit(&root_node);
         let call_site = finder.best?;
 
-        let message_offset = u32::try_from(call_site.message_start.saturating_add(1)).expect(
-            "INVARIANT VIOLATED: signature-help message offset exceeded u32. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
-        );
+        let message_offset = u32::try_from(call_site.message_start.saturating_add(1))
+            .expect_invariant(
+                "signature-help message offset exceeded u32",
+                "analysis TextRange offsets are u32",
+                "widen domain offsets before accepting larger source files",
+            );
         let (identifier, _, _, _, namespace_kind) = self.get_identifier(message_offset);
         let crate::indexer::Identifier::RubyMethod {
             namespace,
@@ -218,8 +226,10 @@ impl RubyPrismAnalyzer {
         byte_offset: u32,
         namespace_stack: &mut Vec<RubyConstant>,
     ) {
-        let target_offset = usize::try_from(byte_offset).expect(
-            "INVARIANT VIOLATED: u32 analysis offset could not fit usize. This is a bug because supported targets must address u32 source offsets. Fix: reject the unsupported target architecture.",
+        let target_offset = usize::try_from(byte_offset).expect_invariant(
+            "u32 analysis offset could not fit usize",
+            "supported targets must address u32 source offsets",
+            "reject the unsupported target architecture",
         );
         let position_in_node = |node_loc: &ruby_prism::Location| -> bool {
             let start_offset = node_loc.start_offset();
@@ -330,16 +340,20 @@ impl ShapeKeyCompletionTargetFinder {
             return;
         }
         let receiver_location = receiver.location();
-        assert!(
+        invariant!(
             receiver_location.start_offset() < receiver_location.end_offset(),
-            "INVARIANT VIOLATED: a Hash key completion receiver has an empty Prism range. This is a bug because `[]` requires a concrete receiver expression. Fix: reject recovered calls without a nonempty receiver before semantic lookup."
+            what = "a Hash key completion receiver has an empty Prism range",
+            why = "`[]` requires a concrete receiver expression",
+            fix = "reject recovered calls without a nonempty receiver before semantic lookup",
         );
         let call_location = node.location();
         let call_span = call_location
             .end_offset()
             .checked_sub(call_location.start_offset())
-            .expect(
-                "INVARIANT VIOLATED: a Hash key completion call has an inverted Prism range. This is a parser bug because call ranges must be ordered. Fix: validate the recovered CallNode before visiting it.",
+            .expect_invariant(
+                "a Hash key completion call has an inverted Prism range",
+                "call ranges must be ordered",
+                "validate the recovered CallNode before visiting it",
             );
         if self
             .best
@@ -350,22 +364,30 @@ impl ShapeKeyCompletionTargetFinder {
         }
         self.best = Some(ShapeKeyCompletionCandidate {
             target: ShapeKeyCompletionTarget {
-                receiver_start: u32::try_from(receiver_location.start_offset()).expect(
-                    "INVARIANT VIOLATED: a Hash key receiver start exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                receiver_start: u32::try_from(receiver_location.start_offset()).expect_invariant(
+                    "a Hash key receiver start exceeded u32",
+                    "analysis source coordinates are u32-bounded",
+                    "reject oversized documents before indexing",
                 ),
-                receiver_end: u32::try_from(receiver_location.end_offset()).expect(
-                    "INVARIANT VIOLATED: a Hash key receiver end exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                receiver_end: u32::try_from(receiver_location.end_offset()).expect_invariant(
+                    "a Hash key receiver end exceeded u32",
+                    "analysis source coordinates are u32-bounded",
+                    "reject oversized documents before indexing",
                 ),
-                receiver_local_name: receiver.as_local_variable_read_node().map(|local| {
-                    String::from_utf8_lossy(local.name().as_slice()).to_string()
-                }),
+                receiver_local_name: receiver
+                    .as_local_variable_read_node()
+                    .map(|local| String::from_utf8_lossy(local.name().as_slice()).to_string()),
                 syntax,
                 partial,
-                replacement_start: u32::try_from(value_location.start_offset()).expect(
-                    "INVARIANT VIOLATED: a Hash key replacement start exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                replacement_start: u32::try_from(value_location.start_offset()).expect_invariant(
+                    "a Hash key replacement start exceeded u32",
+                    "analysis source coordinates are u32-bounded",
+                    "reject oversized documents before indexing",
                 ),
-                replacement_end: u32::try_from(value_location.end_offset()).expect(
-                    "INVARIANT VIOLATED: a Hash key replacement end exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                replacement_end: u32::try_from(value_location.end_offset()).expect_invariant(
+                    "a Hash key replacement end exceeded u32",
+                    "analysis source coordinates are u32-bounded",
+                    "reject oversized documents before indexing",
                 ),
             },
             call_span,
@@ -384,9 +406,14 @@ impl ShapeKeyCompletionTargetFinder {
             return;
         }
         let call = node.location();
-        let call_span = call.end_offset().checked_sub(call.start_offset()).expect(
-            "INVARIANT VIOLATED: a completion CallNode has an inverted Prism range. This is a parser bug because call ranges must be ordered. Fix: validate the recovered CallNode before using its receiver.",
-        );
+        let call_span = call
+            .end_offset()
+            .checked_sub(call.start_offset())
+            .expect_invariant(
+                "a completion CallNode has an inverted Prism range",
+                "call ranges must be ordered",
+                "validate the recovered CallNode before using its receiver",
+            );
         if self
             .best_receiver
             .as_ref()
@@ -395,17 +422,23 @@ impl ShapeKeyCompletionTargetFinder {
             return;
         }
         let receiver = receiver.location();
-        assert!(
+        invariant!(
             receiver.start_offset() < receiver.end_offset(),
-            "INVARIANT VIOLATED: a method-completion receiver has an empty Prism range. This is a parser recovery bug because an explicit receiver must own syntax. Fix: reject recovered calls without a concrete receiver."
+            what = "a method-completion receiver has an empty Prism range",
+            why = "an explicit receiver must own syntax",
+            fix = "reject recovered calls without a concrete receiver",
         );
         self.best_receiver = Some(CompletionReceiverCandidate {
             target: CompletionReceiverTarget {
-                receiver_start: u32::try_from(receiver.start_offset()).expect(
-                    "INVARIANT VIOLATED: method-completion receiver start exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: reject oversized documents before completion.",
+                receiver_start: u32::try_from(receiver.start_offset()).expect_invariant(
+                    "method-completion receiver start exceeded u32 byte offsets",
+                    "analysis TextRange offsets are u32",
+                    "reject oversized documents before completion",
                 ),
-                receiver_end: u32::try_from(receiver.end_offset()).expect(
-                    "INVARIANT VIOLATED: method-completion receiver end exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: reject oversized documents before completion.",
+                receiver_end: u32::try_from(receiver.end_offset()).expect_invariant(
+                    "method-completion receiver end exceeded u32 byte offsets",
+                    "analysis TextRange offsets are u32",
+                    "reject oversized documents before completion",
                 ),
             },
             call_span,
@@ -474,11 +507,15 @@ impl<'a> SignatureCallSiteFinder<'a> {
             receiver_range: node.receiver().map(|receiver| {
                 let location = receiver.location();
                 (
-                    u32::try_from(location.start_offset()).expect(
-                        "INVARIANT VIOLATED: signature-help receiver start exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+                    u32::try_from(location.start_offset()).expect_invariant(
+                        "signature-help receiver start exceeded u32 byte offsets",
+                        "analysis TextRange offsets are u32",
+                        "widen domain offsets before accepting larger source files",
                     ),
-                    u32::try_from(location.end_offset()).expect(
-                        "INVARIANT VIOLATED: signature-help receiver end exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+                    u32::try_from(location.end_offset()).expect_invariant(
+                        "signature-help receiver end exceeded u32 byte offsets",
+                        "analysis TextRange offsets are u32",
+                        "widen domain offsets before accepting larger source files",
                     ),
                 )
             }),
@@ -533,10 +570,10 @@ fn active_parameter_for_call(node: &CallNode<'_>, byte_offset: usize, source: &s
         }
     }
 
-    let last = args.last().expect(
-        "INVARIANT VIOLATED: argument list became empty after a non-empty check. \
-         This is a bug because the local argument vector is immutable. \
-         Fix: keep argument collection and active-parameter calculation together.",
+    let last = args.last().expect_invariant(
+        "argument list became empty after a non-empty check",
+        "the local argument vector is immutable",
+        "keep argument collection and active-parameter calculation together",
     );
     let tail_start = last.location().end_offset().min(source.len());
     let tail_end = byte_offset.min(source.len());

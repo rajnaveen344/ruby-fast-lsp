@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -22,7 +23,7 @@ use crate::environment::extensions::{
     MAX_PROCESS_ARGUMENT_BYTES, MAX_PROCESS_OUTPUT_BYTES, MAX_PROCESS_REQUESTS_PER_EVENT,
     MAX_PROCESS_STDIN_BYTES, MAX_PROCESS_TIMEOUT,
 };
-use crate::indexer::scheduling::resources::{
+use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 
@@ -149,8 +150,10 @@ pub(super) fn watched_file_candidates(
         let Some(root) = roots.iter().find(|root| file_path.starts_with(root)) else {
             continue;
         };
-        let relative = file_path.strip_prefix(root).expect(
-            "INVARIANT VIOLATED: watched file selected a workspace root that is not its prefix. This is a bug because the root was chosen with starts_with. Fix: keep root selection and strip_prefix adjacent.",
+        let relative = file_path.strip_prefix(root).expect_invariant(
+            "watched file selected a workspace root that is not its prefix",
+            "the root was chosen with starts_with",
+            "keep root selection and strip_prefix adjacent",
         );
         let kind = if change.typ == FileChangeType::CREATED {
             WatchedFileChangeKind::Created
@@ -408,10 +411,10 @@ pub(super) async fn run_extension_process(
             run_extension_process_admitted(request),
         )
         .await
-        .expect(
-            "INVARIANT VIOLATED: a non-cancellable extension process failed resource admission. \
-             This is a bug because its fixed positive claim must fit the server-owned policy. \
-             Fix: keep the extension process claim within the configured production budget.",
+        .expect_invariant(
+            "a non-cancellable extension process failed resource admission",
+            "its fixed positive claim must fit the server-owned policy",
+            "keep the extension process claim within the configured production budget",
         )
 }
 
@@ -445,16 +448,22 @@ async fn run_extension_process_admitted(
             }
         }
     };
-    let stdout = child.stdout.take().expect(
-        "INVARIANT VIOLATED: extension process has no piped stdout. This is a bug because stdout is configured before spawning. Fix: keep stdout piped before taking the child handle.",
+    let stdout = child.stdout.take().expect_invariant(
+        "extension process has no piped stdout",
+        "stdout is configured before spawning",
+        "keep stdout piped before taking the child handle",
     );
-    let stderr = child.stderr.take().expect(
-        "INVARIANT VIOLATED: extension process has no piped stderr. This is a bug because stderr is configured before spawning. Fix: keep stderr piped before taking the child handle.",
+    let stderr = child.stderr.take().expect_invariant(
+        "extension process has no piped stderr",
+        "stderr is configured before spawning",
+        "keep stderr piped before taking the child handle",
     );
     let stdout_task = tokio::spawn(read_bounded_process_output(stdout));
     let stderr_task = tokio::spawn(read_bounded_process_output(stderr));
-    let mut stdin = child.stdin.take().expect(
-        "INVARIANT VIOLATED: extension process has no piped stdin. This is a bug because stdin is configured before spawning. Fix: keep stdin piped before taking the child handle.",
+    let mut stdin = child.stdin.take().expect_invariant(
+        "extension process has no piped stdin",
+        "stdin is configured before spawning",
+        "keep stdin piped before taking the child handle",
     );
     let stdin_content = request.stdin.unwrap_or_default();
     let stdin_task = tokio::spawn(async move {
@@ -475,14 +484,22 @@ async fn run_extension_process_admitted(
         };
     let stdin_error = stdin_task
         .await
-        .expect("INVARIANT VIOLATED: extension process stdin task panicked. This is a bug because the task only writes bounded bytes. Fix: keep panicking work out of the stdin task.")
+        .expect_invariant(
+            "extension process stdin task panicked",
+            "the task only writes bounded bytes",
+            "keep panicking work out of the stdin task",
+        )
         .err()
         .map(|err| err.to_string());
-    let (stdout, stdout_truncated) = stdout_task.await.expect(
-        "INVARIANT VIOLATED: extension process stdout task panicked. This is a bug because the task only drains bounded process output. Fix: keep panicking work out of the output task.",
+    let (stdout, stdout_truncated) = stdout_task.await.expect_invariant(
+        "extension process stdout task panicked",
+        "the task only drains bounded process output",
+        "keep panicking work out of the output task",
     );
-    let (mut stderr, stderr_truncated) = stderr_task.await.expect(
-        "INVARIANT VIOLATED: extension process stderr task panicked. This is a bug because the task only drains bounded process output. Fix: keep panicking work out of the output task.",
+    let (mut stderr, stderr_truncated) = stderr_task.await.expect_invariant(
+        "extension process stderr task panicked",
+        "the task only drains bounded process output",
+        "keep panicking work out of the output task",
     );
     for error in [wait_error, stdin_error].into_iter().flatten() {
         if !stderr.is_empty() {

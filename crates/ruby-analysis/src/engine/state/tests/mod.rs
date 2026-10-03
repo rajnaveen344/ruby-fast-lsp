@@ -1,21 +1,26 @@
 use crate::core::{
-    DiagnosticFact, DiagnosticSeverity, FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact,
-    GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, InferenceEvidence,
-    InferenceTelemetry, MethodCalleeResolution, MethodFact, MethodReturnEquation, NamespaceKind,
-    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeFact,
-    TypeInferenceOutcome, TypeProvenance, TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
+    DiagnosticFact, DiagnosticSeverity, FileAnalysis, FullyQualifiedName, GeneratedOwnerId,
+    GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind,
+    InferenceEvidence, InferenceTelemetry, MethodCalleeResolution, MethodFact,
+    MethodReturnEquation, NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, RubyType,
+    SymbolFact, SymbolKind, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+    UnknownReason, UnresolvedGraphEdgeFact,
 };
 
-use super::fingerprint::SemanticChange;
 use super::*;
-use crate::core::TypeResolution;
+use crate::core::{SourceFileId, SourceKind, TextRange, TypeResolution};
+use crate::engine::lookup::{self, LookupReceiver, MethodAnswer, MethodRequest, MethodWant};
+use crate::engine::persist::fingerprint::SemanticChange;
 use crate::engine::resolution::{
     method_lookup_chain, method_lookup_chain_for_reference_cached,
     method_lookup_chain_uncached_construction_count, namespace_target_exists,
     MethodLookupChainCache,
 };
-use crate::engine::AnalysisQueryCache;
 use crate::engine::ConstantLookupRequest;
+use crate::engine::View;
+use crate::engine::ViewCache;
+use crate::inference::semantics::ReceiverAccess;
+use std::path::PathBuf;
 
 mod caches;
 mod constants;
@@ -24,6 +29,29 @@ mod graph;
 mod inference_outcomes;
 mod lifecycle;
 mod navigation;
+mod remove;
+
+/// Ask `view` for `want` of `method` on the `owner` namespace with `access`.
+fn ask(
+    view: &View<'_>,
+    owner: &FullyQualifiedName,
+    method: &RubyMethod,
+    access: ReceiverAccess<'_>,
+    want: MethodWant,
+) -> MethodAnswer {
+    let request = MethodRequest::new(LookupReceiver::Namespace(owner), *method, want);
+    lookup::method(view, request.with_access(access))
+}
+
+/// [`ask`] with an unrestricted receiver.
+fn ask_any(
+    view: &View<'_>,
+    owner: &FullyQualifiedName,
+    method: &RubyMethod,
+    want: MethodWant,
+) -> MethodAnswer {
+    ask(view, owner, method, ReceiverAccess::Any, want)
+}
 
 fn constant_subject(name: &str) -> TypeSubject {
     TypeSubject::Constant(FullyQualifiedName::constant(vec![
@@ -32,7 +60,7 @@ fn constant_subject(name: &str) -> TypeSubject {
 }
 
 fn register_project_file(
-    engine: &mut AnalysisEngine,
+    engine: &mut Project,
     path: impl Into<std::path::PathBuf>,
     source: impl Into<String>,
 ) -> SourceFileId {
@@ -69,6 +97,7 @@ fn explicit_method_call_candidate(
                 receiver_type: None,
                 diagnose_unresolved: true,
                 allow_unindexed_owner: false,
+                safe_navigation: false,
                 signature: Some(crate::core::MethodCallSignatureCandidate::default()),
             },
         },

@@ -1,12 +1,13 @@
 //! Parameter, RBS contract, and variable binding type queries.
 
+use crate::core::VariableTypeKind;
 use crate::core::{
     FullyQualifiedName, RubyType, SourceFileId, SourceKind, TypeFact, TypeResolution, TypeSubject,
 };
-use crate::engine::queries::lookup::types::VariableTypeKind;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
+use crate::invariant::ExpectInvariant;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn parameter_type_at(
         &self,
         method_name: &str,
@@ -15,7 +16,6 @@ impl<'a> AnalysisQuery<'a> {
         byte_offset: u32,
     ) -> Option<RubyType> {
         let method_fact = self
-            .engine
             .method_facts_in_file(file_id)
             .into_iter()
             .find(|fact| {
@@ -65,13 +65,11 @@ impl<'a> AnalysisQuery<'a> {
         parameter_name: &str,
     ) -> Option<RubyType> {
         let signature_methods = self
-            .engine
             .method_facts_for(method)
             .into_iter()
             .filter(|fact| {
                 fact.owner == *owner
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind == SourceKind::Signature)
             })
@@ -122,13 +120,11 @@ impl<'a> AnalysisQuery<'a> {
         owner: &FullyQualifiedName,
     ) -> Option<RubyType> {
         let signature_methods = self
-            .engine
             .method_facts_for(method)
             .into_iter()
             .filter(|fact| {
                 fact.owner == *owner
                     && self
-                        .engine
                         .file(fact.range.file_id)
                         .is_some_and(|file| file.kind == SourceKind::Signature)
             })
@@ -177,14 +173,15 @@ impl<'a> AnalysisQuery<'a> {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<RubyType> {
-        assert!(
+        invariant!(
             matches!(
                 kind,
-                VariableTypeKind::Instance
-                    | VariableTypeKind::Class
-                    | VariableTypeKind::Global
+                VariableTypeKind::Instance | VariableTypeKind::Class | VariableTypeKind::Global
             ),
-            "INVARIANT VIOLATED: an owner-aware variable query received a local or constant kind. This is a bug because locals require a lexical scope and constants require lexical constant resolution. Fix: use local_variable_type_at or the constant query instead."
+            what = "an owner-aware variable query received a local or constant kind",
+            why =
+                "locals require a lexical scope and constants require lexical constant resolution",
+            fix = "use local_variable_type_at or the constant query instead",
         );
 
         let matching = self
@@ -246,9 +243,11 @@ impl<'a> AnalysisQuery<'a> {
         name_start_offset: u32,
         name_end_offset: u32,
     ) -> Option<RubyType> {
-        assert!(
+        invariant!(
             name_start_offset <= name_end_offset,
-            "INVARIANT VIOLATED: a variable assignment name range is reversed. This is a bug because exact-write type queries require a normalized source range. Fix: pass the Prism name location without swapping its offsets."
+            what = "a variable assignment name range is reversed",
+            why = "exact-write type queries require a normalized source range",
+            fix = "pass the Prism name location without swapping its offsets",
         );
         let mut best_span = None;
         let mut best_type = None;
@@ -307,8 +306,14 @@ impl<'a> AnalysisQuery<'a> {
             if !matches {
                 continue;
             }
-            let span = fact.range.end_byte.checked_sub(fact.range.start_byte).expect(
-                    "INVARIANT VIOLATED: a stored type fact range is reversed. This is a bug because TypeFact ranges must remain normalized. Fix: construct type facts through TextRange::new and preserve that invariant during replacement.",
+            let span = fact
+                .range
+                .end_byte
+                .checked_sub(fact.range.start_byte)
+                .expect_invariant(
+                    "a stored type fact range is reversed",
+                    "TypeFact ranges are normalized",
+                    "build ranges with TextRange::new and keep them normalized on replacement",
                 );
             match best_span {
                 None => {

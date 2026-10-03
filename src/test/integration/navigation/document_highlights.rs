@@ -1,11 +1,11 @@
-use crate::server::RubyLanguageServer;
+use crate::server::Server;
 use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::{InitializeParams, OneOf, Position, Range};
 use tower_lsp::LanguageServer;
 
 #[tokio::test]
 async fn initialization_advertises_document_highlights() {
-    let server = RubyLanguageServer::default();
+    let server = Server::default();
     let initialized = server
         .initialize(InitializeParams::default())
         .await

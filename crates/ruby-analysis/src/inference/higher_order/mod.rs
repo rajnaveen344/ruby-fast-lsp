@@ -5,15 +5,16 @@
 //! argument types, infers one block body using the returned parameter types,
 //! and then supplies the exhaustive block result to finish substitution.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rbs_parser::{ParamKind, RbsType};
 
-use crate::core::{
-    CallableBlockTemplate, CallableParameterTemplate, CallableSignature,
-    CallableTypeTemplate as TypeTemplate, MethodParamKind, RubyType, TypeInferenceOutcome,
-    UnknownReason,
-};
+use crate::core::callables::callable_signature::CallableBlockTemplate;
+use crate::core::callables::callable_signature::CallableParameterTemplate;
+use crate::core::callables::callable_signature::CallableSignature;
+use crate::core::callables::callable_signature::CallableTypeTemplate as TypeTemplate;
+use crate::core::{MethodParamKind, RubyType, TypeInferenceOutcome, UnknownReason};
 
 pub(crate) const MAX_CALLABLE_OVERLOADS: usize = 8;
 pub(crate) const MAX_CALLABLE_TYPE_VARIABLES: usize = 8;
@@ -27,7 +28,8 @@ pub(crate) struct KnownProcType {
     /// Flow-local identity of the callable literal. Source offsets are unique
     /// within one file traversal and never enter engine storage.
     pub(crate) identity: u32,
-    pub(crate) summary: Result<crate::core::CallableBodySummary, UnknownReason>,
+    pub(crate) summary:
+        Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +40,7 @@ struct PreparedCallable {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PreparedCallableSet {
+pub struct PreparedCallableSet {
     candidates: Vec<PreparedCallable>,
     block_parameter_types: Vec<RubyType>,
 }
@@ -179,8 +181,10 @@ impl PreparedCallableSet {
         if let Some(reason) = result.unknown_reason() {
             return TypeInferenceOutcome::unknown(reason);
         }
-        let result = result.into_proven_type().expect(
-            "INVARIANT VIOLATED: callable-body outcome is neither proven nor Unknown. This is a bug because TypeInferenceOutcome has exactly those two states. Fix: preserve the proof state while composing the higher-order result.",
+        let result = result.into_proven_type().expect_invariant(
+            "callable-body outcome is neither proven nor Unknown",
+            "TypeInferenceOutcome has exactly those two states",
+            "preserve the proof state while composing the higher-order result",
         );
         self.finish(&result)
     }
@@ -288,8 +292,10 @@ pub(crate) fn prepare_callable_set(
 
     Ok(PreparedCallableSet {
         candidates,
-        block_parameter_types: common_block_parameters.expect(
-            "INVARIANT VIOLATED: applicable callable signatures produced no block parameter set. This is a bug because an empty applicable set returns before preparation. Fix: keep candidate and block-parameter construction atomic.",
+        block_parameter_types: common_block_parameters.expect_invariant(
+            "applicable callable signatures produced no block parameter set",
+            "an empty applicable set returns before preparation",
+            "keep candidate and block-parameter construction atomic",
         ),
     })
 }
@@ -589,8 +595,10 @@ fn constrain_template(
         TypeTemplate::Variable(name) => {
             bind_variable(name, actual, substitutions, solve_iterations)
         }
-        TypeTemplate::Receiver => panic!(
-            "INVARIANT VIOLATED: an uninstantiated receiver template reached callable constraints. This is a bug because prepare_callable_set must replace every receiver template before solving. Fix: recurse through every callable template in instantiate_receiver_signature."
+        TypeTemplate::Receiver => unreachable_invariant!(
+            what = "an uninstantiated receiver template reached callable constraints",
+            why = "prepare_callable_set must replace every receiver template before solving",
+            fix = "recurse through every callable template in instantiate_receiver_signature",
         ),
         TypeTemplate::Concrete(expected) => {
             if expected.is_compatible_with(actual) {
@@ -626,8 +634,10 @@ fn constrain_template(
                 | RubyType::Unknown => return Err(UnknownReason::UnsupportedCallable),
             };
             let RubyType::Hash(keys, values) = generic else {
-                panic!(
-                    "INVARIANT VIOLATED: a generic Hash projection returned a non-Hash type. This is a bug because structural shapes project only to RubyType::Hash. Fix: keep ShapeType::generic_hash_type canonical."
+                unreachable_invariant!(
+                    what = "a generic Hash projection returned a non-Hash type",
+                    why = "structural shapes project only to RubyType::Hash",
+                    fix = "keep ShapeType::generic_hash_type canonical",
                 );
             };
             constrain_template(
@@ -719,8 +729,10 @@ fn bind_variable(
     if RubyType::contains_unknown(actual) {
         return Err(UnknownReason::IncompleteGenericSubstitution);
     }
-    *solve_iterations = solve_iterations.checked_add(1).expect(
-        "INVARIANT VIOLATED: higher-order solve iteration count overflowed usize. This is a bug because the solver stops at a tiny fixed bound. Fix: increment only through bind_variable and preserve the bound check.",
+    *solve_iterations = solve_iterations.checked_add(1).expect_invariant(
+        "higher-order solve iteration count overflowed usize",
+        "the solver stops at a tiny fixed bound",
+        "increment only through bind_variable and preserve the bound check",
     );
     if *solve_iterations > MAX_CALLABLE_SOLVE_ITERATIONS {
         return Err(UnknownReason::HigherOrderBoundExceeded);
@@ -746,8 +758,10 @@ fn resolve_template(
     }
     match template {
         TypeTemplate::Concrete(ruby_type) => Ok(ruby_type.clone()),
-        TypeTemplate::Receiver => panic!(
-            "INVARIANT VIOLATED: an uninstantiated receiver template reached callable result substitution. This is a bug because prepare_callable_set must replace every receiver template before solving. Fix: recurse through every callable template in instantiate_receiver_signature."
+        TypeTemplate::Receiver => unreachable_invariant!(
+            what = "an uninstantiated receiver template reached callable result substitution",
+            why = "prepare_callable_set must replace every receiver template before solving",
+            fix = "recurse through every callable template in instantiate_receiver_signature",
         ),
         TypeTemplate::Variable(name) => substitutions
             .get(name)

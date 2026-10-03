@@ -1,10 +1,10 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use log::warn;
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_fast_lsp_extension_api::Extension;
 use ruby_prism::CallNode;
 
 use crate::environment::extensions::dispatch::apply::apply_patch;
@@ -15,7 +15,7 @@ use crate::environment::extensions::patches::conflicts::{
     resolve_execution_context_conflicts, resolve_index_patch_conflicts,
 };
 use crate::environment::extensions::patches::validation::{
-    index_patch_extension_id, index_patch_requires_project_context, validate_execution_contexts,
+    index_patch_extension_id, index_patch_requires_project_context,
     validate_execution_contexts_for_project, validate_index_patch_payloads,
     validate_index_patch_provenance,
 };
@@ -39,54 +39,7 @@ pub(in crate::environment::extensions) fn process_call_node_with_registry(
     {
         return false;
     }
-    if process_wasm_call_node(registry, visitor, node, applicability) {
-        return true;
-    }
-    if registry.inner.read().has_loaded_wasm_for_call(method_name) {
-        return false;
-    }
-
-    let rspec = ruby_fast_lsp_extension_rspec::extension();
-
-    assert!(
-        rspec.abi_version() == ruby_fast_lsp_extension_api::ABI_VERSION,
-        "INVARIANT VIOLATED: extension ABI version mismatch for {}. \
-         This is a bug because extension patches cannot be safely interpreted across ABI versions. \
-         Fix: rebuild extension against current ruby-fast-lsp-extension-api.",
-        rspec.id()
-    );
-
-    if !rspec.indexed_call_names().contains(&method_name) {
-        return false;
-    }
-
-    let ctx = call_context(visitor, node, true);
-    let output = rspec.index_call_output(&ctx);
-    validate_index_patch_provenance(rspec.id(), &output.index_patches).expect(
-        "INVARIANT VIOLATED: bundled native extension spoofed index patch provenance. This is a bug because bundled and Wasm extensions must obey the same public trust contract. Fix: emit the compiled extension ID in every PatchSource.",
-    );
-    validate_index_patch_payloads(&output.index_patches).expect(
-        "INVARIANT VIOLATED: bundled native extension emitted an invalid index patch. This is a bug because native adapters must use the same validated ABI as Wasm guests. Fix: correct the extension payload.",
-    );
-    assert!(
-        ctx.project.is_some()
-            || !output
-                .index_patches
-                .iter()
-                .any(index_patch_requires_project_context),
-        "INVARIANT VIOLATED: bundled native extension emitted a project-generated owner without an owning ProjectContext. This is a guest bug because project-scoped semantic identity cannot be constructed outside a project. Fix: emit source-scoped owners or require project context."
-    );
-    validate_execution_contexts(rspec.id(), &ctx, &output.execution_contexts).expect(
-        "INVARIANT VIOLATED: bundled native extension emitted an invalid execution context. This is a bug because native adapters must use the same validated ABI as Wasm guests. Fix: correct the context ranges, owners, targets, or provenance.",
-    );
-    let handled = !output.index_patches.is_empty() || !output.execution_contexts.is_empty();
-    for patch in output.index_patches {
-        apply_patch(visitor, node, patch);
-    }
-    for context in output.execution_contexts {
-        apply_execution_context(visitor, context);
-    }
-    handled
+    process_wasm_call_node(registry, visitor, node, applicability)
 }
 
 fn process_wasm_call_node(
@@ -228,9 +181,11 @@ fn process_wasm_call_node(
             .cloned()
             .collect::<BTreeSet<_>>();
         for extension_id in &conflict.extension_ids {
-            let loaded = emitters.get(extension_id).expect(
-                        "INVARIANT VIOLATED: conflicting patch source has no emitting extension. This is a bug because provenance is validated before conflict resolution. Fix: keep emitter registration adjacent to accepted patch collection.",
-                    );
+            let loaded = emitters.get(extension_id).expect_invariant(
+                "conflicting patch source has no emitting extension",
+                "provenance is validated before conflict resolution",
+                "keep emitter registration adjacent to accepted patch collection",
+            );
             loaded.reject_conflict(conflict.message.clone());
         }
         warn!(

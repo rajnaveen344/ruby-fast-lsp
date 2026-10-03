@@ -13,12 +13,11 @@ use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, RubyConstant, RubyMethod,
     TextRange,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn reference_ranges_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
-        self.engine
-            .reference_facts_for(fqn)
+        self.reference_facts_for(fqn)
             .iter()
             .map(|fact| fact.range)
             .collect()
@@ -138,33 +137,28 @@ impl<'a> AnalysisQuery<'a> {
             if non_public_target && !allow_private && !protected_query_allowed {
                 continue;
             }
-            ranges.extend(
-                self.engine
-                    .reference_facts_for(&target)
-                    .iter()
-                    .filter_map(|fact| {
-                        if target_non_public
-                            && fact.access == MethodReferenceAccess::ExplicitReceiver
-                        {
-                            if target_visibility_owner.as_ref().is_some_and(
-                                |(visibility, owner)| {
-                                    *visibility == MethodVisibility::Protected
-                                        && self.reference_caller_can_see_protected(fact, owner)
-                                },
-                            ) {
-                                Some(fact.range)
-                            } else {
-                                None
-                            }
-                        } else {
-                            Some(fact.range)
-                        }
-                    }),
-            );
+            ranges.extend(self.reference_facts_for(&target).iter().filter_map(|fact| {
+                if target_non_public && fact.access == MethodReferenceAccess::ExplicitReceiver {
+                    if target_visibility_owner
+                        .as_ref()
+                        .is_some_and(|(visibility, owner)| {
+                            *visibility == MethodVisibility::Protected
+                                && self.reference_caller_can_see_protected(fact, owner)
+                        })
+                    {
+                        Some(fact.range)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(fact.range)
+                }
+            }));
         }
         for candidate in self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .method_candidates_named(*method)
         {
             let resolves_to_target = self
@@ -196,7 +190,7 @@ impl<'a> AnalysisQuery<'a> {
         let FullyQualifiedName::Method(parts, method) = method_fqn else {
             return None;
         };
-        self.engine.all_method_facts().iter().find_map(|fact| {
+        self.all_method_facts().iter().find_map(|fact| {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 return None;
             };
@@ -259,8 +253,7 @@ impl<'a> AnalysisQuery<'a> {
     ) -> bool {
         let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
         ancestor_chain.iter().any(|owner| {
-            self.engine
-                .method_facts_matching_owner_name(owner, method)
+            self.method_facts_matching_owner_name(owner, method)
                 .iter()
                 .any(|fact| {
                     effective_method_visibility_for_chain(
@@ -279,7 +272,7 @@ impl<'a> AnalysisQuery<'a> {
         method: &RubyMethod,
         visibility: MethodVisibility,
     ) -> bool {
-        self.engine.all_method_facts().iter().any(|fact| {
+        self.all_method_facts().iter().any(|fact| {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 return false;
             };
@@ -295,8 +288,7 @@ impl<'a> AnalysisQuery<'a> {
         let Some(target) = self.super_method_reference_target(namespace_fqn, method) else {
             return Vec::new();
         };
-        self.engine
-            .reference_facts_for(&target)
+        self.reference_facts_for(&target)
             .iter()
             .map(|fact| fact.range)
             .collect()
