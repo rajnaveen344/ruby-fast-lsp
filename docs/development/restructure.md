@@ -931,12 +931,32 @@ Delete this file when the last task is done. Git history keeps the record.
       produce edges; frame-boundary lexical lookup resolves
       `class Inner::Box; include Sized` to `Shapes::Inner::Sized`; the loader
       prefilter misses `for X in` constant targets.
-    The first three categories still change dependency declarations if
-    D1e2 switches them to the seed; settle or accept them there.
+    The first three categories were then settled in the seed, each with a
+    parity test: it drops cyclic, duplicate, and conflicting ancestry edges
+    as the collector does; it reopens a constant alias only when the alias
+    names a known namespace; and it replays eval blocks in method bodies
+    after the main walk so their receivers resolve against the whole file.
+    A seed-only template now matches the collector's declarations on the
+    standard library exactly.
   - [ ] D1e2. Dependencies build a seed (profiler pair; the indexing cost
         above must be paid back by D1e3), the hosts write through the seed
         sink, collector lookups read the sink, and the collector's
         declaration recording is deleted.
+    - Measured and not landed (perf-d1e2). The collector walk still has to
+      run for dependency sources, because it produces their YARD, RBS, and
+      flow-inferred types. A seed beside it adds a second Prism traversal:
+      dependency template collection over the installed gems went from
+      1238-1314 ms to 1550-1616 ms (+24%), and +19% without variable
+      literal types. The declaration recording it would delete is about 5%
+      of that work. Profiling the seed found that literal typing rebuilt a
+      class name per literal and sorted every union member; fixing that
+      (`RubyType` language-class constructors and union flattening) made all
+      collection about 14% faster and landed on its own.
+    - One traversal needs the declaration sink to run inside the collector
+      walk, or the collector's types to move to the seed. Both belong to
+      D2, where the collector's flow work is rewritten. Until then, project
+      files take seed declarations and dependencies take the collector's,
+      and `declaration_parity.rs` keeps the two walks equal.
   - [ ] D1f. Run the cursor walk and document symbols on the `Walk` scope with
         pruning sinks, then delete the remaining copies. Depends on the `Walk`
         and sink interface that D1e introduces. Until then, the cursor walk
