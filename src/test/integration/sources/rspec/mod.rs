@@ -4,7 +4,8 @@
 //! Each case runs in a project that locks `rspec-core` 3.x, through either
 //! the native fallback or the `extensions/rspec-ruby` package, and returns a
 //! transcript of what it observed so the two implementations can be compared.
-//! `semantic` runs every case through the implementation the server uses.
+//! `semantic` runs every case through the implementation the server uses, and
+//! `parity` requires both implementations to observe the same results.
 
 mod harness;
 mod helpers;
@@ -23,6 +24,20 @@ macro_rules! rspec_cases {
                 #[tokio::test]
                 async fn $case() {
                     super::$module::$case(super::SEMANTIC_IMPLEMENTATION).await;
+                }
+            )*
+        }
+
+        /// Both implementations observe exactly the same results.
+        mod parity {
+            use super::harness::Rspec;
+
+            $(
+                #[tokio::test]
+                async fn $case() {
+                    let native = super::$module::$case(Rspec::NativeFallback).await;
+                    let package = super::$module::$case(Rspec::Package).await;
+                    assert_eq!(native, package, "native fallback versus package");
                 }
             )*
         }
