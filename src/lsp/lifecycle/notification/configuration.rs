@@ -1,12 +1,10 @@
-//! Configuration changes and extension watch registration.
+//! Configuration changes.
 
 use super::watched_files::rebuild_runtime_owned_project_state;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::version::parse_ruby_family;
-use crate::invariant::ExpectInvariant;
 use crate::server::Server;
 use log::{info, warn};
-use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 pub async fn handle_did_change_configuration(
@@ -49,20 +47,11 @@ pub async fn handle_did_change_configuration(
 
                 // Apply log level immediately (works without restart)
                 config.apply_log_level();
-                if let Err(error) = server
-                    .extensions
-                    .registry()
-                    .configure_from_config_and_workspace_roots_governed(
-                        &config,
-                        &server.workspace_root_paths(),
-                        server.indexing.resources().clone(),
-                    )
-                    .await
-                {
+                if let Err(error) = server.reconfigure_extensions(&config).await {
                     warn!("Extension settings reconfiguration worker failed: {error:#}");
                     return;
                 }
-                refresh_extension_watch_registration(server).await;
+                server.refresh_extension_watch_registration().await;
 
                 server.replace_configuration(config.clone());
 
@@ -81,76 +70,6 @@ pub async fn handle_did_change_configuration(
                 warn!("Failed to parse configuration from settings");
             }
         }
-    }
-}
-
-pub(super) async fn refresh_extension_watch_registration(server: &Server) {
-    if !server
-        .extensions
-        .dynamic_registration()
-        .load(Ordering::Acquire)
-    {
-        return;
-    }
-    let Some(client) = server.client() else {
-        return;
-    };
-
-    let desired = server.extensions.registry().watcher_globs();
-    let mut current = server.extensions.registration().lock().await;
-    if *current == desired {
-        return;
-    }
-
-    if !current.is_empty() {
-        let unregistration = Unregistration {
-            id: "ruby-fast-lsp-extension-watchers".to_string(),
-            method: "workspace/didChangeWatchedFiles".to_string(),
-        };
-        if let Err(err) = client.unregister_capability(vec![unregistration]).await {
-            warn!("Failed to unregister extension file watchers: {:?}", err);
-            return;
-        }
-        current.clear();
-    }
-
-    if desired.is_empty() {
-        return;
-    }
-    let registration = extension_watch_registration(&desired);
-    match client.register_capability(vec![registration]).await {
-        Ok(()) => {
-            info!(
-                "Registered {} extension watched-file glob(s)",
-                desired.len()
-            );
-            *current = desired;
-        }
-        Err(err) => warn!("Failed to register extension file watchers: {:?}", err),
-    }
-}
-
-pub(super) fn extension_watch_registration(globs: &[String]) -> Registration {
-    let options = DidChangeWatchedFilesRegistrationOptions {
-        watchers: globs
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .map(|pattern| FileSystemWatcher {
-                glob_pattern: GlobPattern::String(pattern),
-                kind: None,
-            })
-            .collect(),
-    };
-    Registration {
-        id: "ruby-fast-lsp-extension-watchers".to_string(),
-        method: "workspace/didChangeWatchedFiles".to_string(),
-        register_options: Some(serde_json::to_value(options).expect_invariant(
-            "typed watched-file registration options failed to serialize",
-            "lsp-types registration values must serialize",
-            "preserve serializable watcher option fields",
-        )),
     }
 }
 

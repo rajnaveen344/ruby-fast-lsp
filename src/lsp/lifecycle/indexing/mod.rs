@@ -22,7 +22,7 @@ enum DocumentSemanticMode {
 }
 
 fn interactive_file_processor(server: &Server, uri: &Url) -> FileProcessor {
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     server
         .jruby_add_on_for_uri(uri)
         .map(|add_on| processor.clone().with_jruby_add_on(&add_on))
@@ -142,7 +142,7 @@ async fn init_workspace_inner(
     {
         coordinator.set_load_target(workspace.handle().load_target());
     }
-    coordinator.set_extension_registry(server.extensions.registry().clone());
+    coordinator.set_extension_registry(server.extension_registry().clone());
     if let Some(run) = run {
         coordinator.set_indexing_run(run);
     }
@@ -543,7 +543,7 @@ pub async fn handle_watched_files_changed(
             return;
         }
     };
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let mut analysis_changed = false;
     let mut changed_dependency_uris = Vec::new();
 

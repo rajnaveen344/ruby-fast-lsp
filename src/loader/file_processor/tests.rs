@@ -26,7 +26,7 @@ fn analyze_and_commit(
 #[test]
 fn file_processor_reports_body_only_and_exported_api_changes() {
     let server = Server::default();
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let uri = crate::test::harness::fixture_uri("/app/user.rb");
 
     let initial = analyze_and_commit(
@@ -362,7 +362,7 @@ fn inferred_method_return_replace_keeps_unrelated_neighbors() {
 #[test]
 fn file_processor_handles_shebang_source_without_crashing() {
     let server = Server::default();
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let uri = crate::test::harness::fixture_uri("/project/Rakefile");
     let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nExampleApp::Application.load_tasks\n";
 
@@ -375,7 +375,7 @@ fn file_processor_handles_shebang_source_without_crashing() {
 #[test]
 fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
     let server = Server::default();
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let helpers_uri = crate::test::harness::fixture_uri("/project/helpers.rb");
     let app_uri = crate::test::harness::fixture_uri("/project/app.rb");
     let helpers = "module API\n  module Catalog\n    def get_images\n    end\n  end\n\n  include Catalog\nend\n";
@@ -416,7 +416,7 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
 #[test]
 fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
     let server = Server::default();
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let declaration_uri = crate::test::harness::fixture_uri("/project/types.rb");
     let reopening_uri = crate::test::harness::fixture_uri("/project/reopening.rb");
 
@@ -461,7 +461,7 @@ fn explicit_project_engine_owns_external_gem_source() {
     let project = server.add_workspace(project_uri);
     let dependency_uri =
         crate::test::harness::fixture_uri("/workspace/server/vendor/cache/pbkdf2/lib/pbkdf2.rb");
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
 
     processor
         .collect_file_facts_as_deferred_resolution_in_engine(
@@ -489,7 +489,7 @@ fn explicit_project_engine_owns_external_gem_source() {
 
 fn collect_gem_template_facts(source: &str) -> FileAnalysis {
     let server = Server::default();
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let producer_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     let dependency_uri = crate::test::harness::fixture_uri("/shared/gems/widget/lib/widget.rb");
     let template = processor
@@ -549,7 +549,7 @@ fn gem_collection_persists_yard_method_returns() {
 #[test]
 fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
     let server = Server::default();
-    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
+    let processor = FileProcessor::with_extension_registry(server.extension_registry().clone());
     let producer_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     let dependency_uri = crate::test::harness::fixture_uri("/shared/gems/widget/lib/widget.rb");
     let source = "class SharedWidget\n  def value\n    'cached'\n  end\nend\n";

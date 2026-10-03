@@ -113,7 +113,7 @@ async fn compact_inlay_navigation_retains_external_project_context() {
     editor.add_workspace("workspace_a");
     editor.add_workspace("workspace_b");
     let processor =
-        FileProcessor::with_extension_registry(editor.server().extensions.registry().clone());
+        FileProcessor::with_extension_registry(editor.server().extension_registry().clone());
     let entry_uri = crate::test::harness::fixture_uri("/external/catalog/lib/entry.rb");
     let source = "module Catalog\n  class Entry\n    Inner\n  end\nend\n";
     for project in ["workspace_a", "workspace_b"] {

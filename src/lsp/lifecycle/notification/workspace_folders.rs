@@ -1,6 +1,5 @@
 //! Workspace folder additions and removals.
 
-use super::configuration::refresh_extension_watch_registration;
 use crate::lsp::lifecycle::indexing;
 use crate::server::Server;
 use log::{info, warn};
@@ -57,19 +56,10 @@ pub async fn handle_did_change_workspace_folders(
     }
 
     let config = server.configuration_snapshot();
-    if let Err(error) = server
-        .extensions
-        .registry()
-        .configure_from_config_and_workspace_roots_governed(
-            &config,
-            &server.workspace_root_paths(),
-            server.indexing.resources().clone(),
-        )
-        .await
-    {
+    if let Err(error) = server.reconfigure_extensions(&config).await {
         warn!("Extension workspace reconfiguration worker failed: {error:#}");
     }
-    refresh_extension_watch_registration(server).await;
+    server.refresh_extension_watch_registration().await;
 
     for text_document in open_documents_to_rehome {
         let owner = server.project_for_uri(&text_document.uri);

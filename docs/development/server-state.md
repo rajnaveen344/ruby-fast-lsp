@@ -74,6 +74,7 @@ through the owner:
 | `products` | none; load contexts carry `SharedProducts`, and tests observe reuse through `shared_products()` |
 | `documents` | `open_document`, `open_document_content`, `get_doc`, `is_document_open`, `open_documents` (a read-only view), `update_open_document`, `close_open_document` |
 | `config` | `configuration_snapshot()` (a copy), `with_configuration` (read one part), `replace_configuration` (accept a whole configuration); tests also use `update_configuration` |
+| `extensions` | `extension_registry()` (the shared registry handle), `reconfigure_extensions` (governed reload for the current roots), `set_extension_watch_dynamic_registration`, `refresh_extension_watch_registration` (the watched-file registration state stays private) |
 
 Separate executables use server operations instead of replacing internal
 state bags.

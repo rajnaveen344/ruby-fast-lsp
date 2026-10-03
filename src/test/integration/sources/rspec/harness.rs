@@ -32,8 +32,7 @@ impl RspecEditor {
         let editor = FakeEditor::new().await;
         editor
             .server()
-            .extensions
-            .registry()
+            .extension_registry()
             .configure_from_config(&RubyFastLspConfig {
                 extension_packages: vec![rspec_package_dir().to_string_lossy().into_owned()],
                 ..RubyFastLspConfig::default()

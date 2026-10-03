@@ -1,7 +1,6 @@
 //! Watched-file changes, including project-input rebuilds of runtime-owned
 //! state.
 
-use super::configuration::refresh_extension_watch_registration;
 use crate::environment::config::runtime::EffectiveRuntimeSelection;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
@@ -57,23 +56,13 @@ pub async fn handle_did_change_watched_files(
             })
         });
     if extension_inputs_changed {
-        if let Err(error) = server
-            .extensions
-            .registry()
-            .configure_from_config_and_workspace_roots_governed(
-                &config,
-                &server.workspace_root_paths(),
-                server.indexing.resources().clone(),
-            )
-            .await
-        {
+        if let Err(error) = server.reconfigure_extensions(&config).await {
             warn!("Project extension watcher reload failed: {error:#}");
         }
     }
     let workspace_trusted = server.with_configuration(|config| config.workspace_trusted);
     let reindex_uris = server
-        .extensions
-        .registry()
+        .extension_registry()
         .handle_watched_file_changes(
             workspace_trusted,
             &server.workspace_root_paths(),
@@ -87,7 +76,7 @@ pub async fn handle_did_change_watched_files(
             uri,
             typ: FileChangeType::CHANGED,
         }));
-    refresh_extension_watch_registration(server).await;
+    server.refresh_extension_watch_registration().await;
     params.changes.retain(|change| {
         let Ok(path) = change.uri.to_file_path() else {
             return true;
@@ -226,8 +215,7 @@ pub(super) async fn rebuild_runtime_owned_project_state(
     // Forget its seed after the reset, so no seed can land in between, or the
     // rebuild would skip seeding the empty engine.
     server
-        .extensions
-        .registry()
+        .extension_registry()
         .forget_semantic_seed(&workspace.handle().load_target().engine_identity());
     let rebuild =
         indexing::init_workspace_for_run(server, workspace.root_uri.clone(), run.clone()).await;

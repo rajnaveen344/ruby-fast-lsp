@@ -38,7 +38,7 @@ pub async fn handle_shutdown(server: &Server) -> LspResult<()> {
     info!("Shutting down Ruby LSP server");
     server.cancel_watched_file_changes();
     server.cancel_all_indexing();
-    server.extensions.registry().shutdown();
+    server.extension_registry().shutdown();
     Ok(())
 }
 

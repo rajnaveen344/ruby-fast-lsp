@@ -72,6 +72,6 @@ pub async fn handle_extension_status(
 ) -> LspResult<ExtensionStatusResponse> {
     info!("Extension status request received");
     Ok(ExtensionStatusResponse {
-        extensions: server.extensions.registry().status_reports(),
+        extensions: server.extension_registry().status_reports(),
     })
 }

@@ -36,7 +36,7 @@ async fn trusted_workspace_discovers_project_local_extension_package() {
         .await
         .expect("test server initialization must succeed");
 
-    let reports = server.extensions.registry().status_reports();
+    let reports = server.extension_registry().status_reports();
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, "rspec-ruby");
     assert_eq!(reports[0].version.as_deref(), Some("0.1.0-project"));
@@ -77,7 +77,7 @@ async fn dynamic_workspace_change_reconfigures_project_extensions() {
         })
         .await;
     assert_eq!(
-        server.extensions.registry().status_reports()[0]
+        server.extension_registry().status_reports()[0]
             .version
             .as_deref(),
         Some("0.1.0-dynamic-lsp")
@@ -91,7 +91,7 @@ async fn dynamic_workspace_change_reconfigures_project_extensions() {
             },
         })
         .await;
-    assert!(server.extensions.registry().status_reports().is_empty());
+    assert!(server.extension_registry().status_reports().is_empty());
 }
 
 #[tokio::test]
@@ -107,9 +107,9 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
     };
     let server = Server::default();
     server.add_workspace(root_uri);
-    server.extensions.registry().configure_from_config(&config);
+    server.extension_registry().configure_from_config(&config);
     assert_eq!(
-        server.extensions.registry().status_reports()[0].status,
+        server.extension_registry().status_reports()[0].status,
         "loaded"
     );
 
@@ -125,7 +125,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
     )
     .await;
     assert_eq!(
-        server.extensions.registry().status_reports()[0].status,
+        server.extension_registry().status_reports()[0].status,
         "loaded"
     );
 
@@ -141,7 +141,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
     )
     .await;
 
-    let report = &server.extensions.registry().status_reports()[0];
+    let report = &server.extension_registry().status_reports()[0];
     assert_eq!(report.status, "failed");
     invariant!(
         report
@@ -192,7 +192,7 @@ async fn runtime_rebuild_restores_extension_semantic_seed() {
     let server = Server::default();
     server.replace_configuration(config.clone());
     server.add_workspace(root_uri.clone());
-    server.extensions.registry().configure_from_config(&config);
+    server.extension_registry().configure_from_config(&config);
     crate::lsp::lifecycle::notification::handle_did_open(
         &server,
         tower_lsp::lsp_types::DidOpenTextDocumentParams {

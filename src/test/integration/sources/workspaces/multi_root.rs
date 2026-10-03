@@ -244,7 +244,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
         .workspace_for("workspace_a/app.rb")
         .expect("workspace_a must own its project files");
     let processor = crate::loader::file_processor::FileProcessor::with_extension_registry(
-        editor.server().extensions.registry().clone(),
+        editor.server().extension_registry().clone(),
     );
     let entry_uri = crate::test::harness::fixture_uri("/external/demo-gem/lib/entry.rb");
     let inner_uri = crate::test::harness::fixture_uri("/external/demo-gem/lib/inner.rb");
@@ -306,7 +306,7 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
         .workspace_for("workspace_a/app.rb")
         .expect("workspace_a must own its project files");
     let processor = crate::loader::file_processor::FileProcessor::with_extension_registry(
-        editor.server().extensions.registry().clone(),
+        editor.server().extension_registry().clone(),
     );
     let entry_uri = crate::test::harness::fixture_uri("/external/unique-gem/lib/entry.rb");
     let inner_uri = crate::test::harness::fixture_uri("/external/unique-gem/lib/inner.rb");
@@ -375,7 +375,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
     editor.add_workspace("workspace_a");
     editor.add_workspace("workspace_b");
     let processor = crate::loader::file_processor::FileProcessor::with_extension_registry(
-        editor.server().extensions.registry().clone(),
+        editor.server().extension_registry().clone(),
     );
     let entry_uri = crate::test::harness::fixture_uri("/external/shared-gem/lib/entry.rb");
     let entry_source = "module SharedGem\n  class Entry\n    Inner\n  end\nend\n";

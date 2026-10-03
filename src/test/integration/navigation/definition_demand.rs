@@ -77,7 +77,7 @@ async fn early_definition_request_waits_for_its_exact_project_demand_and_retries
     let target_uri = Url::from_file_path(&target_path).unwrap();
     std::fs::write(&target_path, "class AccountRecord\nend\n").unwrap();
     let ctx = server.load_context_for_uri(&target_uri);
-    FileProcessor::with_extension_registry(server.extensions.registry().clone())
+    FileProcessor::with_extension_registry(server.extension_registry().clone())
         .analyze_file(&target_uri, "class AccountRecord\nend\n", &ctx)
         .unwrap()
         .commit(&ctx);
@@ -169,7 +169,7 @@ async fn dependency_demand_can_resolve_before_the_project_stage_completes() {
     let target_uri = Url::from_file_path(&target_path).unwrap();
     let target = "module BSON\n  class ObjectId\n  end\nend\n";
     std::fs::write(&target_path, target).unwrap();
-    FileProcessor::with_extension_registry(server.extensions.registry().clone())
+    FileProcessor::with_extension_registry(server.extension_registry().clone())
         .collect_file_facts_as_deferred_resolution_in_engine(
             &target_uri,
             target,

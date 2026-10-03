@@ -11,6 +11,8 @@ use crate::invariant::ExpectInvariant;
 pub use diagnostics::engine_diagnostics;
 use diagnostics::DiagnosticPublisher;
 pub(crate) use documents::OpenDocuments;
+#[cfg(test)]
+pub(crate) use extensions::extension_watch_registration;
 pub(crate) use extensions::ExtensionServices;
 pub(crate) use indexing::IndexingServices;
 use namespace_tree::NamespaceTreeCache;
@@ -92,7 +94,7 @@ pub struct Server {
     pub(self) projects: ProjectRegistry,
     pub(crate) indexing: IndexingServices,
     pub(self) products: RuntimeProducts,
-    pub(crate) extensions: ExtensionServices,
+    pub(self) extensions: ExtensionServices,
     pub(self) diagnostics: DiagnosticPublisher,
     pub(self) file_changes: WatchedFileChanges,
     pub(self) namespace_tree: NamespaceTreeCache,

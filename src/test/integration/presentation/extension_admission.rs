@@ -24,7 +24,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
                 1,
             ),
         ));
-    server.extensions.registry().configure_from_config(
+    server.extension_registry().configure_from_config(
         &crate::environment::config::RubyFastLspConfig {
             extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("extensions/rspec-ruby")
@@ -134,7 +134,7 @@ async fn request_time_extension_symbols_wait_for_admission_without_blocking_reac
                 1,
             ),
         ));
-    server.extensions.registry().configure_from_config(
+    server.extension_registry().configure_from_config(
         &crate::environment::config::RubyFastLspConfig {
             extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("extensions/rspec-ruby")

@@ -1,14 +1,12 @@
 //! `initialize` (server capabilities and initialization options) and
 //! `initialized` (client registrations and workspace indexing).
 
-use super::configuration::refresh_extension_watch_registration;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::version::parse_ruby_family;
 use crate::features::presentation::semantic_tokens;
 use crate::lsp::lifecycle::indexing;
 use crate::server::Server;
 use log::{debug, info, warn};
-use std::sync::atomic::Ordering;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 
@@ -23,10 +21,7 @@ pub async fn handle_initialize(
         .and_then(|workspace| workspace.did_change_watched_files.as_ref())
         .and_then(|watched_files| watched_files.dynamic_registration)
         .unwrap_or(false);
-    lang_server
-        .extensions
-        .dynamic_registration()
-        .store(extension_watch_dynamic_registration, Ordering::Release);
+    lang_server.set_extension_watch_dynamic_registration(extension_watch_dynamic_registration);
     let workspace_folders = params.workspace_folders;
     let root_uri = params.root_uri;
 
@@ -109,16 +104,7 @@ pub async fn handle_initialize(
     } else {
         warn!("No workspace folder or root URI provided. Files opened ad-hoc will use the orphan index.");
     }
-    if let Err(error) = lang_server
-        .extensions
-        .registry()
-        .configure_from_config_and_workspace_roots_governed(
-            &config,
-            &lang_server.workspace_root_paths(),
-            lang_server.indexing.resources().clone(),
-        )
-        .await
-    {
+    if let Err(error) = lang_server.reconfigure_extensions(&config).await {
         warn!("Extension initialization worker failed: {error:#}");
         return Err(tower_lsp::jsonrpc::Error::internal_error());
     }
@@ -236,7 +222,7 @@ pub async fn handle_initialized(server: &Server, _params: InitializedParams) {
         }
     }
 
-    refresh_extension_watch_registration(server).await;
+    server.refresh_extension_watch_registration().await;
 
     let config = server.configuration_snapshot();
 

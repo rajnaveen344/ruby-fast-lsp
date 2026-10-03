@@ -53,8 +53,7 @@ pub async fn handle(
         .analysis_workspace_for_uri(uri)
         .map(|workspace| workspace.root_path);
     match lang_server
-        .extensions
-        .registry()
+        .extension_registry()
         .code_lenses_governed(
             lang_server.indexing.resources().clone(),
             project_root,
