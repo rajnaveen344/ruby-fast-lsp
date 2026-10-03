@@ -47,7 +47,6 @@ use crate::indexer::documents::scope_rules::{
     alias_reopen_target, eval_block, method_declaration, multi_write_targets,
     namespace_is_proven_class, self_definition_namespace, DefinitionVisibility, MethodDeclaration,
 };
-use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
 use crate::indexer::{is_framework_instance_block_call_name, LocalScopeKind};
 
@@ -278,9 +277,7 @@ impl Visit<'_> for AnalysisIndexer {
         let owner = FullyQualifiedName::namespace_with_kind(owner_namespace.clone(), owner_kind);
         let range = self.range(&node.location());
         let name_range = self.range(&node.name_loc());
-        let yard_doc = self.source.as_deref().and_then(|source| {
-            YardParser::extract_from_source(source, node.location().start_offset())
-        });
+        let yard_doc = self.yard_doc_at(node.location().start_offset());
         let params = method_param_facts(node)
             .into_iter()
             .map(|param| {

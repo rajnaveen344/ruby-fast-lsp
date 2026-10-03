@@ -14,6 +14,9 @@ use ruby_prism::{
 
 use self::syntax::{constant_parts, u32_offset};
 use crate::indexer::documents::scope_tracker::ScopeTracker;
+use crate::indexer::yard::parser::YardParser;
+use crate::indexer::yard::types::YardMethodDoc;
+use crate::invariant::ExpectInvariant;
 
 mod constants;
 mod deferred;
@@ -34,6 +37,9 @@ pub struct AnalysisIndexer {
     known_namespaces: HashSet<FullyQualifiedName>,
     known_constant_types: HashMap<FullyQualifiedName, RubyType>,
     source: Option<String>,
+    /// Byte offsets of the source's newlines, for the zero-based line of a
+    /// definition without rescanning the file at each one.
+    newline_offsets: Vec<usize>,
     facts: FileAnalysis,
     /// Eval calls in method bodies waiting for the file's later namespaces.
     deferred_eval_blocks: Vec<deferred::DeferredEvalBlock>,
@@ -91,6 +97,7 @@ impl AnalysisIndexer {
             known_namespaces,
             known_constant_types,
             source: None,
+            newline_offsets: Vec::new(),
             facts: FileAnalysis::default(),
             deferred_eval_blocks: Vec::new(),
             replaying_deferred: false,
@@ -98,7 +105,7 @@ impl AnalysisIndexer {
     }
 
     pub fn index_source(mut self, source: &str) -> FileAnalysis {
-        self.source = Some(source.to_string());
+        self.set_source(source);
         let parse = ruby_prism::parse(source.as_bytes());
         let root = parse.node();
         self.visit(&root);
@@ -107,10 +114,35 @@ impl AnalysisIndexer {
     }
 
     pub fn index_node_with_source(mut self, node: &Node<'_>, source: &str) -> FileAnalysis {
-        self.source = Some(source.to_string());
+        self.set_source(source);
         self.visit(node);
         self.replay_deferred_eval_blocks(node);
         self.facts
+    }
+
+    fn set_source(&mut self, source: &str) {
+        self.source = Some(source.to_string());
+        self.newline_offsets = source
+            .bytes()
+            .enumerate()
+            .filter(|(_, byte)| *byte == b'\n')
+            .map(|(offset, _)| offset)
+            .collect();
+    }
+
+    /// The YARD documentation attached to a definition starting at `offset`.
+    fn yard_doc_at(&self, offset: usize) -> Option<YardMethodDoc> {
+        let source = self.source.as_deref()?;
+        let line = u32::try_from(
+            self.newline_offsets
+                .partition_point(|&newline| newline < offset),
+        )
+        .expect_invariant(
+            "YARD method line exceeded u32",
+            "editor protocol positions use u32 line numbers",
+            "reject or segment files with more than u32::MAX lines",
+        );
+        YardParser::extract_from_source_at_line(source, offset, line)
     }
 
     /// The namespace that owns definitions here (Ruby's cref).
