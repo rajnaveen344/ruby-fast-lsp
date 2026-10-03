@@ -568,6 +568,10 @@ Delete this file when the last task is done. Git history keeps the record.
         harness, and docs (`main.rs` names `tower_lsp::Server` in full). The
         six services stay direct fields; each has its own lock and
         lifetime, so a grouping field would only add a hop.
+  - [x] C5d. Make the remaining `pub(crate)` server fields (`client`,
+        `products`, `documents`, `config`, `extensions`, `indexing`)
+        private, one field per commit, each behind named operations listed
+        in `docs/development/server-state.md`.
 - [x] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
   - [x] C6a. Bug: the persisted gem product identity hashed the JRuby import
