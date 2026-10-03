@@ -7,7 +7,6 @@ use parking_lot::Mutex;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_fast_lsp_extension_api::Extension;
 use ruby_prism::CallNode;
 
 use crate::environment::extensions::loading::config::ExtensionLoadConfig;
@@ -225,7 +224,7 @@ impl ExtensionRegistry {
             return true;
         }
 
-        if !visitor.enclosing_extension_calls().is_empty()
+        !visitor.enclosing_extension_calls().is_empty()
             && self
                 .extensions
                 .iter()
@@ -240,14 +239,6 @@ impl ExtensionRegistry {
                         )
                         && extension.can_run_inside_extension_frame(visitor, node)
                 })
-        {
-            return true;
-        }
-
-        !self.has_loaded_wasm_for_call(method_name)
-            && ruby_fast_lsp_extension_rspec::extension()
-                .indexed_call_names()
-                .contains(&method_name)
     }
 
     pub(super) fn frame_extension_ids(
@@ -314,15 +305,6 @@ impl ExtensionRegistry {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
-    }
-
-    pub(in crate::environment::extensions) fn has_loaded_wasm_for_call(
-        &self,
-        method_name: &str,
-    ) -> bool {
-        self.extensions
-            .iter()
-            .any(|extension| extension.is_loaded() && extension.handles_call(method_name))
     }
 
     /// Hand `commit` the semantic seed that `engine` lacks for this project
@@ -412,11 +394,7 @@ pub(in crate::environment::extensions) fn extension_applicability_fingerprint(
 }
 
 fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> Arc<HashSet<String>> {
-    let mut names = ruby_fast_lsp_extension_rspec::extension()
-        .indexed_call_names()
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<HashSet<_>>();
+    let mut names = HashSet::new();
     for extension in extensions {
         names.extend(extension.indexed_call_names.iter().cloned());
         names.extend(extension.frame_call_names.iter().cloned());

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use log::warn;
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_fast_lsp_extension_api::Extension;
 use ruby_prism::CallNode;
 
 use crate::environment::extensions::dispatch::apply::apply_patch;
@@ -16,7 +15,7 @@ use crate::environment::extensions::patches::conflicts::{
     resolve_execution_context_conflicts, resolve_index_patch_conflicts,
 };
 use crate::environment::extensions::patches::validation::{
-    index_patch_extension_id, index_patch_requires_project_context, validate_execution_contexts,
+    index_patch_extension_id, index_patch_requires_project_context,
     validate_execution_contexts_for_project, validate_index_patch_payloads,
     validate_index_patch_provenance,
 };
@@ -40,62 +39,7 @@ pub(in crate::environment::extensions) fn process_call_node_with_registry(
     {
         return false;
     }
-    if process_wasm_call_node(registry, visitor, node, applicability) {
-        return true;
-    }
-    if registry.inner.read().has_loaded_wasm_for_call(method_name) {
-        return false;
-    }
-
-    let rspec = ruby_fast_lsp_extension_rspec::extension();
-
-    invariant!(
-        rspec.abi_version() == ruby_fast_lsp_extension_api::ABI_VERSION,
-        what = "extension ABI version mismatch for {}",
-        why = "extension patches cannot be safely interpreted across ABI versions",
-        fix = "rebuild extension against current ruby-fast-lsp-extension-api",
-        rspec.id(),
-    );
-
-    if !rspec.indexed_call_names().contains(&method_name) {
-        return false;
-    }
-
-    let ctx = call_context(visitor, node, true);
-    let output = rspec.index_call_output(&ctx);
-    validate_index_patch_provenance(rspec.id(), &output.index_patches).expect_invariant(
-        "bundled native extension spoofed index patch provenance",
-        "bundled and Wasm extensions must obey the same public trust contract",
-        "emit the compiled extension ID in every PatchSource",
-    );
-    validate_index_patch_payloads(&output.index_patches).expect_invariant(
-        "bundled native extension emitted an invalid index patch",
-        "native adapters must use the same validated ABI as Wasm guests",
-        "correct the extension payload",
-    );
-    invariant!(
-        ctx.project.is_some()
-            || !output
-                .index_patches
-                .iter()
-                .any(index_patch_requires_project_context),
-        what = "native extension emitted a project-generated owner without a ProjectContext",
-        why = "project-scoped identity needs a project",
-        fix = "emit source-scoped owners or require project context",
-    );
-    validate_execution_contexts(rspec.id(), &ctx, &output.execution_contexts).expect_invariant(
-        "bundled native extension emitted an invalid execution context",
-        "native adapters must use the same validated ABI as Wasm guests",
-        "correct the context ranges, owners, targets, or provenance",
-    );
-    let handled = !output.index_patches.is_empty() || !output.execution_contexts.is_empty();
-    for patch in output.index_patches {
-        apply_patch(visitor, node, patch);
-    }
-    for context in output.execution_contexts {
-        apply_execution_context(visitor, context);
-    }
-    handled
+    process_wasm_call_node(registry, visitor, node, applicability)
 }
 
 fn process_wasm_call_node(

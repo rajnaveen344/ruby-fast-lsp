@@ -14,12 +14,10 @@ flowchart TD
     Filter -- yes --> HostCtx[Host builds CallContext]
 
     HostCtx --> ExtApi[crates/extension-api\nABI structs + Extension trait]
-    ExtApi --> RSpecRust[crates/extension-rspec\nnative Rust extension]
     ExtApi --> RSpecRuby[extensions/rspec-ruby\nRuby source]
     RSpecRuby --> Mruby[mruby Wasm module\nrspec-ruby.wasm]
     Mruby --> WasmHost[crates/extension-wasm-host\nJSON over Wasm memory ABI]
-    RSpecRust --> Patches[IndexPatch list]
-    WasmHost --> Patches
+    WasmHost --> Patches[IndexPatch list]
 
     Patches --> Validate[Core validates patch\nnamespaces, method names, ABI version]
     Validate --> Apply[Core applies to analysis facts]
@@ -52,11 +50,11 @@ sequenceDiagram
 
 ## Current Layout
 
-- `crates/extension-api`: shared ABI/data model for native extensions now and Wasm/WIT later.
+- `crates/extension-api`: shared ABI/data model for Wasm guests and the host.
 - `crates/extension-wasm-host`: Wasm loader using JSON over linear memory for `CallContext -> IndexPatch[]`.
-- `crates/extension-rspec`: native Rust extension used as the in-process fallback/reference implementation.
 - `extensions/mruby-sdk`: tiny Ruby DSL for authoring patch-based extensions.
-- `extensions/rspec-ruby`: Ruby-authored RSpec extension package compiled to mruby Wasm.
+- `extensions/rspec-ruby`: Ruby-authored RSpec extension package compiled to
+  mruby Wasm; the only RSpec implementation.
 - `extensions/rails-ruby`: Rust-authored Rails adapter compiled to Wasm while
   retaining its stable package ID.
 - `extensions/sinatra-rust`, `extensions/minitest-ruby`, and
@@ -114,8 +112,9 @@ filesystem path is the final tie-break. A lower-priority valid package may load
 only when every higher-priority package with the same ID fails validation; a
 package whose ID is already loaded is skipped before its Wasm is compiled.
 
-Wasm extensions handle matching calls first; built-in native extensions are
-fallback.
+Every framework, RSpec included, is a Wasm package; the host has no built-in
+framework fallback. Without a loaded package, framework calls index as
+ordinary Ruby.
 
 Package shape:
 

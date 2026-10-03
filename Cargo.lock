@@ -2147,7 +2147,6 @@ dependencies = [
  "rbs-parser",
  "ruby-analysis",
  "ruby-fast-lsp-extension-api",
- "ruby-fast-lsp-extension-rspec",
  "ruby-fast-lsp-extension-wasm-host",
  "ruby-fast-lsp-jruby-support",
  "ruby-fast-lsp-jvm-metadata",
@@ -2203,13 +2202,6 @@ dependencies = [
  "ruby-fast-lsp-extension-api",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "ruby-fast-lsp-extension-rspec"
-version = "0.1.0"
-dependencies = [
- "ruby-fast-lsp-extension-api",
 ]
 
 [[package]]

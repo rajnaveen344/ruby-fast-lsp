@@ -1,12 +1,11 @@
 //! Execution contexts across edits, hooks, examples, shared contexts, and
 //! projects.
 
-use super::harness::{Rspec, RspecEditor};
+use super::harness::RspecEditor;
 
-pub(super) async fn execution_context_and_methods_are_replaced_after_edit(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn execution_context_and_methods_are_replaced_after_edit() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/edit_context_spec.rb");
     editor
         .open(
@@ -70,11 +69,11 @@ old_helper
         why = "contexts and facts must share the file replacement lifecycle",
         fix = "clear execution-context facts when replacing the file",
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn before_hook_runtime_methods_flow_to_examples(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn before_hook_runtime_methods_flow_to_examples() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -94,13 +93,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn cross_file_shared_context_helpers_flow_to_including_group(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn cross_file_shared_context_helpers_flow_to_including_group() {
+    let mut editor = RspecEditor::new().await;
     let rspec_file = editor.path("lib/rspec.rb");
     let support_file = editor.path("spec/support/auth_context.rb");
     let consumer_file = editor.path("spec/shared_context_consumer_spec.rb");
@@ -155,13 +152,11 @@ end
         .path()
         .ends_with("/spec/support/auth_context.rb"));
     assert_eq!(generated[0].range.start.line, 4);
-    editor.into_transcript()
 }
 
-pub(super) async fn shared_context_identity_is_isolated_between_projects(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::with_projects(rspec, &[true, true]).await;
+#[tokio::test]
+async fn shared_context_identity_is_isolated_between_projects() {
+    let mut editor = RspecEditor::with_projects(&[true, true]).await;
     let rspec_a = editor.path_in(0, "lib/rspec.rb");
     let rspec_b = editor.path_in(1, "lib/rspec.rb");
     let shared_a = editor.path_in(0, "spec/support/shared.rb");
@@ -198,11 +193,11 @@ end
             .is_empty(),
         "project B must not resolve a same-named shared context owned by project A"
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn example_runtime_methods_do_not_leak_to_siblings(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn example_runtime_methods_do_not_leak_to_siblings() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/example_runtime_isolation_spec.rb");
     editor
         .open(
@@ -233,11 +228,11 @@ end
         second.is_empty(),
         "an example-local runtime method must not leak to a sibling example instance"
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn runtime_blocks_preserve_lexical_constant_scope(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn runtime_blocks_preserve_lexical_constant_scope() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -258,5 +253,4 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }

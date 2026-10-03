@@ -4,7 +4,21 @@ use crate::utils::persistent_cache::PersistentProductStat;
 
 #[test]
 fn tracked_call_name_set_is_shared_arc_and_covers_rspec_without_ordinary_ruby_names() {
-    let registry = ExtensionRegistryHandle::empty();
+    assert!(
+        ExtensionRegistryHandle::empty()
+            .tracked_call_names()
+            .is_empty(),
+        "a registry without loaded extensions tracks no call names"
+    );
+    let config = RubyFastLspConfig {
+        extension_packages: vec![Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("extensions/rspec-ruby")
+            .to_string_lossy()
+            .into_owned()],
+        ..RubyFastLspConfig::default()
+    };
+    let registry = ExtensionRegistryHandle::from_config(&config);
+    assert_eq!(registry.status_reports()[0].status, "loaded");
     let names = registry.tracked_call_names();
     let again = registry.tracked_call_names();
     assert!(

@@ -1,10 +1,11 @@
 //! Example-group scope: which calls enter RSpec scope, mixins, and the
 //! hidden owner of each group.
 
-use super::harness::{Rspec, RspecEditor};
+use super::harness::RspecEditor;
 
-pub(super) async fn include_makes_helper_methods_visible(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn include_makes_helper_methods_visible() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -28,13 +29,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn extend_makes_helper_methods_visible_on_singleton_scope(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn extend_makes_helper_methods_visible_on_singleton_scope() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -58,13 +57,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn extension_does_not_treat_other_describe_as_rspec_scope(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn extension_does_not_treat_other_describe_as_rspec_scope() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/plain_spec.rb");
     editor
         .open(
@@ -100,13 +97,11 @@ end
         why = "extension hooks must use resolved callees, not call names alone",
         fix = "require an RSpec resolved callee before entering RSpec scope",
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn extension_does_not_apply_include_outside_rspec_scope(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn extension_does_not_apply_include_outside_rspec_scope() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/inline_test.rb");
     editor
         .open(
@@ -135,11 +130,11 @@ end
         why = "extension hooks must not mutate singleton lookup for plain Ruby",
         fix = "gate RSpec mixin patches on resolved RSpec enclosing calls",
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn example_group_owns_direct_method_definitions(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn example_group_owns_direct_method_definitions() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -159,11 +154,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn example_group_owns_define_method_declarations(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn example_group_owns_define_method_declarations() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -184,11 +179,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn nested_group_inherits_outer_hidden_owner(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn nested_group_inherits_outer_hidden_owner() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -208,11 +203,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn nested_group_owns_and_isolates_its_methods(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn nested_group_owns_and_isolates_its_methods() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/nested_group_isolation_spec.rb");
     editor
         .open(
@@ -256,13 +251,11 @@ end
         parent.is_empty(),
         "a nested RSpec group method must not leak back into its parent group"
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn sibling_groups_do_not_share_direct_method_definitions(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn sibling_groups_do_not_share_direct_method_definitions() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/sibling_spec.rb");
     editor
         .open(
@@ -308,11 +301,11 @@ end
         lexical.is_empty(),
         "RSpec example-group methods must not leak onto the surrounding lexical module"
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn sibling_groups_isolate_method_references(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn sibling_groups_isolate_method_references() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/sibling_references_spec.rb");
     editor
         .open(
@@ -364,5 +357,4 @@ end
         vec![19],
         "the second generated owner must not collect the sibling group's call"
     );
-    editor.into_transcript()
 }

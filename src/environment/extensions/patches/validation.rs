@@ -252,6 +252,7 @@ fn validate_patch_owner_target(
     }
 }
 
+#[cfg(test)]
 pub(in crate::environment::extensions) fn validate_execution_contexts(
     expected_extension_id: &str,
     call: &CallContext,

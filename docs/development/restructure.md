@@ -646,7 +646,7 @@ Delete this file when the last task is done. Git history keeps the record.
         fallback. Not merged: the catalog's
         `clean_version`/`version_family`, which parse free-form `ruby -v`
         output rather than a family string.
-  - [ ] C7d. One RSpec implementation. There were two implementations of
+  - [x] C7d. One RSpec implementation. There were two implementations of
         the same patch contract: the native fallback
         `crates/extension-rspec`, which the extension host ran in process
         whenever no loaded Wasm package claimed the call, and the
@@ -727,11 +727,22 @@ Delete this file when the last task is done. Git history keeps the record.
           fixture lives in a project with a minimal neutral `Gemfile.lock`
           that locks `rspec-core` 3.x.
       - Done: `semantic` runs all 24 cases through `Rspec::Package`.
-    - [ ] C7d4. Delete `crates/extension-rspec` and the host special case
+    - [x] C7d4. Delete `crates/extension-rspec` and the host special case
           that runs it, from the workspace, `build.rs` fingerprints, and
           docs. The producer identity changes, which forces one cold gem
           reindex. Drop the native side of the parity test.
-    - [ ] C7d5. Describe `extensions/rspec-ruby` as the supported RSpec
+      - Done: the crate, its workspace entries, the native dispatch in
+        `dispatch/calls.rs`, and the native names in the registry's tracked
+        call set and frame check are gone; an empty registry now tracks no
+        call names. The 24 cases are plain `#[tokio::test]`s that load the
+        package, and `package_requires_locked_rspec_core` asserts that an
+        unlocked project gets no helper. The crate's six unit tests have
+        package counterparts in `extensions/rspec-ruby/test`.
+      - Correction: `build.rs` never fingerprinted the crate, and
+        extensions run only on project and excluded sources, so persisted
+        gem products never held native RSpec facts. The gem producer
+        identity is unchanged and no reindex is needed.
+    - [x] C7d5. Describe `extensions/rspec-ruby` as the supported RSpec
           extension in its README, the extensions README, `docs/`, and
           `src/ARCHITECTURE.md`.
 

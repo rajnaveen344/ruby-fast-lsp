@@ -9,7 +9,6 @@ members = [
     "crates/devtools",
     "crates/extension-api",
     "crates/extension-guest-sdk",
-    "crates/extension-rspec",
     "crates/extension-wasm-host",
     "extensions/example-rust",
     "extensions/sinatra-rust",
@@ -53,7 +52,6 @@ toml = "0.9.8"
 semver = "1.0.28"
 sha2 = "0.10.9"
 ruby-fast-lsp-extension-api = { path = "crates/extension-api" }
-ruby-fast-lsp-extension-rspec = { path = "crates/extension-rspec" }
 ruby-fast-lsp-extension-wasm-host = { path = "crates/extension-wasm-host" }
 ruby-fast-lsp-jvm-metadata = { path = "crates/jvm-metadata" }
 ruby-fast-lsp-jruby-support = { path = "crates/jruby-support" }

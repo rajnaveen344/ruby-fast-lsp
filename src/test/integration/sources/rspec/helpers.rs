@@ -2,10 +2,11 @@
 
 use tower_lsp::lsp_types::NumberOrString;
 
-use super::harness::{Rspec, RspecEditor};
+use super::harness::RspecEditor;
 
-pub(super) async fn let_defines_helper_method(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn let_defines_helper_method() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -25,11 +26,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn subject_with_name_defines_helper_method(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn subject_with_name_defines_helper_method() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -49,11 +50,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn bang_subject_defines_subject_helper_method(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn bang_subject_defines_subject_helper_method() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -73,11 +74,11 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn dsl_macros_do_not_report_unresolved_methods(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn dsl_macros_do_not_report_unresolved_methods() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -105,11 +106,11 @@ end</err>
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
-pub(super) async fn dsl_macros_do_not_report_wrong_arity(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn dsl_macros_do_not_report_wrong_arity() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -130,7 +131,6 @@ end</warn>
 "#,
         )
         .await;
-    editor.into_transcript()
 }
 
 fn is_unresolved_audit_on_user(diagnostic: &tower_lsp::lsp_types::Diagnostic) -> bool {
@@ -140,10 +140,9 @@ fn is_unresolved_audit_on_user(diagnostic: &tower_lsp::lsp_types::Diagnostic) ->
     ) && diagnostic.message == "Unresolved method `audit` on `User`"
 }
 
-pub(super) async fn inferred_helper_diagnostics_follow_return_type_edits(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn inferred_helper_diagnostics_follow_return_type_edits() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/inferred_diagnostic_spec.rb");
     let initial = r#"class User
   def name
@@ -193,13 +192,11 @@ end
             .any(is_unresolved_audit_on_user),
         "changing the let block return must remove the stale receiver diagnostic: {updated_diagnostics:?}"
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn generated_helper_rename_follows_global_method_rename_policy(
-    rspec: Rspec,
-) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn generated_helper_rename_follows_global_method_rename_policy() {
+    let mut editor = RspecEditor::new().await;
     let filename = editor.path("spec/generated_helper_rename_spec.rb");
     editor
         .open(
@@ -225,11 +222,11 @@ end
             .is_none(),
         "generated RSpec methods must not bypass the project-wide method rename policy"
     );
-    editor.into_transcript()
 }
 
-pub(super) async fn extension_requires_resolved_rspec_constant(rspec: Rspec) -> Vec<String> {
-    let mut editor = RspecEditor::new(rspec).await;
+#[tokio::test]
+async fn extension_requires_resolved_rspec_constant() {
+    let mut editor = RspecEditor::new().await;
     editor
         .check(
             r#"
@@ -246,5 +243,4 @@ end
 "#,
         )
         .await;
-    editor.into_transcript()
 }

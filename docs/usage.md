@@ -67,6 +67,9 @@ The VS Code extension passes all five packages to its server. The npm server
 loads the RSpec package from its platform package's `extensions/` directory;
 a package with the same ID from `extensionPackages`, `extensionDirs`, a
 trusted project, or the environment replaces it.
+Framework support comes only from these packages: without a loaded RSpec
+package, or in a project that does not lock `rspec-core` 3.x, RSpec calls
+index as ordinary Ruby.
 
 RSpec and Minitest declarations offer Run/Debug lenses. RSpec uses
 `bundle exec rspec file:line`; Minitest uses a Rails runner when available or an
