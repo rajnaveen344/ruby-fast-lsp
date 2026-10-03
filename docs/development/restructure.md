@@ -671,7 +671,7 @@ Delete this file when the last task is done. Git history keeps the record.
     and files outside any project, no longer get RSpec facts. This already
     held for VSIX users, whose bundled package claimed every RSpec call.
 
-    - [ ] C7d1. Parity test: run every RSpec integration case through the
+    - [x] C7d1. Parity test: run every RSpec integration case through the
           native fallback and through the loaded package, in a project
           that locks `rspec-core` 3.x, and assert identical observations.
           Record each divergence below and fix bugs in the owning
@@ -701,25 +701,15 @@ Delete this file when the last task is done. Git history keeps the record.
       - Intended difference, kept as `package_requires_locked_rspec_core`:
         in a project without a lockfile the native fallback still resolves
         a `let` helper and the package does not.
-      - Blocked: rebuilding the Wasm needs the mruby/wasi-sdk toolchain,
-        either the Docker builder (`extensions/mruby-sdk/scripts/build-wasm-docker.sh
-        extensions/rspec-ruby`, which downloads Debian, wasi-sdk 33, and
-        mruby 4.0.0) or a local `MRUBY_ROOT` and `WASI_SDK_PATH`. Neither is
-        installed here and the Docker daemon is not running. Every later
-        step depends on it: shipping the stale package in npm (C7d2) would
-        bring back the bare-`subject` bug for projects that lock
-        `rspec-core` 3.x, and so would porting the cases (C7d3) or deleting
-        the fallback (C7d4).
-        Options: (a) rebuild with the Docker builder, update
-        `checksum_sha256` in `extension.toml`, and copy the package into
-        `editors/vscode/vsix/extensions/rspec-ruby`; (b) install wasi-sdk
-        and build mruby locally, then the same; (c) teach the host to skip
-        bare `subject` calls, which duplicates package policy in the host.
-        Recommendation: (a), then add the `parity` module back (each case
-        run through `Rspec::NativeFallback` and `Rspec::Package` with
-        `assert_eq!` on the transcripts), confirm all 24 match, and continue
-        with C7d2. A packaging test that compares the Wasm against a build of
-        `extension.rb` would stop the artifact going stale again.
+      - Rebuilt `rspec-ruby.wasm` with the Docker builder (mruby 4.0.0,
+        wasi-sdk 33) and updated `checksum_sha256`. The `parity` module runs
+        each case through `Rspec::NativeFallback` and `Rspec::Package` and
+        asserts identical transcripts; all 24 match.
+      - Guard: `[build] source_sha256` in `extension.toml` records a
+        fingerprint of every build input (package Ruby sources, SDK prelude,
+        shim, build config, patches, vendored gems, Docker builder).
+        `crates/devtools/src/package_sources.rs` fails when the sources no
+        longer match it, so the checked-in Wasm cannot go stale silently.
     - [ ] C7d2. Ship the RSpec package in the npm platform packages and have
           the server load packages bundled next to its executable by
           default, at the lowest priority, so a configured package with the
