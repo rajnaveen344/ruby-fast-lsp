@@ -11,8 +11,8 @@ use ruby_prism::CallNode;
 
 use super::syntax::{
     attr_name_and_range, call_two_symbol_or_string_args, define_method_name_and_range,
-    delegate_methods_and_receiver, forwardable_delegates_and_receiver, method_name_and_range,
-    symbol_name_and_range,
+    delegate_methods_and_receiver, forwardable_delegates_and_receiver, symbol_name_and_range,
+    text_range,
 };
 use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::implicit_singleton_namespace;
@@ -193,28 +193,18 @@ impl AnalysisIndexer {
         }
     }
 
-    pub(super) fn push_visibility_modifier(
+    /// Give each method a `private`, `protected`, or `public` call names
+    /// the call's visibility.
+    pub(super) fn set_named_methods_visibility(
         &mut self,
-        node: &CallNode<'_>,
         visibility: MethodVisibility,
+        methods: Vec<(String, ruby_prism::Location<'_>)>,
     ) {
-        let Some(arguments) = node.arguments() else {
-            self.scope.set_current_visibility(visibility);
-            return;
-        };
-        if arguments.arguments().iter().next().is_none() {
-            self.scope.set_current_visibility(visibility);
-            return;
-        }
-
-        for arg in arguments.arguments().iter() {
-            let Some((name, range)) = method_name_and_range(&arg, self.file_id) else {
-                continue;
-            };
+        for (name, location) in methods {
             let Ok(method) = RubyMethod::new(&name) else {
                 continue;
             };
-            self.set_method_visibility(method, visibility, range);
+            self.set_method_visibility(method, visibility, text_range(self.file_id, &location));
         }
     }
 

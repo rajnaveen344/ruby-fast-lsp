@@ -40,26 +40,6 @@ pub(super) fn attr_name_and_range(
     None
 }
 
-pub(super) fn method_name_and_range(
-    node: &Node<'_>,
-    file_id: SourceFileId,
-) -> Option<(String, TextRange)> {
-    if let Some(symbol) = node.as_symbol_node() {
-        let location = symbol.value_loc().unwrap_or_else(|| symbol.location());
-        return Some((
-            String::from_utf8_lossy(symbol.unescaped()).to_string(),
-            text_range(file_id, &location),
-        ));
-    }
-    if let Some(string) = node.as_string_node() {
-        return Some((
-            String::from_utf8_lossy(string.unescaped()).to_string(),
-            text_range(file_id, &string.content_loc()),
-        ));
-    }
-    None
-}
-
 pub(super) fn included_hook_mixin_call_kind(
     node: &CallNode<'_>,
     file_id: SourceFileId,

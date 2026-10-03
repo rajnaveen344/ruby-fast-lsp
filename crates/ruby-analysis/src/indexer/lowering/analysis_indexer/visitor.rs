@@ -45,7 +45,8 @@ use super::types::{literal_type, method_body_literal_type};
 use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::{
     alias_reopen_target, eval_block, method_declaration, multi_write_targets,
-    namespace_is_proven_class, self_definition_namespace, DefinitionVisibility, MethodDeclaration,
+    namespace_is_proven_class, self_definition_namespace, visibility_call, DefinitionVisibility,
+    MethodDeclaration, VisibilityCall,
 };
 use crate::indexer::yard::types::YardMethodDoc;
 use crate::indexer::{is_framework_instance_block_call_name, LocalScopeKind};
@@ -556,15 +557,21 @@ impl Visit<'_> for AnalysisIndexer {
             _ => {}
         }
 
+        let visibility = node
+            .receiver()
+            .is_none()
+            .then(|| visibility_call(node))
+            .flatten();
+        if let Some(VisibilityCall::Default(visibility)) = visibility {
+            self.scope.set_current_visibility(visibility);
+        }
+
         if node.receiver().is_none() {
             match node.name().as_slice() {
                 b"attr_reader" => self.push_attr_method_facts(node, true, false),
                 b"attr_writer" => self.push_attr_method_facts(node, false, true),
                 b"attr_accessor" => self.push_attr_method_facts(node, true, true),
                 b"module_function" => self.push_module_function_facts(node),
-                b"private" => self.push_visibility_modifier(node, MethodVisibility::Private),
-                b"protected" => self.push_visibility_modifier(node, MethodVisibility::Protected),
-                b"public" => self.push_visibility_modifier(node, MethodVisibility::Public),
                 b"alias_method" => self.push_alias_method_call_fact(node),
                 b"define_method" => self.push_define_method_fact(node),
                 b"define_singleton_method" => self.push_define_singleton_method_fact(node),
@@ -623,6 +630,9 @@ impl Visit<'_> for AnalysisIndexer {
         }
 
         self.visit_call_children(node);
+        if let Some(VisibilityCall::Methods(visibility, methods)) = visibility {
+            self.set_named_methods_visibility(visibility, methods);
+        }
     }
 
     fn visit_block_node(&mut self, node: &BlockNode<'_>) {

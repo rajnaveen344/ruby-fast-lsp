@@ -1,4 +1,4 @@
-//! Direct class-body macros: visibility, attributes, aliases, module functions, and mixins.
+//! Direct class-body macros: attributes, aliases, module functions, and mixins.
 
 use crate::core::MethodVisibility;
 use crate::core::{
@@ -9,37 +9,11 @@ use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
 
 use super::names::{
-    define_method_name_and_range, direct_attr_name_and_range, direct_method_name_and_range,
-    direct_symbol_name_and_range,
+    define_method_name_and_range, direct_attr_name_and_range, direct_symbol_name_and_range,
 };
 use crate::indexer::fact_collector::FactCollector;
 
 impl FactCollector {
-    pub(super) fn push_direct_visibility_modifier(
-        &mut self,
-        node: &CallNode,
-        visibility: MethodVisibility,
-    ) {
-        let Some(arguments) = node.arguments() else {
-            self.direct_set_visibility(visibility);
-            return;
-        };
-        if arguments.arguments().iter().next().is_none() {
-            self.direct_set_visibility(visibility);
-            return;
-        }
-
-        for arg in arguments.arguments().iter() {
-            let Some((name, range)) = direct_method_name_and_range(self, &arg) else {
-                continue;
-            };
-            let Ok(method) = RubyMethod::new(&name) else {
-                continue;
-            };
-            self.direct_set_method_visibility(method, visibility, range);
-        }
-    }
-
     pub(super) fn push_direct_included_hook_mixin_edges(&mut self, node: &CallNode) {
         if !self.inside_singleton_included_method() {
             return;

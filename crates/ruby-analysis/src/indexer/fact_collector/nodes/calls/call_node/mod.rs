@@ -10,9 +10,10 @@ mod reference;
 mod reflection;
 
 use crate::core::GraphEdgeKind;
-use crate::core::MethodVisibility;
+use crate::core::RubyMethod;
 use ruby_prism::CallNode;
 
+use crate::indexer::documents::scope_rules::{visibility_call, VisibilityCall};
 use crate::indexer::fact_collector::FactCollector;
 
 impl FactCollector {
@@ -84,16 +85,10 @@ impl FactCollector {
                 self.push_direct_class_attribute_method_facts(node);
                 true
             }
-            b"private" => {
-                self.push_direct_visibility_modifier(node, MethodVisibility::Private);
-                true
-            }
-            b"protected" => {
-                self.push_direct_visibility_modifier(node, MethodVisibility::Protected);
-                true
-            }
-            b"public" => {
-                self.push_direct_visibility_modifier(node, MethodVisibility::Public);
+            b"private" | b"protected" | b"public" => {
+                if let Some(VisibilityCall::Default(visibility)) = visibility_call(node) {
+                    self.direct_set_visibility(visibility);
+                }
                 true
             }
             b"module_function" => {
@@ -136,7 +131,20 @@ impl FactCollector {
         }
     }
 
-    pub(in crate::indexer::fact_collector) fn process_call_node_exit(&mut self, _node: &CallNode) {
+    pub(in crate::indexer::fact_collector) fn process_call_node_exit(&mut self, node: &CallNode) {
+        // Named methods take the visibility after the arguments, so a `def`
+        // argument has been recorded.
+        if node.receiver().is_none() {
+            if let Some(VisibilityCall::Methods(visibility, methods)) = visibility_call(node) {
+                for (name, location) in methods {
+                    let Ok(method) = RubyMethod::new(&name) else {
+                        continue;
+                    };
+                    let range = self.direct_range(&location);
+                    self.direct_set_method_visibility(method, visibility, range);
+                }
+            }
+        }
         self.extensions.exit_call();
     }
 }

@@ -8,7 +8,7 @@ use crate::core::{
     NamespaceKind, RubyConstant, RubyMethod, RubyType,
 };
 use crate::invariant::ExpectInvariant;
-use ruby_prism::{CallNode, MultiWriteNode, Node};
+use ruby_prism::{CallNode, Location, MultiWriteNode, Node};
 use std::collections::HashSet;
 
 use super::scope_tracker::{mixin_ref_from_node, ScopeTracker};
@@ -389,6 +389,57 @@ pub fn method_declaration(
         current.default
     };
     declared(method, kind, visibility, module_function_copy)
+}
+
+/// What a receiverless `private`, `protected`, or `public` call changes.
+#[derive(Debug)]
+pub enum VisibilityCall<'pr> {
+    /// A call without arguments: later definitions in the current scope take
+    /// the visibility.
+    Default(MethodVisibility),
+    /// The named methods take the visibility and the default is unchanged.
+    /// Ruby evaluates the arguments first, so a walk applies these after it
+    /// has visited them: a `def` argument names the method it just defined.
+    Methods(MethodVisibility, Vec<(String, Location<'pr>)>),
+}
+
+/// The visibility change a `private`, `protected`, or `public` call makes.
+/// Symbol and string arguments name methods, as does a receiverless `def`
+/// argument; other arguments name nothing a walk can see.
+pub fn visibility_call<'pr>(node: &CallNode<'pr>) -> Option<VisibilityCall<'pr>> {
+    let visibility = match node.name().as_slice() {
+        b"private" => MethodVisibility::Private,
+        b"protected" => MethodVisibility::Protected,
+        b"public" => MethodVisibility::Public,
+        _ => return None,
+    };
+    let arguments = node
+        .arguments()
+        .map(|arguments| arguments.arguments().iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if arguments.is_empty() {
+        return Some(VisibilityCall::Default(visibility));
+    }
+    let methods = arguments
+        .iter()
+        .filter_map(|argument| {
+            if let Some(symbol) = argument.as_symbol_node() {
+                let location = symbol.value_loc().unwrap_or_else(|| symbol.location());
+                return Some((static_name(argument)?, location));
+            }
+            if let Some(string) = argument.as_string_node() {
+                return Some((static_name(argument)?, string.content_loc()));
+            }
+            let definition = argument.as_def_node()?;
+            definition.receiver().is_none().then(|| {
+                (
+                    String::from_utf8_lossy(definition.name().as_slice()).to_string(),
+                    definition.name_loc(),
+                )
+            })
+        })
+        .collect();
+    Some(VisibilityCall::Methods(visibility, methods))
 }
 
 /// Whether every same-file declaration of a namespace is a class. With no

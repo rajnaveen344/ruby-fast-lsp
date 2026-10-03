@@ -250,3 +250,43 @@ Vault.new.hidden
         "protected override should block external explicit receiver, got {external_defs:?}"
     );
 }
+
+#[tokio::test]
+async fn goto_visibility_call_with_definition_filters_only_that_method() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "visibility_definition_argument.rb",
+            r#"class Vault
+  private def secret
+    "token"
+  end
+
+  def open
+    "door"
+  end
+end
+
+Vault.new.secret
+Vault.new.open
+"#,
+        )
+        .await;
+
+    let private_defs = editor
+        .goto_def_at("visibility_definition_argument.rb", 10, 11)
+        .await;
+    assert!(
+        private_defs.is_empty(),
+        "explicit receiver must not resolve a `private def` method, got {private_defs:?}"
+    );
+
+    let public_defs = editor
+        .goto_def_at("visibility_definition_argument.rb", 11, 11)
+        .await;
+    assert_eq!(
+        public_defs.len(),
+        1,
+        "a method after `private def` stays public"
+    );
+}
