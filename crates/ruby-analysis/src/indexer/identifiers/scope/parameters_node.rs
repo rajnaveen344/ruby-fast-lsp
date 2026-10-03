@@ -4,7 +4,7 @@ use crate::indexer::Identifier;
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;

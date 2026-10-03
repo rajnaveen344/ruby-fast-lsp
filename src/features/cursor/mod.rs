@@ -64,8 +64,9 @@ impl Cursor<'_> {
         uri: &Url,
         content: &str,
         position: Position,
-    ) -> RubyPrismAnalyzer {
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+    ) -> RubyPrismAnalyzer<'_> {
+        let analyzer =
+            RubyPrismAnalyzer::new(uri.clone(), content.to_string()).with_semantics(self.view);
         let Some(document) = self.document else {
             return analyzer;
         };
@@ -113,12 +114,12 @@ impl EngineQuery {
     }
 }
 
-pub(crate) fn analyzer_for_document(
-    analyzer: RubyPrismAnalyzer,
+pub(crate) fn analyzer_for_document<'s>(
+    analyzer: RubyPrismAnalyzer<'s>,
     document: &RubyDocument,
     view: &View<'_>,
     position: Position,
-) -> RubyPrismAnalyzer {
+) -> RubyPrismAnalyzer<'s> {
     let byte_offset = document.position_to_analysis_offset(source_position(position));
     match view.execution_context_at(document.analysis_file_id(), byte_offset) {
         Some(context) => analyzer.with_execution_context(context.clone()),

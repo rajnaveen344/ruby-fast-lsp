@@ -1,6 +1,6 @@
 //! `class` and `module` declarations: the name under the cursor, and the
-//! namespace frame the body opens, following constant aliases this file
-//! declares.
+//! namespace frame the body opens, following constant aliases this file or
+//! the project declares.
 
 use ruby_prism::{ClassNode, Location, ModuleNode, Node};
 
@@ -10,22 +10,22 @@ use crate::indexer::{mixin_ref_from_node, queries::syntax, Identifier, LVScopeKi
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) -> bool {
-        let superclass = node.superclass().and_then(|superclass| {
-            match self.file_constant_value(&superclass)? {
-                RubyType::ClassReference(target) => target.to_instance_namespace(),
-                RubyType::Class(_)
-                | RubyType::Module(_)
-                | RubyType::ModuleReference(_)
-                | RubyType::Literal(_)
-                | RubyType::Array(_)
-                | RubyType::Hash(_, _)
-                | RubyType::Shape(_)
-                | RubyType::Union(_)
-                | RubyType::Unknown => None,
-            }
-        });
+        let superclass =
+            node.superclass()
+                .and_then(|superclass| match self.constant_value(&superclass)? {
+                    RubyType::ClassReference(target) => target.to_instance_namespace(),
+                    RubyType::Class(_)
+                    | RubyType::Module(_)
+                    | RubyType::ModuleReference(_)
+                    | RubyType::Literal(_)
+                    | RubyType::Array(_)
+                    | RubyType::Hash(_, _)
+                    | RubyType::Shape(_)
+                    | RubyType::Union(_)
+                    | RubyType::Unknown => None,
+                });
         self.enter_namespace_declaration(
             &node.constant_path(),
             node.name().as_slice(),
@@ -82,11 +82,7 @@ impl IdentifierVisitor {
             kind,
             superclass,
             &lexical_context,
-            |candidates| {
-                candidates
-                    .iter()
-                    .find_map(|candidate| self.file_constant_types.get(candidate).cloned())
-            },
+            |candidates| self.alias_value(candidates),
         );
         if let Some(target) = reopened {
             self.scope_tracker
@@ -158,15 +154,72 @@ impl IdentifierVisitor {
     }
 
     /// The class or module value a constant read names through declarations
-    /// and constant writes earlier in this file.
-    pub(in crate::indexer::identifiers) fn file_constant_value(
+    /// and constant writes earlier in this file, then the project.
+    pub(in crate::indexer::identifiers) fn constant_value(
         &self,
         node: &Node<'_>,
     ) -> Option<RubyType> {
         let reference = mixin_ref_from_node(node)?;
         let lexical_context = self.scope_tracker.get_ns_stack();
-        let value = lexical_candidates(&reference.parts, reference.absolute, &lexical_context)
-            .find_map(|candidate| self.file_constant_types.get(&candidate).cloned());
-        value
+        let candidates = lexical_candidates(&reference.parts, reference.absolute, &lexical_context)
+            .collect::<Vec<_>>();
+        self.first_constant_value(&candidates)
+    }
+
+    /// The value of the first candidate constant that has one, checking this
+    /// file before the project for each candidate.
+    fn first_constant_value(&self, candidates: &[Vec<RubyConstant>]) -> Option<RubyType> {
+        let Some(semantics) = self.semantics else {
+            return candidates
+                .iter()
+                .find_map(|candidate| self.file_constant_types.get(candidate).cloned());
+        };
+        let candidates = candidates
+            .iter()
+            .cloned()
+            .map(FullyQualifiedName::constant)
+            .collect::<Vec<_>>();
+        let local = |constant: &FullyQualifiedName| {
+            self.file_constant_types
+                .get(constant.namespace_parts_slice())
+                .cloned()
+        };
+        semantics
+            .first_constant_value_type(&candidates, &local)
+            .map(|(_, value)| value)
+    }
+
+    /// The value a declaration name may alias. As in the collector, a
+    /// reference to a namespace nothing declares is a lexical guess, not an
+    /// alias, so the declaration names its own class.
+    fn alias_value(&self, candidates: &[Vec<RubyConstant>]) -> Option<RubyType> {
+        let value = self.first_constant_value(candidates)?;
+        match &value {
+            RubyType::ClassReference(target) | RubyType::ModuleReference(target) => target
+                .to_instance_namespace()
+                .is_some_and(|namespace| self.namespace_is_known(&namespace))
+                .then_some(value),
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::Literal(_)
+            | RubyType::Array(_)
+            | RubyType::Hash(_, _)
+            | RubyType::Shape(_)
+            | RubyType::Union(_)
+            | RubyType::Unknown => Some(value),
+        }
+    }
+
+    /// Whether this file declares `namespace` before the cursor walk's
+    /// current node, or the project declares it anywhere.
+    pub(in crate::indexer::identifiers) fn namespace_is_known(
+        &self,
+        namespace: &FullyQualifiedName,
+    ) -> bool {
+        self.file_constant_types
+            .contains_key(namespace.namespace_parts_slice())
+            || self
+                .semantics
+                .is_some_and(|semantics| semantics.has_graph_node(namespace))
     }
 }

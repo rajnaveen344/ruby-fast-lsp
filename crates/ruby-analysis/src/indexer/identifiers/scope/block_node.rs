@@ -4,7 +4,7 @@ use crate::indexer::LVScopeKind;
 
 use crate::indexer::identifiers::IdentifierVisitor;
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_block_node_entry(&mut self, node: &BlockNode) {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;

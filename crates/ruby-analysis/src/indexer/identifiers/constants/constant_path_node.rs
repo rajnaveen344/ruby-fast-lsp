@@ -5,7 +5,7 @@ use crate::indexer::{queries::syntax, Identifier};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_constant_path_node_entry(&mut self, node: &ConstantPathNode) {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;

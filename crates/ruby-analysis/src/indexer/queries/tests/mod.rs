@@ -15,7 +15,7 @@ use crate::indexer::*;
 use url::Url;
 
 // Helper function to parse content and create an analyzer
-fn create_analyzer(content: &str) -> RubyPrismAnalyzer {
+fn create_analyzer(content: &str) -> RubyPrismAnalyzer<'static> {
     RubyPrismAnalyzer::new(Url::parse("file:///dummy.rb").unwrap(), content.to_string())
 }
 

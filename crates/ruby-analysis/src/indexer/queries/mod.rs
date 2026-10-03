@@ -13,16 +13,20 @@ use crate::core::{ExecutionContextFact, RubyConstant, SourceFileId, SourcePositi
 use crate::indexer::{
     is_erb_path, mask_erb, Identifier, IdentifierType, IdentifierVisitor, LVScopeId,
 };
+use crate::inference::semantics::Semantics;
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use url::Url;
 
 /// Main analyzer for Ruby code using Prism
-pub struct RubyPrismAnalyzer {
+pub struct RubyPrismAnalyzer<'s> {
     pub uri: Url,
     pub code: String,
     analysis_code: String,
     execution_context: Option<ExecutionContextFact>,
+    /// The owning project, read for constant aliases and receivers that
+    /// other files declare.
+    semantics: Option<&'s dyn Semantics>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +63,7 @@ pub struct CompletionReceiverTarget {
     pub receiver_end: u32,
 }
 
-impl RubyPrismAnalyzer {
+impl<'s> RubyPrismAnalyzer<'s> {
     pub fn new(uri: Url, code: String) -> Self {
         let analysis_code = if is_erb_path(uri.path()) {
             mask_erb(&code).source().to_string()
@@ -71,7 +75,13 @@ impl RubyPrismAnalyzer {
             code,
             analysis_code,
             execution_context: None,
+            semantics: None,
         }
+    }
+
+    pub fn with_semantics(mut self, semantics: &'s dyn Semantics) -> Self {
+        self.semantics = Some(semantics);
+        self
     }
 
     pub fn with_execution_context(mut self, context: ExecutionContextFact) -> Self {
@@ -111,6 +121,7 @@ impl RubyPrismAnalyzer {
             self.code.clone(),
             byte_offset,
             self.execution_context.clone(),
+            self.semantics,
         );
         iden_visitor.visit(root_node);
 

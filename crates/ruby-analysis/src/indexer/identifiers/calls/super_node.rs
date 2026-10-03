@@ -7,7 +7,7 @@ use crate::indexer::Identifier;
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_forwarding_super_node_entry(&mut self, node: &ForwardingSuperNode) {
         self.process_super_keyword(&node.location());
     }

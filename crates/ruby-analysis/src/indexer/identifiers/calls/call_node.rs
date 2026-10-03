@@ -136,7 +136,7 @@ fn call_arg_name_and_location_from_node<'a>(
     None
 }
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         if self.is_result_set() {
             return;

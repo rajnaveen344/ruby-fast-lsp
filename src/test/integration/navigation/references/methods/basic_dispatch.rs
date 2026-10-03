@@ -1,6 +1,6 @@
 //! References for plain instance, class, top-level, singleton-class, and constructor calls.
 
-use crate::test::harness::check;
+use crate::test::harness::{check, check_multi_file};
 
 /// Find references for instance method.
 #[tokio::test]
@@ -211,5 +211,17 @@ end
 Catalog::Registry.<ref>lookup</ref>
 "#,
     )
+    .await;
+}
+
+/// A method declared in a class reopened through a constant alias from
+/// another file is found from calls on the aliased class.
+#[tokio::test]
+async fn references_method_declared_in_class_reopened_through_alias_from_another_file() {
+    check_multi_file(&[
+        ("engine.rb", "class Engine\nend\n\nMotor = Engine\n"),
+        ("motor.rb", "class Motor\n  def start$0\n  end\nend\n"),
+        ("main.rb", "Engine.new.<ref>start</ref>\n"),
+    ])
     .await;
 }

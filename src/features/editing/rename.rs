@@ -96,7 +96,8 @@ pub fn prepare_rename_at(
         match view.method_rename_target_at(analysis_file_id, analysis_offset) {
             Some(target) => (target.ranges, target.current_name.to_string()),
             None => {
-                let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone());
+                let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone())
+                    .with_semantics(view);
                 let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
                 let Identifier::RubyConstant { iden, .. } = identifier? else {
                     return None;
@@ -159,7 +160,8 @@ pub fn rename_at(
         }
         if changes.is_empty() {
             let new_constant = RubyConstant::new(new_name).ok()?;
-            let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
+            let analyzer =
+                RubyPrismAnalyzer::new(uri.clone(), content.clone()).with_semantics(view);
             let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
             let Identifier::RubyConstant { iden, .. } = identifier? else {
                 return None;

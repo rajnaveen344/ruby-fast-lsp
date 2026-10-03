@@ -5,7 +5,7 @@ use ruby_prism::{AliasMethodNode, Node};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     pub fn process_alias_method_node_entry(&mut self, node: &AliasMethodNode) {
         if self.is_result_set() {
             return;

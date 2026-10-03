@@ -31,6 +31,7 @@ pub fn definitions_at(
     if let Some(yard_type) = YardParser::find_type_at_position(content, source_position(position)) {
         info!("Found YARD type at position: {}", yard_type.type_name);
         let ancestors = RubyPrismAnalyzer::new(uri.clone(), content.to_string())
+            .with_semantics(cursor.view)
             .get_namespace_at_offset(byte_offset);
         info!("YARD type namespace context: {:?}", ancestors);
         return yard_type_definitions(cursor.view, &yard_type.type_name, &ancestors);

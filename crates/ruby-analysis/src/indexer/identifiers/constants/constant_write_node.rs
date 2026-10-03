@@ -9,7 +9,7 @@ use crate::indexer::{mixin_ref_from_node, Identifier};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     fn set_simple_constant_def_at_name(&mut self, name: &[u8], name_loc: &Location<'_>) {
         if self.is_result_set() || !self.is_position_in_location(name_loc) {
             return;
@@ -29,7 +29,7 @@ impl IdentifierVisitor {
     }
 
     pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
-        if let Some(value) = self.file_constant_value(&node.value()) {
+        if let Some(value) = self.constant_value(&node.value()) {
             let name = String::from_utf8_lossy(node.name().as_slice());
             if let Ok(constant) = RubyConstant::new(&name) {
                 let mut key = self.scope_tracker.get_ns_stack();
@@ -44,7 +44,7 @@ impl IdentifierVisitor {
     }
 
     pub fn record_constant_path_write(&mut self, node: &ConstantPathWriteNode) {
-        let Some(value) = self.file_constant_value(&node.value()) else {
+        let Some(value) = self.constant_value(&node.value()) else {
             return;
         };
         let target = node.target().as_node();

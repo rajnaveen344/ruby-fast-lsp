@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use crate::indexer::documents::scope_rules;
 use crate::indexer::{Identifier, LVScopeId, ScopeTracker};
+use crate::inference::semantics::Semantics;
 
 use ruby_prism::*;
 
@@ -35,14 +36,17 @@ pub enum IdentifierType {
 }
 
 /// Visitor for finding identifiers at a specific position
-pub struct IdentifierVisitor {
+pub struct IdentifierVisitor<'s> {
     content: String,
     byte_offset: u32,
     scope_tracker: ScopeTracker,
     execution_context: Option<ExecutionContextFact>,
     /// Class and module values of constants this file declares or assigns
-    /// before the current node; the walk has no project knowledge.
+    /// before the current node; they win over `semantics`.
     file_constant_types: HashMap<Vec<RubyConstant>, RubyType>,
+    /// The owning project, when the query has one, for constant aliases and
+    /// receivers declared in other files.
+    semantics: Option<&'s dyn Semantics>,
 
     // Output
     pub ns_stack_at_pos: Vec<RubyConstant>,
@@ -52,20 +56,21 @@ pub struct IdentifierVisitor {
     pub identifier_type: Option<IdentifierType>,
 }
 
-impl IdentifierVisitor {
+impl<'s> IdentifierVisitor<'s> {
     #[cfg(test)]
     pub fn new(
         document: crate::indexer::RubyDocument,
         position: crate::core::SourcePosition,
     ) -> Self {
         let byte_offset = document.position_to_analysis_offset(position);
-        Self::new_with_execution_context_at_offset(document.content, byte_offset, None)
+        Self::new_with_execution_context_at_offset(document.content, byte_offset, None, None)
     }
 
     pub fn new_with_execution_context_at_offset(
         content: String,
         byte_offset: u32,
         execution_context: Option<ExecutionContextFact>,
+        semantics: Option<&'s dyn Semantics>,
     ) -> Self {
         let scope_tracker = ScopeTracker::new();
 
@@ -75,6 +80,7 @@ impl IdentifierVisitor {
             scope_tracker,
             execution_context,
             file_constant_types: HashMap::new(),
+            semantics,
             ns_stack_at_pos: Vec::new(),
             namespace_kind_at_pos: None,
             lv_scope_id_at_pos: None,
@@ -204,7 +210,7 @@ fn static_receiver_namespace(
     Some(namespace)
 }
 
-impl Visit<'_> for IdentifierVisitor {
+impl Visit<'_> for IdentifierVisitor<'_> {
     fn visit_class_node(&mut self, node: &ClassNode) {
         let opened = self.process_class_node_entry(node);
         visit_class_node(self, node);

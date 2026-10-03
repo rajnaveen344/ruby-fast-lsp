@@ -8,7 +8,7 @@ use crate::indexer::{queries::syntax, Identifier, LVScopeKind};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
-impl IdentifierVisitor {
+impl IdentifierVisitor<'_> {
     /// Pushes the method's scopes and returns whether it did. A def that is
     /// skipped here, such as one whose name is still being typed, must not be
     /// exited.
@@ -94,16 +94,13 @@ impl IdentifierVisitor {
     }
 
     /// The class or module a constant `def` receiver names, resolved
-    /// against declarations earlier in this file.
+    /// against declarations earlier in this file and the project.
     fn def_receiver_namespace(&self, receiver: &Node<'_>) -> Option<Vec<RubyConstant>> {
         scope_rules::resolve_receiver_namespace(
             receiver,
             scope_rules::implicit_singleton_namespace(&self.scope_tracker).as_deref(),
             &self.scope_tracker.get_ns_stack(),
-            &|fqn| {
-                self.file_constant_types
-                    .contains_key(fqn.namespace_parts_slice())
-            },
+            &|fqn| self.namespace_is_known(fqn),
         )
     }
 
