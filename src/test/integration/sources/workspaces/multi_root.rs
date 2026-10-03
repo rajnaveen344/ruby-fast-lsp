@@ -75,7 +75,7 @@ async fn ready_project_definition_stays_responsive_while_sibling_workers_are_sat
     let started = Arc::new(AtomicUsize::new(0));
     let mut workers = Vec::new();
     for index in 0..2 {
-        let scheduler = editor.server().indexing.scheduler().clone();
+        let scheduler = editor.server().indexing_scheduler().clone();
         let started = started.clone();
         workers.push(tokio::spawn(async move {
             let _permit = scheduler

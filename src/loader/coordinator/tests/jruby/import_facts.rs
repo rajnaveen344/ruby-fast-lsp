@@ -557,7 +557,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
             .is_empty(),
         "removing the newly added import and constructor call must clear their reference facts"
     );
-    let resources = server.indexing.resources().snapshot();
+    let resources = server.indexing_resource_snapshot();
     assert_eq!(
         resources.completed_tasks, 3,
         "didOpen plus two didChange passes must each own exactly one outer resource lease; \

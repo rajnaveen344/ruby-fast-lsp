@@ -79,13 +79,12 @@ pub async fn handle_did_change_workspace_folders(
         tokio::spawn(async move {
             server_clone.publish_indexing_status().await;
             let Some(_permit) = server_clone
-                .indexing
-                .scheduler()
-                .acquire_cancellable(
+                .register_indexing_run(
                     project_root,
                     crate::loader::scheduling::scheduler::IndexingPriority::Background,
-                    run.cancellation(),
+                    &run,
                 )
+                .wait()
                 .await
             else {
                 return;

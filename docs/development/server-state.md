@@ -62,11 +62,9 @@ caches one response for the whole Ruby Index view. The six server-wide
 services stay direct fields rather than one `services` group: each has its own
 lock and lifetime, and a grouping field would only add a hop to every access.
 
-No server field is public outside the crate. Fields are explicitly
-`pub(self)` (private to `src/server/`) unless still listed as `pub(crate)`;
-fields move to `pub(self)` one at a time, each behind named operations, so
-features and lifecycle handlers call what they need instead of reaching
-through the owner:
+Every server field is `pub(self)`, private to `src/server/`. Features and
+lifecycle handlers call named operations for what they need instead of reaching
+through an owner; the fields with operations outside `src/server/` are:
 
 | Field | Operations outside `src/server/` |
 | --- | --- |
@@ -75,6 +73,7 @@ through the owner:
 | `documents` | `open_document`, `open_document_content`, `get_doc`, `is_document_open`, `open_documents` (a read-only view), `update_open_document`, `close_open_document` |
 | `config` | `configuration_snapshot()` (a copy), `with_configuration` (read one part), `replace_configuration` (accept a whole configuration); tests also use `update_configuration` |
 | `extensions` | `extension_registry()` (the shared registry handle), `reconfigure_extensions` (governed reload for the current roots), `set_extension_watch_dynamic_registration`, `refresh_extension_watch_registration` (the watched-file registration state stays private) |
+| `indexing` | `indexing_resources()` (the shared admission governor), `indexing_resource_snapshot`, `register_indexing_run` (whose admission is awaited with `wait()`), `set_indexing_resource_policy` and `set_indexing_concurrency` before the server is shared; tests also use `indexing_scheduler()` and `test_schedule()` |
 
 Separate executables use server operations instead of replacing internal
 state bags.

@@ -60,7 +60,7 @@ async fn code_actions(
         .unwrap_or_else(|| Path::new(".").to_path_buf());
     let fixed = match fix_document(
         &config,
-        server.indexing.resources().clone(),
+        server.indexing_resources().clone(),
         &workspace_root,
         &file_path,
         &content,

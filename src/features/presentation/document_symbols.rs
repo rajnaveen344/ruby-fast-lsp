@@ -58,7 +58,7 @@ pub async fn handle(
     match server
         .extension_registry()
         .document_symbols_governed(
-            server.indexing.resources().clone(),
+            server.indexing_resources().clone(),
             project_root,
             uri.as_str().to_string(),
             document.content.clone(),

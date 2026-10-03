@@ -67,7 +67,7 @@ pub async fn handle_did_change_watched_files(
             workspace_trusted,
             &server.workspace_root_paths(),
             &params.changes,
-            server.indexing.resources().clone(),
+            server.indexing_resources().clone(),
         )
         .await;
     params
@@ -163,13 +163,12 @@ pub(super) async fn rebuild_runtime_owned_project_state(
     let run = workspace.begin_indexing_run();
     server.publish_indexing_status().await;
     let Some(_permit) = server
-        .indexing
-        .scheduler()
-        .acquire_cancellable(
+        .register_indexing_run(
             workspace.root_path.clone(),
             crate::loader::scheduling::scheduler::IndexingPriority::OpenDocument,
-            run.cancellation(),
+            &run,
         )
+        .wait()
         .await
     else {
         return;

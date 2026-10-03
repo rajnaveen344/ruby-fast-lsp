@@ -54,7 +54,7 @@ pub async fn run_linter(server: &Server, uri: &Url, content: &str) {
 
     match lint_document(
         &config,
-        server.indexing.resources().clone(),
+        server.indexing_resources().clone(),
         &workspace_root,
         &file_path,
         content,

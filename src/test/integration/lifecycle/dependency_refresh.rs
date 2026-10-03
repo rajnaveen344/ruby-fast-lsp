@@ -65,8 +65,7 @@ async fn delayed_refresh(change: Change) {
     }
 
     let mut collected = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::RequireRefreshCollected, path.clone());
     let refresh_server = server.clone();
     let refresh_workspace = workspace.clone();
@@ -155,8 +154,7 @@ async fn delayed_refresh(change: Change) {
         );
     }
     let mut attempted = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::RequireRefreshAttempted, path.clone());
     collected.release();
     attempted.wait().await;
@@ -179,7 +177,7 @@ async fn delayed_refresh(change: Change) {
         .expect("dependency refresh must not panic");
     assert_eq!(observe(), expected);
     assert_eq!(
-        server.indexing.schedule.trace(),
+        server.test_schedule().trace(),
         vec![
             (Point::RequireRefreshCollected, path.clone()),
             (Point::RequireRefreshAttempted, path),

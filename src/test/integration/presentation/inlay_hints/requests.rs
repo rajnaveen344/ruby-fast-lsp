@@ -115,16 +115,9 @@ async fn inlay_hints_wait_for_the_current_document_semantic_commit() {
     std::fs::write(&path, source).unwrap();
 
     let mut server = Server::default();
-    server
-        .indexing
-        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-            crate::utils::admission::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        ));
+    server.set_indexing_resource_policy(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
+    );
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
     indexing::handle_did_open(
         &server,
@@ -141,7 +134,7 @@ async fn inlay_hints_wait_for_the_current_document_semantic_commit() {
 
     let release = Arc::new(tokio::sync::Notify::new());
     let holder_release = release.clone();
-    let holder_resources = server.indexing.resources().clone();
+    let holder_resources = server.indexing_resources().clone();
     let holder_root = workspace.path().to_path_buf();
     let holder = tokio::spawn(async move {
         holder_resources
@@ -163,7 +156,7 @@ async fn inlay_hints_wait_for_the_current_document_semantic_commit() {
             .unwrap();
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().active_tasks != 1 {
+        while server.indexing_resource_snapshot().active_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -191,7 +184,7 @@ async fn inlay_hints_wait_for_the_current_document_semantic_commit() {
         .await;
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().queued_tasks != 1 {
+        while server.indexing_resource_snapshot().queued_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })

@@ -10,13 +10,13 @@ mod watched_files;
 use crate::invariant::ExpectInvariant;
 pub use diagnostics::engine_diagnostics;
 use diagnostics::DiagnosticPublisher;
-pub(crate) use documents::OpenDocuments;
+use documents::OpenDocuments;
 #[cfg(test)]
 pub(crate) use extensions::extension_watch_registration;
-pub(crate) use extensions::ExtensionServices;
-pub(crate) use indexing::IndexingServices;
+use extensions::ExtensionServices;
+use indexing::IndexingServices;
 use namespace_tree::NamespaceTreeCache;
-pub(crate) use products::RuntimeProducts;
+use products::RuntimeProducts;
 pub use products::{
     ProjectRuntimeStatus, RuntimeProductSnapshot, RuntimeStatus, RuntimeStatusParams,
 };
@@ -92,7 +92,7 @@ pub struct Server {
     pub(self) config: Arc<Mutex<RubyFastLspConfig>>,
     pub(self) documents: OpenDocuments,
     pub(self) projects: ProjectRegistry,
-    pub(crate) indexing: IndexingServices,
+    pub(self) indexing: IndexingServices,
     pub(self) products: RuntimeProducts,
     pub(self) extensions: ExtensionServices,
     pub(self) diagnostics: DiagnosticPublisher,

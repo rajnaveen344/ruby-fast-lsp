@@ -39,14 +39,14 @@ fn mri_runtime_does_not_materialize_a_jruby_import_provider() {
 async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource_claims() {
     let root = PathBuf::from("/workspace/server");
     let mut server = Server::default();
+    server.set_indexing_resource_policy(admission::IndexingResourcePolicy::with_limits(
+        6,
+        2,
+        512 * MIB,
+        2,
+    ));
     server
-        .indexing
-        .set_resources(admission::IndexingResourceGovernor::new(
-            admission::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
-        ));
-    server
-        .indexing
-        .resources()
+        .indexing_resources()
         .prioritize_active_project_with_navigation_pending(&root, true);
     let server = Arc::new(server);
     let (started_tx, mut started_rx) = tokio::sync::mpsc::channel(2);
@@ -59,7 +59,7 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
         let started_tx = started_tx.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                server.indexing.resources(),
+                server.indexing_resources(),
                 Some(root),
                 None,
                 IndexingWorkClass::RuntimeCompanionParallelIo,
@@ -78,7 +78,7 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
         let root = root.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                server.indexing.resources(),
+                server.indexing_resources(),
                 Some(root),
                 None,
                 IndexingWorkClass::ProjectParallelIo,
@@ -102,7 +102,7 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
         .expect("the companion and project pass must overlap")
         .expect("start channel must remain open");
     assert_ne!(first, second);
-    let snapshot = server.indexing.resources().snapshot();
+    let snapshot = server.indexing_resource_snapshot();
     assert_eq!(snapshot.active_tasks, 2);
     assert_eq!(snapshot.active_cpu_lanes, 6);
     assert_eq!(snapshot.active_transient_memory_bytes, 512 * MIB);
@@ -119,14 +119,14 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
     let active_root = PathBuf::from("/workspace/server");
     let sibling_root = PathBuf::from("/workspace/admin");
     let mut server = Server::default();
+    server.set_indexing_resource_policy(admission::IndexingResourcePolicy::with_limits(
+        6,
+        2,
+        512 * MIB,
+        2,
+    ));
     server
-        .indexing
-        .set_resources(admission::IndexingResourceGovernor::new(
-            admission::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
-        ));
-    server
-        .indexing
-        .resources()
+        .indexing_resources()
         .prioritize_active_project_with_navigation_pending(&active_root, true);
     let server = Arc::new(server);
     let (active_started_tx, active_started_rx) = tokio::sync::oneshot::channel();
@@ -136,7 +136,7 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
         let active_root = active_root.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                server.indexing.resources(),
+                server.indexing_resources(),
                 Some(active_root),
                 None,
                 IndexingWorkClass::RuntimeCompanionParallelIo,
@@ -157,7 +157,7 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
         let server = server.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                server.indexing.resources(),
+                server.indexing_resources(),
                 Some(sibling_root),
                 None,
                 IndexingWorkClass::RuntimeCompanionParallelIo,
@@ -179,8 +179,7 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
     );
 
     server
-        .indexing
-        .resources()
+        .indexing_resources()
         .prioritize_active_project_with_navigation_pending(&active_root, false);
     tokio::time::timeout(Duration::from_secs(1), sibling_started_rx)
         .await

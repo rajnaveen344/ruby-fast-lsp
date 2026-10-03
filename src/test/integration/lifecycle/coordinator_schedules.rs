@@ -44,8 +44,7 @@ async fn edit_between_real_collection_and_commit(
     }
 
     let mut collected = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::ProjectFactsCollected, path.clone());
     let run = workspace.begin_indexing_run();
     let cold_server = server.clone();
@@ -60,8 +59,7 @@ async fn edit_between_real_collection_and_commit(
         .source_snapshot_for_path(&path)
         .expect("cold collection must register its input before reaching the commit boundary");
     let mut updated = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::DocumentSourceUpdated, path.clone());
     let operation_file = filename.clone();
     let editing = tokio::spawn(async move {
@@ -87,8 +85,7 @@ async fn edit_between_real_collection_and_commit(
     }
     updated.release();
     let mut attempted = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::ProjectCommitAttempted, path.clone());
     let editor = if cpu_lanes == 1 {
         // A one-lane governor correctly queues the edit while cold work owns
@@ -196,7 +193,7 @@ async fn edit_between_real_collection_and_commit(
         "the coordinator must publish current diagnostic output after the interleaving"
     );
     assert_eq!(
-        server.indexing.schedule.trace(),
+        server.test_schedule().trace(),
         vec![
             (Point::ProjectFactsCollected, path.clone()),
             (Point::DocumentSourceUpdated, path.clone()),
@@ -280,8 +277,7 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
     );
 
     let mut pending = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::ColdDiagnosticsPending, path.clone());
     let run = workspace.begin_indexing_run();
     let cold_server = server.clone();
@@ -342,8 +338,7 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
         return;
     }
     let mut attempted = server
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::ColdDiagnosticsAttempted, path.clone());
     pending.release();
     attempted.wait().await;
@@ -360,7 +355,7 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
         .expect("uncancelled coordinator must finish");
     assert_eq!(editor.diagnostics(&filename).await, Vec::new());
     assert_eq!(
-        server.indexing.schedule.trace(),
+        server.test_schedule().trace(),
         vec![
             (Point::ColdDiagnosticsPending, path.clone()),
             (Point::ColdDiagnosticsAttempted, path),

@@ -247,19 +247,11 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     let indexer = shared_dependency_indexer(&project_root, &gem_root);
     let mut server = Server::with_user_cache_root(fixture.path().join("user-cache"))
         .expect("construct isolated cache server");
+    server.set_indexing_resource_policy(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(6, 2, 512 * 1024 * 1024, 2),
+    );
     server
-        .indexing
-        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-            crate::utils::admission::IndexingResourcePolicy::with_limits(
-                6,
-                2,
-                512 * 1024 * 1024,
-                2,
-            ),
-        ));
-    server
-        .indexing
-        .resources()
+        .indexing_resources()
         .prioritize_active_project_with_navigation_pending(&project_root, true);
     let server = Arc::new(server);
 
@@ -269,8 +261,7 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     let runtime_root = project_root.clone();
     let runtime = tokio::spawn(async move {
         runtime_server
-            .indexing
-            .resources()
+            .indexing_resources()
             .run_partitioned_parallel_with_resources(
                 "simulated JRuby runtime companion",
                 IndexingWorkSpec::new(
@@ -311,7 +302,7 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
              maintenance path"
     );
     assert_eq!(result.unwrap().unwrap().len(), 1);
-    let resources = server.indexing.resources().snapshot();
+    let resources = server.indexing_resource_snapshot();
     assert_eq!(resources.peak_active_cpu_lanes, 6);
     assert_eq!(
         resources.peak_active_transient_memory_bytes,

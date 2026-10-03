@@ -55,7 +55,7 @@ pub async fn handle(
     match lang_server
         .extension_registry()
         .code_lenses_governed(
-            lang_server.indexing.resources().clone(),
+            lang_server.indexing_resources().clone(),
             project_root,
             uri.as_str().to_string(),
             content,

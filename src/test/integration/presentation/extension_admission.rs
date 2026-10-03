@@ -14,16 +14,9 @@ use tower_lsp::lsp_types::{
 async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_reactor() {
     let uri = crate::test::harness::fixture_uri("/tmp/governed_code_lenses.rb");
     let mut server = Server::default();
-    server
-        .indexing
-        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-            crate::utils::admission::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        ));
+    server.set_indexing_resource_policy(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
+    );
     server.extension_registry().configure_from_config(
         &crate::environment::config::RubyFastLspConfig {
             extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -48,7 +41,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
 
     let holder_release = Arc::new(tokio::sync::Notify::new());
     let holder_release_task = holder_release.clone();
-    let holder_governor = server.indexing.resources().clone();
+    let holder_governor = server.indexing_resources().clone();
     let holder = tokio::spawn(async move {
         holder_governor
             .run_async_with_resources(
@@ -69,7 +62,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
             .unwrap();
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().active_tasks != 1 {
+        while server.indexing_resource_snapshot().active_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -90,7 +83,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
         .await
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().queued_tasks != 1 {
+        while server.indexing_resource_snapshot().queued_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -114,7 +107,7 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
         .unwrap()
         .unwrap()
         .expect("open document must return a code-lens response");
-    let complete = server.indexing.resources().snapshot();
+    let complete = server.indexing_resource_snapshot();
     assert_eq!(complete.active_tasks, 0);
     assert_eq!(complete.queued_tasks, 0);
     assert_eq!(complete.completed_tasks, 3);
@@ -124,16 +117,9 @@ async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_
 async fn request_time_extension_symbols_wait_for_admission_without_blocking_reactor() {
     let uri = crate::test::harness::fixture_uri("/tmp/governed_document_symbols.rb");
     let mut server = Server::default();
-    server
-        .indexing
-        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-            crate::utils::admission::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        ));
+    server.set_indexing_resource_policy(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
+    );
     server.extension_registry().configure_from_config(
         &crate::environment::config::RubyFastLspConfig {
             extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -158,7 +144,7 @@ async fn request_time_extension_symbols_wait_for_admission_without_blocking_reac
 
     let holder_release = Arc::new(tokio::sync::Notify::new());
     let holder_release_task = holder_release.clone();
-    let holder_governor = server.indexing.resources().clone();
+    let holder_governor = server.indexing_resources().clone();
     let holder = tokio::spawn(async move {
         holder_governor
             .run_async_with_resources(
@@ -179,7 +165,7 @@ async fn request_time_extension_symbols_wait_for_admission_without_blocking_reac
             .unwrap();
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().active_tasks != 1 {
+        while server.indexing_resource_snapshot().active_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -200,7 +186,7 @@ async fn request_time_extension_symbols_wait_for_admission_without_blocking_reac
         .await
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().queued_tasks != 1 {
+        while server.indexing_resource_snapshot().queued_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -234,7 +220,7 @@ async fn request_time_extension_symbols_wait_for_admission_without_blocking_reac
     assert!(symbols
         .iter()
         .any(|symbol| symbol.name == "GovernedDocumentSymbol"));
-    let complete = server.indexing.resources().snapshot();
+    let complete = server.indexing_resource_snapshot();
     assert_eq!(complete.active_tasks, 0);
     assert_eq!(complete.queued_tasks, 0);
     assert_eq!(complete.completed_tasks, 3);

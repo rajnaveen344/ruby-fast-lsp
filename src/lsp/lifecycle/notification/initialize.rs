@@ -247,10 +247,10 @@ pub async fn handle_initialized(server: &Server, _params: InitializedParams) {
         .into_iter()
         .map(|ws| {
             let run = ws.begin_indexing_run();
-            let admission = server.indexing.scheduler().register_cancellable(
+            let admission = server.register_indexing_run(
                 ws.root_path.clone(),
                 crate::loader::scheduling::scheduler::IndexingPriority::Background,
-                run.cancellation(),
+                &run,
             );
             (ws, run, admission)
         })

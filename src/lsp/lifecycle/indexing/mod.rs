@@ -64,8 +64,7 @@ async fn process_interactive_file(
         1,
     );
     server
-        .indexing
-        .resources()
+        .indexing_resources()
         .clone()
         .run_with_resources(
             "interactive document semantic analysis",
@@ -170,8 +169,7 @@ pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams)
     #[cfg(test)]
     if let Ok(path) = uri.to_file_path() {
         server
-            .indexing
-            .schedule
+            .test_schedule()
             .checkpoint(
                 crate::loader::scheduling::test_schedule::Point::DocumentSourceUpdated,
                 &path,
@@ -352,8 +350,7 @@ pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentPar
     #[cfg(test)]
     if let Ok(path) = uri.to_file_path() {
         server
-            .indexing
-            .schedule
+            .test_schedule()
             .checkpoint(
                 crate::loader::scheduling::test_schedule::Point::DocumentSourceUpdated,
                 &path,

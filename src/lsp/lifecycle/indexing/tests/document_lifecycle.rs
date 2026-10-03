@@ -45,21 +45,14 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
     let path = workspace.path().join("opened.rb");
     let uri = Url::from_file_path(&path).unwrap();
     let mut server = Server::default();
-    server
-        .indexing
-        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-            crate::utils::admission::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        ));
+    server.set_indexing_resource_policy(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
+    );
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
     let release = Arc::new(tokio::sync::Notify::new());
     let holder_release = release.clone();
-    let holder_resources = server.indexing.resources().clone();
+    let holder_resources = server.indexing_resources().clone();
     let holder_root = workspace_root.clone();
     let holder = tokio::spawn(async move {
         holder_resources
@@ -81,7 +74,7 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
             .unwrap();
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().active_tasks != 1 {
+        while server.indexing_resource_snapshot().active_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -105,7 +98,7 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
         .await;
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().queued_tasks != 1 {
+        while server.indexing_resource_snapshot().queued_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -126,7 +119,7 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
     holder.await.unwrap();
     open.await.unwrap();
     assert!(has_namespace(&server, &uri, "OpenedUnderPressure"));
-    let complete = server.indexing.resources().snapshot();
+    let complete = server.indexing_resource_snapshot();
     assert_eq!(complete.active_tasks, 0);
     assert_eq!(complete.queued_tasks, 0);
     assert_eq!(complete.completed_tasks, 2);
@@ -143,16 +136,9 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
     let path = workspace.path().join("changing.rb");
     let uri = Url::from_file_path(&path).unwrap();
     let mut server = Server::default();
-    server
-        .indexing
-        .set_resources(crate::utils::admission::IndexingResourceGovernor::new(
-            crate::utils::admission::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        ));
+    server.set_indexing_resource_policy(
+        crate::utils::admission::IndexingResourcePolicy::with_limits(1, 1, 256 * 1024 * 1024, 1),
+    );
     server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
     handle_did_open(
         &server,
@@ -169,7 +155,7 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
 
     let release = Arc::new(tokio::sync::Notify::new());
     let holder_release = release.clone();
-    let holder_resources = server.indexing.resources().clone();
+    let holder_resources = server.indexing_resources().clone();
     let holder_root = workspace.path().to_path_buf();
     let holder = tokio::spawn(async move {
         holder_resources
@@ -191,7 +177,7 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
             .unwrap();
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().active_tasks != 1 {
+        while server.indexing_resource_snapshot().active_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })
@@ -218,7 +204,7 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
         .await;
     });
     tokio::time::timeout(Duration::from_secs(1), async {
-        while server.indexing.resources().snapshot().queued_tasks != 1 {
+        while server.indexing_resource_snapshot().queued_tasks != 1 {
             tokio::task::yield_now().await;
         }
     })

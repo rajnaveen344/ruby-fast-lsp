@@ -121,7 +121,7 @@ pub(crate) struct IndexingServices {
     resources: IndexingResourceGovernor,
     pub(super) status: IndexingStatusPublisher,
     #[cfg(test)]
-    pub(crate) schedule: Arc<crate::loader::scheduling::test_schedule::TestSchedule>,
+    pub(super) schedule: Arc<crate::loader::scheduling::test_schedule::TestSchedule>,
     #[cfg(test)]
     pub(super) progress_reports: Arc<Mutex<Vec<(PathBuf, u64, u64)>>>,
 }
@@ -156,17 +156,17 @@ impl Default for IndexingServices {
 }
 
 impl IndexingServices {
-    pub(crate) fn scheduler(&self) -> &IndexingScheduler {
+    pub(super) fn scheduler(&self) -> &IndexingScheduler {
         &self.scheduler
     }
-    pub(crate) fn resources(&self) -> &IndexingResourceGovernor {
+    pub(super) fn resources(&self) -> &IndexingResourceGovernor {
         &self.resources
     }
-    /// Select admission policy before starting work (also used by the profiler).
-    pub(crate) fn set_scheduler(&mut self, scheduler: IndexingScheduler) {
+    /// Select admission policy before starting work.
+    pub(super) fn set_scheduler(&mut self, scheduler: IndexingScheduler) {
         self.scheduler = scheduler;
     }
-    pub(crate) fn set_resources(&mut self, resources: IndexingResourceGovernor) {
+    pub(super) fn set_resources(&mut self, resources: IndexingResourceGovernor) {
         self.resources = resources;
     }
 }
@@ -211,6 +211,21 @@ impl Server {
         self.indexing
             .scheduler()
             .register_cancellable(project_root, priority, run.cancellation())
+    }
+
+    /// The shared admission governor that every load and worker acquires through.
+    pub(crate) fn indexing_resources(&self) -> &IndexingResourceGovernor {
+        self.indexing.resources()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn indexing_scheduler(&self) -> &IndexingScheduler {
+        self.indexing.scheduler()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_schedule(&self) -> &crate::loader::scheduling::test_schedule::TestSchedule {
+        &self.indexing.schedule
     }
 
     #[cfg(test)]

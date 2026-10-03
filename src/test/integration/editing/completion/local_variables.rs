@@ -63,8 +63,7 @@ async fn completion_waits_for_the_in_flight_document_edit() {
     let uri = crate::test::harness::fixture_uri("/locals.rb");
     let mut pause = editor
         .server()
-        .indexing
-        .schedule
+        .test_schedule()
         .arm(Point::DocumentSourceUpdated, uri.to_file_path().unwrap());
     let server = editor.server().clone();
     let edit = tokio::spawn(async move {
