@@ -405,3 +405,23 @@ fn cyclic_ancestry_edges_are_dropped() {
         "{seed:#?}"
     );
 }
+
+#[test]
+fn alias_reopen_needs_a_known_namespace() {
+    // A constant aliasing an unresolved path does not name a known class, so
+    // a later `class` with the constant's name declares that class itself
+    // rather than reopening a namespace guessed from the lexical scope.
+    let source = "module Shapes\n  if defined?(Missing::Thing)\n    Thing = Missing::Thing\n  \
+                  else\n    class Thing\n      def run; end\n    end\n  end\n  \
+                  if defined?(::Absent)\n    Absent = ::Absent\n  else\n    class Absent\n      \
+                  def self.call; end\n    end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "node Shapes::Thing Class",
+            "method Shapes::Thing#run on Shapes::Thing Some(Instance)",
+            "node Shapes::Absent Class",
+            "method Shapes::Absent#call on #<Class:Shapes::Absent> Some(Singleton)",
+        ],
+    );
+}

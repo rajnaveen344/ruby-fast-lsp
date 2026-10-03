@@ -151,6 +151,32 @@ impl FactCollector {
             })
     }
 
+    /// The value a class or module declaration name may alias. A reference
+    /// to a namespace no walk knows is a guess from the lexical scope, not
+    /// evidence of an alias, so the declaration names its own class.
+    pub(in crate::indexer::fact_collector) fn alias_value_type(
+        &self,
+        candidates: &[Vec<RubyConstant>],
+    ) -> Option<RubyType> {
+        let (_, ruby_type) = self.first_constant_value_type(candidates.iter().cloned())?;
+        match &ruby_type {
+            RubyType::ClassReference(target) | RubyType::ModuleReference(target) => {
+                let known = target
+                    .to_instance_namespace()
+                    .is_some_and(|namespace| self.namespace_is_known(&namespace));
+                known.then_some(ruby_type)
+            }
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::Literal(_)
+            | RubyType::Array(_)
+            | RubyType::Hash(_, _)
+            | RubyType::Shape(_)
+            | RubyType::Union(_)
+            | RubyType::Unknown => Some(ruby_type),
+        }
+    }
+
     pub fn direct_push_edge(
         &mut self,
         source: FullyQualifiedName,

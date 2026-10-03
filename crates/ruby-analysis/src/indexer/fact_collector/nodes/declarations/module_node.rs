@@ -18,10 +18,7 @@ impl FactCollector {
             GraphNodeKind::Module,
             None,
             &self.scope_tracker.get_ns_stack(),
-            |candidates| {
-                self.first_constant_value_type(candidates.iter().cloned())
-                    .map(|(_, ruby_type)| ruby_type)
-            },
+            |candidates| self.alias_value_type(candidates),
         );
         if let Some(target) = reopened_target {
             self.scope_tracker

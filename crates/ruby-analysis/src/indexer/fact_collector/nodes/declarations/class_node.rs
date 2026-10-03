@@ -44,10 +44,7 @@ impl FactCollector {
                 .as_ref()
                 .and_then(|(_, _, target)| target.as_ref()),
             &lexical_context,
-            |candidates| {
-                self.first_constant_value_type(candidates.iter().cloned())
-                    .map(|(_, ruby_type)| ruby_type)
-            },
+            |candidates| self.alias_value_type(candidates),
         );
 
         // Handle namespace setup
