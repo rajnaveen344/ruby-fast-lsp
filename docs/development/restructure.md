@@ -957,10 +957,26 @@ Delete this file when the last task is done. Git history keeps the record.
       D2, where the collector's flow work is rewritten. Until then, project
       files take seed declarations and dependencies take the collector's,
       and `declaration_parity.rs` keeps the two walks equal.
-  - [ ] D1f. Run the cursor walk and document symbols on the `Walk` scope with
-        pruning sinks, then delete the remaining copies. Depends on the `Walk`
-        and sink interface that D1e introduces. Until then, the cursor walk
-        and the seed already share `ScopeTracker` and `scope_rules`.
+  - [x] D1f. Run the cursor walk and document symbols on the shared scope,
+        then delete the remaining copies. Under the D1e decision, one `Walk`
+        means one scope implementation (`ScopeTracker`) and one set of rules
+        (`scope_rules`), not one traversal: the cursor walk stops at the
+        cursor and document symbols keep their own outline, and neither
+        would gain from a sink interface. What landed:
+    - Document symbols take visibility from `ScopeTracker` and
+      `scope_rules::visibility_call` instead of their own stack, so
+      `private :name` and `private def name` change only the named methods.
+    - A class or module with a malformed name (`class lowercase`) opens no
+      namespace frame, so its exit no longer pops the enclosing one in the
+      cursor walk or document symbols.
+    - The cursor walk reads project declarations through `Semantics`, so a
+      class reopened through a constant alias declared in another file, and
+      a `def` receiver naming a namespace from another file, resolve as they
+      do in the seed. Requests with a `View` (cursor queries, rename, YARD
+      types) pass it; the demand-key prepass has none and stays file-local.
+    - The receiverless and `send`-driven `define_method` side rules
+      (`receiverless_definition_kind`, `sent_definition_kind`) had a copy in
+      each of the three walks and in `dynamic_definition_block`.
 - [ ] D2. Merge collector flow inference and `TypeTracker` into one `Flow`.
       Compare the profiler output before and after.
 - [ ] D3. Rewrite `src/ARCHITECTURE.md`, the analysis README, and `AGENTS.md`
