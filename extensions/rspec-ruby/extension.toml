@@ -15,6 +15,8 @@ locked_gems = [{ name = "rspec-core", version = ">=3.0.0, <4.0.0" }]
 
 [build]
 output = "target/wasm32-wasip1/release/rspec-ruby.wasm"
+# Build inputs of the checked-in Wasm; see crates/devtools/src/package_sources.rs.
+source_sha256 = "1cfc25674fdfad430b44ce165c973effcf12d15818ec39c05bbbb7a91b852fad"
 
 [indexing]
 project_context = "activation"

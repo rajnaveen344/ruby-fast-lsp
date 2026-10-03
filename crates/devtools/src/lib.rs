@@ -1,5 +1,6 @@
 //! Shared support for the developer binaries: fixture corpora, latency
-//! metrics, and the file-open memory measurement.
+//! metrics, the file-open memory measurement, and extension package source
+//! fingerprints.
 
 #[macro_use]
 #[allow(unused_macros, dead_code)]
@@ -9,6 +10,7 @@ mod invariant;
 pub mod corpus;
 pub mod file_open;
 pub mod metrics;
+pub mod package_sources;
 
 use std::path::{Path, PathBuf};
 

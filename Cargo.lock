@@ -729,6 +729,7 @@ dependencies = [
  "tempfile",
  "tikv-jemallocator",
  "tokio",
+ "toml",
  "tower-lsp",
  "walkdir",
  "zstd",
