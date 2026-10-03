@@ -239,3 +239,25 @@ Cycle.new.left(2).abs<hover label="Integer">
         )
         .await;
 }
+
+/// A generic read whose receiver has no known element type stays unknown
+/// instead of naming the signature's type parameter as a class.
+#[tokio::test]
+async fn generic_read_without_element_types_does_not_name_the_type_parameter() {
+    check(
+        r#"
+class Foo
+  def fir<type label="?">st_item
+    items = []
+    items.first
+  end
+
+  def all<type label="Array<?>">_keys
+    pairs = {}
+    pairs.keys
+  end
+end
+"#,
+    )
+    .await;
+}

@@ -76,14 +76,14 @@ pub fn get_rbs_method_signatures(
         .collect()
 }
 
-/// Get the return type of a method from RBS, converted to RubyType
+/// Get the return type of a method from RBS, converted to RubyType. The
+/// class's type parameters are unbound, so they convert to `Unknown`.
 pub fn get_rbs_method_return_type_as_ruby_type(
     class_name: &str,
     method_name: &str,
     is_singleton: bool,
 ) -> Option<RubyType> {
-    let rbs_type = get_rbs_method_return_type(class_name, method_name, is_singleton)?;
-    Some(rbs_type_to_ruby_type(&rbs_type))
+    get_rbs_method_return_type_with_type_args(class_name, method_name, is_singleton, &[])
 }
 
 /// Get the return type of a method from RBS with generic type substitution.
@@ -120,7 +120,9 @@ pub fn get_rbs_method_return_type_with_type_args(
     }
 }
 
-/// Build a map from type parameter names to concrete RubyTypes.
+/// Build a map from type parameter names to concrete RubyTypes. A parameter
+/// without an argument maps to `Unknown`; the RBS parser may spell it like a
+/// class name, which must not leak as a concrete class.
 /// Handles type param names that include modifiers like "unchecked out Elem" → "Elem".
 fn build_substitution_map(
     type_params: &[rbs_parser::TypeParam],
@@ -128,8 +130,9 @@ fn build_substitution_map(
 ) -> std::collections::HashMap<String, RubyType> {
     type_params
         .iter()
-        .zip(type_args.iter())
-        .map(|(param, arg)| {
+        .enumerate()
+        .map(|(index, param)| {
+            let arg = type_args.get(index).unwrap_or(&RubyType::Unknown);
             // Strip modifiers: "unchecked out Elem" → "Elem"
             let name = param
                 .name

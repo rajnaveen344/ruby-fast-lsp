@@ -69,6 +69,11 @@ pub(super) fn rbs_type_to_ruby_type_with_substitutions(
         RbsType::Record(fields) => rbs_record_to_ruby_type(fields, |field_type| {
             rbs_type_to_ruby_type_with_substitutions(field_type, substitutions)
         }),
+        RbsType::Tuple(types) => {
+            RubyType::Array(RubyType::canonical_union_members(types.iter().map(
+                |element| rbs_type_to_ruby_type_with_substitutions(element, substitutions),
+            )))
+        }
         // For all other types, fall back to the non-substitution version
         _ => rbs_type_to_ruby_type(rbs_type),
     }
