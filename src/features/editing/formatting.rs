@@ -69,7 +69,7 @@ async fn document_formatting(
                 file_path.display()
             );
             warn!("{message}. No text edit was returned.");
-            if let Some(client) = &server.client {
+            if let Some(client) = server.client() {
                 client.show_message(MessageType::ERROR, message).await;
             }
             return None;

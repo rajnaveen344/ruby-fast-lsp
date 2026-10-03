@@ -86,7 +86,7 @@ fn is_process_alive(pid: u32) -> bool {
 /// The protocol facade lives in `src/lsp/service.rs`.
 #[derive(Clone)]
 pub struct Server {
-    pub(crate) client: Option<Client>,
+    pub(self) client: Option<Client>,
     pub(crate) config: Arc<Mutex<RubyFastLspConfig>>,
     pub(crate) documents: OpenDocuments,
     pub(self) projects: ProjectRegistry,
@@ -102,6 +102,11 @@ impl Server {
     /// Copy the accepted configuration without exposing its shared lock.
     pub fn configuration_snapshot(&self) -> RubyFastLspConfig {
         self.config.lock().clone()
+    }
+
+    /// The editor connection; an embedded server has none.
+    pub(crate) fn client(&self) -> Option<&Client> {
+        self.client.as_ref()
     }
 
     pub(crate) fn document_semantic_lock(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {

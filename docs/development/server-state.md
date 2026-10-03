@@ -62,10 +62,18 @@ caches one response for the whole Ruby Index view. The six server-wide
 services stay direct fields rather than one `services` group: each has its own
 lock and lifetime, and a grouping field would only add a hop to every access.
 
-No server field is public outside the crate. Fields used by sibling modules
-are explicitly `pub(crate)`; server-owned fields are explicitly `pub(self)`.
-This keeps the declaration visually consistent without widening access. Separate
-executables use server operations instead of replacing internal state bags.
+No server field is public outside the crate. Fields are explicitly
+`pub(self)` (private to `src/server/`) unless still listed as `pub(crate)`;
+fields move to `pub(self)` one at a time, each behind named operations, so
+features and lifecycle handlers call what they need instead of reaching
+through the owner:
+
+| Field | Operations outside `src/server/` |
+| --- | --- |
+| `client` | `client()`: the editor connection, absent for an embedded server |
+
+Separate executables use server operations instead of replacing internal
+state bags.
 
 The loader never sees the server. For each project load and interactive file
 pass the server builds a `LoadContext` of shared handles (configuration, require

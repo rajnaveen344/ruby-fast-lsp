@@ -92,7 +92,7 @@ pub(super) async fn refresh_extension_watch_registration(server: &Server) {
     {
         return;
     }
-    let Some(client) = &server.client else {
+    let Some(client) = server.client() else {
         return;
     };
 

@@ -206,7 +206,7 @@ pub async fn handle_initialized(server: &Server, _params: InitializedParams) {
     // Dynamically register type hierarchy capability (LSP 3.17.0)
     // lsp-types 0.94.1 doesn't have typeHierarchyProvider in ServerCapabilities,
     // so we use dynamic registration to enable the "Show Type Hierarchy" menu option.
-    if let Some(client) = &server.client {
+    if let Some(client) = server.client() {
         let registration = Registration {
             id: "type-hierarchy".to_string(),
             method: "textDocument/prepareTypeHierarchy".to_string(),
