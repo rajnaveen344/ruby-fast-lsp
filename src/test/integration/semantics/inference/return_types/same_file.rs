@@ -261,3 +261,24 @@ end
     )
     .await;
 }
+
+/// A generic element read on a local Array returns the element type, not the
+/// signature's unsubstituted type parameter.
+#[tokio::test]
+async fn generic_element_read_on_a_local_array_substitutes_the_element_type() {
+    check(
+        r#"
+class Foo
+  def fir<type label="Integer">st_item
+    items = [1, 2]
+    items.first
+  end
+
+  def fir<type label="Integer">st_direct
+    [1, 2].first
+  end
+end
+"#,
+    )
+    .await;
+}

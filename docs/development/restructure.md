@@ -990,8 +990,13 @@ Delete this file when the last task is done. Git history keeps the record.
         flow type, the collector infers the value expression.
   - [x] D2c. One shape-read dispatch (`[]`, `fetch`, `dig`, `key?`, `keys`,
         `values`, `each*`) in `inference::type::shape::CallRead`.
-  - [ ] D2d. One RBS and analysis method-return resolution for a receiver
-        (collector `method_return.rs`, tracker `expressions/calls.rs`).
+  - [x] D2d. One RBS method-return resolution for a receiver,
+        `method::return_type::receiver_rbs_return_type`, which substitutes
+        Array/Hash element types for both walks. The analysis lookups stay
+        per walk because their sources differ: the collector reads the
+        in-progress file facts (visibility overrides, local superclass
+        edges), the tracker the solved snapshot; both fall through to the
+        shared `receiver_method_return_type`.
   - [ ] D2e. Evaluate the collector consuming expression evidence the
         tracker recorded instead of re-deriving it. Land only if dependency
         collection and core indexing do not regress beyond noise.

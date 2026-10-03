@@ -347,6 +347,80 @@ fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
     names
 }
 
+/// The RBS return type of `method_name` on one receiver, substituting the
+/// receiver's element types for an Array or Hash. The class is looked up by
+/// its last constant name.
+pub(crate) fn receiver_rbs_return_type(
+    receiver_type: &RubyType,
+    method_name: &str,
+) -> Option<RubyType> {
+    let class_name = receiver_rbs_class_name(receiver_type)?;
+    let is_singleton = matches!(
+        receiver_type,
+        RubyType::ClassReference(_) | RubyType::ModuleReference(_)
+    );
+    let type_args = type_args_for_receiver(receiver_type);
+    if type_args.is_empty() {
+        crate::inference::rbs::get_rbs_method_return_type_as_ruby_type(
+            &class_name,
+            method_name,
+            is_singleton,
+        )
+    } else {
+        crate::inference::rbs::get_rbs_method_return_type_with_type_args(
+            &class_name,
+            method_name,
+            is_singleton,
+            &type_args,
+        )
+    }
+}
+
+fn receiver_rbs_class_name(receiver_type: &RubyType) -> Option<String> {
+    match receiver_type {
+        RubyType::Class(fqn)
+        | RubyType::ClassReference(fqn)
+        | RubyType::Module(fqn)
+        | RubyType::ModuleReference(fqn) => fqn.namespace_parts().last().map(ToString::to_string),
+        RubyType::Array(_) => Some("Array".to_string()),
+        RubyType::Hash(_, _) | RubyType::Shape(_) => Some("Hash".to_string()),
+        RubyType::Literal(value) => receiver_rbs_class_name(&value.widened_type()),
+        RubyType::Union(_) => None,
+        RubyType::Unknown => None,
+    }
+}
+
+fn type_args_for_receiver(receiver_type: &RubyType) -> Vec<RubyType> {
+    match receiver_type {
+        RubyType::Array(element_types) => match element_types.len() {
+            0 => Vec::new(),
+            1 => vec![element_types[0].clone()],
+            2.. => vec![RubyType::union(element_types.clone())],
+        },
+        RubyType::Hash(key_types, value_types) => {
+            let key = match key_types.len() {
+                0 => RubyType::Unknown,
+                1 => key_types[0].clone(),
+                2.. => RubyType::union(key_types.clone()),
+            };
+            let value = match value_types.len() {
+                0 => RubyType::Unknown,
+                1 => value_types[0].clone(),
+                2.. => RubyType::union(value_types.clone()),
+            };
+            vec![key, value]
+        }
+        RubyType::Shape(shape) => type_args_for_receiver(&shape.generic_hash_type()),
+        RubyType::Literal(_) => Vec::new(),
+        RubyType::Class(_)
+        | RubyType::Module(_)
+        | RubyType::ClassReference(_)
+        | RubyType::ModuleReference(_)
+        | RubyType::Union(_)
+        | RubyType::Unknown => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,6 +3,7 @@ use crate::core::{
     UnknownReason,
 };
 use crate::inference::method::constructor::seed_constructor_type;
+use crate::inference::method::return_type::receiver_rbs_return_type;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::semantics::ReceiverAccess;
@@ -118,7 +119,7 @@ impl TypeTracker {
                         &method_name,
                         allow_private,
                     )
-                    .or_else(|| self.resolve_rbs_method_return_type(member, &method_name))
+                    .or_else(|| receiver_rbs_return_type(member, &method_name))
                 },
             )
             .unwrap_or(RubyType::Unknown);
@@ -131,8 +132,7 @@ impl TypeTracker {
             return return_type;
         }
 
-        self.resolve_rbs_method_return_type(&receiver_type, &method_name)
-            .unwrap_or(RubyType::Unknown)
+        receiver_rbs_return_type(&receiver_type, &method_name).unwrap_or(RubyType::Unknown)
     }
 
     pub(in crate::inference::type_tracker) fn resolve_static_method_return_outcome(
@@ -156,39 +156,8 @@ impl TypeTracker {
         }
         TypeInferenceOutcome::from_optional(
             self.resolve_method_return_type_from_analysis(receiver_type, method_name, false)
-                .or_else(|| self.resolve_rbs_method_return_type(receiver_type, method_name)),
+                .or_else(|| receiver_rbs_return_type(receiver_type, method_name)),
             UnknownReason::UnresolvedMethodReturn,
-        )
-    }
-
-    pub(in crate::inference::type_tracker) fn resolve_rbs_method_return_type(
-        &self,
-        receiver_type: &RubyType,
-        method_name: &str,
-    ) -> Option<RubyType> {
-        let is_singleton = matches!(
-            receiver_type,
-            RubyType::ClassReference(_) | RubyType::ModuleReference(_)
-        );
-        let class_name = match receiver_type {
-            RubyType::Class(fqn)
-            | RubyType::ClassReference(fqn)
-            | RubyType::Module(fqn)
-            | RubyType::ModuleReference(fqn) => fqn.namespace_parts().last().map(|c| c.to_string()),
-            RubyType::Array(_) => Some("Array".to_string()),
-            RubyType::Hash(_, _) => Some("Hash".to_string()),
-            RubyType::Shape(shape) => {
-                return self.resolve_rbs_method_return_type(&shape.generic_hash_type(), method_name)
-            }
-            RubyType::Literal(value) => {
-                return self.resolve_rbs_method_return_type(&value.widened_type(), method_name)
-            }
-            RubyType::Union(_) | RubyType::Unknown => None,
-        }?;
-        crate::inference::rbs::get_rbs_method_return_type_as_ruby_type(
-            &class_name,
-            method_name,
-            is_singleton,
         )
     }
 
