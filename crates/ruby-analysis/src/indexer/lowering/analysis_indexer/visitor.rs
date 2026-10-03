@@ -537,6 +537,9 @@ impl Visit<'_> for AnalysisIndexer {
             }
             return;
         }
+        if self.defer_eval_block(node) {
+            return;
+        }
         if let Some(execution) = self.push_concern_class_methods_block(node) {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);

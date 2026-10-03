@@ -16,6 +16,7 @@ use self::syntax::{constant_parts, u32_offset};
 use crate::indexer::documents::scope_tracker::ScopeTracker;
 
 mod constants;
+mod deferred;
 mod methods;
 mod namespaces;
 mod syntax;
@@ -34,6 +35,9 @@ pub struct AnalysisIndexer {
     known_constant_types: HashMap<FullyQualifiedName, RubyType>,
     source: Option<String>,
     facts: FileAnalysis,
+    /// Eval calls in method bodies waiting for the file's later namespaces.
+    deferred_eval_blocks: Vec<deferred::DeferredEvalBlock>,
+    replaying_deferred: bool,
 }
 
 impl AnalysisIndexer {
@@ -88,19 +92,24 @@ impl AnalysisIndexer {
             known_constant_types,
             source: None,
             facts: FileAnalysis::default(),
+            deferred_eval_blocks: Vec::new(),
+            replaying_deferred: false,
         }
     }
 
     pub fn index_source(mut self, source: &str) -> FileAnalysis {
         self.source = Some(source.to_string());
         let parse = ruby_prism::parse(source.as_bytes());
-        self.visit(&parse.node());
+        let root = parse.node();
+        self.visit(&root);
+        self.replay_deferred_eval_blocks(&root);
         self.facts
     }
 
     pub fn index_node_with_source(mut self, node: &Node<'_>, source: &str) -> FileAnalysis {
         self.source = Some(source.to_string());
         self.visit(node);
+        self.replay_deferred_eval_blocks(node);
         self.facts
     }
 

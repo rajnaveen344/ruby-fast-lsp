@@ -425,3 +425,19 @@ fn alias_reopen_needs_a_known_namespace() {
         ],
     );
 }
+
+#[test]
+fn eval_receivers_in_method_bodies_see_the_whole_file() {
+    // A method body runs after the file has loaded, so an eval receiver there
+    // names a namespace declared anywhere in the file, including below it.
+    let source = "module Shapes\n  module Sized; end\n  class Base\n    def self.setup\n      \
+                  Later.module_exec do\n        extend Sized\n        def made; end\n      \
+                  end\n    end\n    module Later; end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "edge Shapes::Base::Later Extend Shapes::Sized",
+            "method Shapes::Base::Later#made on Shapes::Base::Later Some(Instance)",
+        ],
+    );
+}

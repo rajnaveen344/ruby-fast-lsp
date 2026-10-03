@@ -201,6 +201,18 @@ pub fn self_definition_namespace(scope_tracker: &ScopeTracker) -> Option<Vec<Rub
     implicit_singleton_namespace(scope_tracker)
 }
 
+/// The side of the receiver where a `def` lands in an eval call's block,
+/// or `None` when `node` is not an eval call.
+pub fn eval_definition_kind(node: &CallNode<'_>) -> Option<NamespaceKind> {
+    match node.name().as_slice() {
+        b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => {
+            Some(NamespaceKind::Instance)
+        }
+        b"instance_eval" | b"instance_exec" => Some(NamespaceKind::Singleton),
+        _ => None,
+    }
+}
+
 /// `Target.class_eval do … end` and its `module_*`/`instance_*` forms.
 /// `resolve_receiver` is the walk's knowledge of constant and `self`
 /// receivers.
@@ -209,11 +221,7 @@ pub fn eval_block(
     scope_tracker: &ScopeTracker,
     resolve_receiver: impl Fn(&Node<'_>) -> Option<Vec<RubyConstant>>,
 ) -> Option<BlockExecution> {
-    let definition_kind = match node.name().as_slice() {
-        b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => NamespaceKind::Instance,
-        b"instance_eval" | b"instance_exec" => NamespaceKind::Singleton,
-        _ => return None,
-    };
+    let definition_kind = eval_definition_kind(node)?;
     node.block()?;
     let namespace = match node.receiver() {
         Some(receiver) => resolve_receiver(&receiver)?,
