@@ -262,69 +262,12 @@ impl FactCollector {
         value: &Node<'_>,
     ) -> HashMap<String, RubyType> {
         let mut captures = HashMap::new();
-        self.collect_pattern_capture_types(pattern, value, &mut captures);
+        crate::inference::r#type::pattern::capture_types_from_value(
+            pattern,
+            value,
+            &mut captures,
+            &mut |element| self.infer_type_from_value(element),
+        );
         captures
     }
-
-    pub(in crate::indexer::fact_collector) fn collect_pattern_capture_types(
-        &self,
-        pattern: &Node<'_>,
-        value: &Node<'_>,
-        captures: &mut HashMap<String, RubyType>,
-    ) {
-        if let Some(target) = pattern.as_local_variable_target_node() {
-            let name = String::from_utf8_lossy(target.name().as_slice()).to_string();
-            captures.insert(name, self.infer_type_from_value(value));
-            return;
-        }
-
-        if let Some(pattern_hash) = pattern.as_hash_pattern_node() {
-            let Some(value_hash) = value.as_hash_node() else {
-                return;
-            };
-            let value_elements = value_hash
-                .elements()
-                .iter()
-                .filter_map(|element| {
-                    let assoc = element.as_assoc_node()?;
-                    Some((symbol_key(&assoc.key())?, assoc.value()))
-                })
-                .collect::<Vec<_>>();
-
-            for element in pattern_hash.elements().iter() {
-                let Some(assoc) = element.as_assoc_node() else {
-                    continue;
-                };
-                let Some(key) = symbol_key(&assoc.key()) else {
-                    continue;
-                };
-                let Some((_, value_node)) = value_elements
-                    .iter()
-                    .find(|(value_key, _)| value_key == &key)
-                else {
-                    continue;
-                };
-                self.collect_pattern_capture_types(&assoc.value(), value_node, captures);
-            }
-            return;
-        }
-
-        if let Some(pattern_array) = pattern.as_array_pattern_node() {
-            let Some(value_array) = value.as_array_node() else {
-                return;
-            };
-            let value_elements = value_array.elements().iter().collect::<Vec<_>>();
-            for (index, required) in pattern_array.requireds().iter().enumerate() {
-                let Some(value_node) = value_elements.get(index) else {
-                    continue;
-                };
-                self.collect_pattern_capture_types(&required, value_node, captures);
-            }
-        }
-    }
-}
-
-pub(in crate::indexer::fact_collector) fn symbol_key(node: &Node<'_>) -> Option<String> {
-    node.as_symbol_node()
-        .map(|symbol| String::from_utf8_lossy(symbol.unescaped()).to_string())
 }

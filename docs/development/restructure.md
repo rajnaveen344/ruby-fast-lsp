@@ -985,8 +985,9 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] D2a. `higher_order::LocalCallables` owns flow-local proc bindings:
         literal and alias assignment, escape invalidation, branch merge, and
         bounded instantiation. `block_parameter_names` is shared.
-  - [ ] D2b. One pattern-capture typing for `case`/`in` (collector
-        `inference/flow.rs`, tracker `flow/patterns.rs`).
+  - [x] D2b. One pattern-capture typing for `case`/`in` in
+        `inference::type::pattern`; the tracker first reads a local's
+        flow type, the collector infers the value expression.
   - [ ] D2c. One shape-read dispatch (`[]`, `fetch`, `dig`, `key?`, `keys`,
         `values`, `each*`) in `inference::type::shape`.
   - [ ] D2d. One RBS and analysis method-return resolution for a receiver
