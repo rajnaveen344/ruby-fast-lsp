@@ -3,6 +3,24 @@ use crate::core::types::shape_type::{LiteralValue, ShapeType, MAX_SHAPE_UNION_VA
 use crate::invariant::ExpectInvariant;
 use std::fmt::{self, Display, Formatter};
 
+/// Distinct union members below which flattening skips repeats by scan.
+const UNION_SCAN_DEDUP_LIMIT: usize = 16;
+
+/// A language-defined class type. The name is parsed once; later calls
+/// clone the interned segments.
+macro_rules! builtin_class {
+    ($name:literal) => {{
+        static NAME: std::sync::LazyLock<FullyQualifiedName> = std::sync::LazyLock::new(|| {
+            FullyQualifiedName::try_from($name).expect_invariant(
+                concat!($name, " is not a valid Ruby constant"),
+                "it is a language-defined class name",
+                "preserve the canonical constant spelling",
+            )
+        });
+        RubyType::Class(NAME.clone())
+    }};
+}
+
 /// Represents Ruby types in the type inference system
 /// Following Ruby's object model where everything is an object
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -36,31 +54,31 @@ pub enum RubyType {
 impl RubyType {
     // Helper constructors for common Ruby classes
     pub fn string() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("String").unwrap())
+        builtin_class!("String")
     }
 
     pub fn integer() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
+        builtin_class!("Integer")
     }
 
     pub fn float() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("Float").unwrap())
+        builtin_class!("Float")
     }
 
     pub fn nil_class() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("NilClass").unwrap())
+        builtin_class!("NilClass")
     }
 
     pub fn symbol() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("Symbol").unwrap())
+        builtin_class!("Symbol")
     }
 
     pub fn true_class() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("TrueClass").unwrap())
+        builtin_class!("TrueClass")
     }
 
     pub fn false_class() -> Self {
-        RubyType::Class(FullyQualifiedName::try_from("FalseClass").unwrap())
+        builtin_class!("FalseClass")
     }
 
     pub fn boolean() -> Self {
@@ -255,17 +273,25 @@ impl RubyType {
     /// Create a new union type from a collection of types
     pub fn union(types: impl IntoIterator<Item = RubyType>) -> Self {
         let mut type_vec = Vec::new();
+        // Large literal collections repeat a few member types many times.
+        // While the distinct members stay few, skip repeats with a cheap
+        // equality scan so the canonical sort sees only distinct members.
+        let push = |type_vec: &mut Vec<RubyType>, ty: RubyType| {
+            if type_vec.len() > UNION_SCAN_DEDUP_LIMIT || !type_vec.contains(&ty) {
+                type_vec.push(ty);
+            }
+        };
 
         for ty in types {
             match ty {
                 // Flatten nested unions
                 RubyType::Union(inner_types) => {
-                    type_vec.extend(inner_types);
+                    for inner in inner_types {
+                        push(&mut type_vec, inner);
+                    }
                 }
                 // Add other types
-                other => {
-                    type_vec.push(other);
-                }
+                other => push(&mut type_vec, other),
             }
         }
 
