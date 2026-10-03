@@ -41,13 +41,21 @@ pub trait Stat: Copy + Eq + fmt::Debug + 'static {
 /// Declare a statistics set: a fieldless enum whose variants carry a stable
 /// report name and an optional `max` merge rule (default: sum).
 ///
-/// ```ignore
+/// ```
+/// use ruby_analysis::stat_set;
+/// use ruby_analysis::stats::{Merge, Stat};
+///
 /// stat_set! {
 ///     pub enum CacheStat {
 ///         Hits = "hits",
 ///         MaxWaitNs = "max_wait_ns": max,
 ///     }
 /// }
+///
+/// assert_eq!(CacheStat::ALL, &[CacheStat::Hits, CacheStat::MaxWaitNs]);
+/// assert_eq!(CacheStat::MaxWaitNs.name(), "max_wait_ns");
+/// assert_eq!(CacheStat::Hits.merge(), Merge::Sum);
+/// assert_eq!(CacheStat::MaxWaitNs.merge(), Merge::Max);
 /// ```
 #[macro_export]
 macro_rules! stat_set {
