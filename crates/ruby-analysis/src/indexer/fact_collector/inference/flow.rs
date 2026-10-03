@@ -19,7 +19,7 @@ pub(in crate::indexer::fact_collector) struct FlowState {
     pub(in crate::indexer::fact_collector) method_yields:
         HashMap<FullyQualifiedName, Vec<RubyType>>,
     pub(in crate::indexer::fact_collector) local_callables:
-        HashMap<String, crate::inference::higher_order::KnownProcType>,
+        crate::inference::higher_order::LocalCallables,
     /// Nonlocal writes currently being traversed. Their target facts are
     /// collected before Prism visits the RHS, but reads inside that RHS must
     /// observe the previous value rather than the not-yet-completed write.

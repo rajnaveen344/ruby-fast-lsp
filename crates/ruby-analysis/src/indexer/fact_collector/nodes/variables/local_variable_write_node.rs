@@ -44,21 +44,6 @@ impl FactCollector {
         Some(variable_name)
     }
 
-    fn bind_local_callable_from_value(&mut self, variable_name: &str, value: &Node<'_>) {
-        if let Some(return_type) = self.infer_known_proc_type(value) {
-            self.bind_local_callable(variable_name.to_string(), return_type);
-        } else if let Some(alias) = value.as_local_variable_read_node() {
-            let alias_name = String::from_utf8_lossy(alias.name().as_slice()).to_string();
-            if let Some(callable) = self.flow.local_callables.get(&alias_name).cloned() {
-                self.bind_local_callable(variable_name.to_string(), callable);
-            } else {
-                self.flow.local_callables.remove(variable_name);
-            }
-        } else {
-            self.flow.local_callables.remove(variable_name);
-        }
-    }
-
     /// Make the name a local before visiting the RHS so blocks see a variable,
     /// not a method. Lower callables here, before `define_variable` and before
     /// visiting the body, so inner block locals cannot leak into outer_locals.
@@ -74,8 +59,11 @@ impl FactCollector {
             return;
         };
         if let Some(value) = value_node {
-            self.invalidate_escaped_callables_in_value(value);
-            self.bind_local_callable_from_value(&variable_name, value);
+            self.flow.local_callables.invalidate_escaped_in_value(value);
+            let literal = self.infer_known_proc_type(value);
+            self.flow
+                .local_callables
+                .assign(&variable_name, literal, value);
         }
 
         if let Ok(fqn) = FullyQualifiedName::local_variable(variable_name.clone()) {

@@ -1,4 +1,5 @@
 use crate::core::{ConstantTypeDependency, LiteralKey, RubyType, UnknownReason, MAX_SHAPE_ALIASES};
+use crate::inference::higher_order::LocalCallables;
 use crate::inference::type_tracker::flow::shapes::identities::{
     ArrayShapeAliases, ShapeContainment, ShapeIdentity, ShapeIdentityState,
 };
@@ -18,8 +19,7 @@ pub(in crate::inference::type_tracker) struct FlowEnvironment {
     pub(in crate::inference::type_tracker) shape_containments: BTreeSet<ShapeContainment>,
     pub(in crate::inference::type_tracker) array_shape_aliases: HashMap<String, ArrayShapeAliases>,
     pub(in crate::inference::type_tracker) unknown_reasons: HashMap<String, UnknownReason>,
-    pub(in crate::inference::type_tracker) callables:
-        HashMap<String, crate::inference::higher_order::KnownProcType>,
+    pub(in crate::inference::type_tracker) callables: LocalCallables,
     pub(in crate::inference::type_tracker) max_live_shape_aliases: usize,
 }
 
@@ -618,39 +618,8 @@ impl TypeTracker {
         self.environment.max_live_shape_aliases = this_env
             .max_live_shape_aliases
             .max(other_env.max_live_shape_aliases);
-        let callable_names = this_env
-            .callables
-            .keys()
-            .chain(other_env.callables.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let mut merged_callables = HashMap::new();
-        for name in callable_names {
-            let merged = match (
-                this_env.callables.get(&name),
-                other_env.callables.get(&name),
-            ) {
-                (Some(left), Some(right)) if left == right => left.clone(),
-                (Some(left), Some(right)) => crate::inference::higher_order::KnownProcType {
-                    identity: left.identity.min(right.identity),
-                    summary: Err(UnknownReason::AmbiguousCallableValue),
-                },
-                (Some(callable), None) | (None, Some(callable)) => {
-                    crate::inference::higher_order::KnownProcType {
-                        identity: callable.identity,
-                        summary: Err(UnknownReason::AmbiguousCallableValue),
-                    }
-                }
-                (None, None) => unreachable_invariant!(
-                    what = "callable merge key `{name}` is absent from both branch environments",
-                    why = "keys are derived from those exact maps",
-                    fix = "keep callable key collection and lookup atomic",
-                    name = name,
-                ),
-            };
-            merged_callables.insert(name, merged);
-        }
-        self.environment.callables = merged_callables;
+        self.environment.callables =
+            LocalCallables::merge(&this_env.callables, &other_env.callables);
         if !inconsistent_array_identities.is_empty() {
             self.environment.invalidate_identities(
                 &inconsistent_array_identities,

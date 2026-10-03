@@ -1,5 +1,6 @@
 use super::FactCollector;
 use crate::inference::control_flow;
+use crate::inference::higher_order::LocalCallables;
 use crate::inference::type_tracker::TypeTracker;
 use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
@@ -45,7 +46,7 @@ impl Visit<'_> for FactCollector {
         }
         self.flow.local_callables = surviving
             .into_iter()
-            .reduce(Self::merge_local_callables)
+            .reduce(|left, right| LocalCallables::merge(&left, &right))
             .unwrap_or(before);
     }
 
@@ -75,7 +76,7 @@ impl Visit<'_> for FactCollector {
             (true, true) => before,
             (true, false) => else_callables,
             (false, true) => then_callables,
-            (false, false) => Self::merge_local_callables(then_callables, else_callables),
+            (false, false) => LocalCallables::merge(&then_callables, &else_callables),
         };
     }
 
@@ -105,7 +106,7 @@ impl Visit<'_> for FactCollector {
             (true, true) => before,
             (true, false) => else_callables,
             (false, true) => then_callables,
-            (false, false) => Self::merge_local_callables(then_callables, else_callables),
+            (false, false) => LocalCallables::merge(&then_callables, &else_callables),
         };
     }
 
@@ -168,7 +169,7 @@ impl Visit<'_> for FactCollector {
 
     fn visit_call_node(&mut self, node: &CallNode) {
         self.collect_nil_call_candidate(node);
-        self.invalidate_escaped_callables_in_call(node);
+        self.flow.local_callables.invalidate_escaped_in_call(node);
         self.process_call_node_entry(node);
         let mut prepared_higher_order = None;
         let extension_context = self.extensions.pending_block.take();

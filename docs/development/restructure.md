@@ -978,7 +978,22 @@ Delete this file when the last task is done. Git history keeps the record.
       (`receiverless_definition_kind`, `sent_definition_kind`) had a copy in
       each of the three walks and in `dynamic_definition_block`.
 - [ ] D2. Merge collector flow inference and `TypeTracker` into one `Flow`.
-      Compare the profiler output before and after.
+      Compare the profiler output before and after. Both walks keep running
+      (the collector also serves dependency sources, where the tracker does
+      not run), so the merge goes rule by rule, each a shared owner both
+      walks call with their own capture and method resolvers:
+  - [x] D2a. `higher_order::LocalCallables` owns flow-local proc bindings:
+        literal and alias assignment, escape invalidation, branch merge, and
+        bounded instantiation. `block_parameter_names` is shared.
+  - [ ] D2b. One pattern-capture typing for `case`/`in` (collector
+        `inference/flow.rs`, tracker `flow/patterns.rs`).
+  - [ ] D2c. One shape-read dispatch (`[]`, `fetch`, `dig`, `key?`, `keys`,
+        `values`, `each*`) in `inference::type::shape`.
+  - [ ] D2d. One RBS and analysis method-return resolution for a receiver
+        (collector `method_return.rs`, tracker `expressions/calls.rs`).
+  - [ ] D2e. Evaluate the collector consuming expression evidence the
+        tracker recorded instead of re-deriving it. Land only if dependency
+        collection and core indexing do not regress beyond noise.
 - [ ] D3. Rewrite `src/ARCHITECTURE.md`, the analysis README, and `AGENTS.md`
       ownership tables to match the final layout. Remove this plan.
 

@@ -211,7 +211,9 @@ impl TypeTracker {
     ) -> RubyType {
         // Get variable name
         let var_name = String::from_utf8_lossy(write.name().as_slice()).to_string();
-        self.invalidate_escaped_callables_in_value(&write.value());
+        self.environment
+            .callables
+            .invalidate_escaped_in_value(&write.value());
 
         // The RHS may raise before the local write commits. Every enclosing
         // rescue can therefore observe the prior value (or Ruby's implicit nil
@@ -252,18 +254,12 @@ impl TypeTracker {
         let dependency = value
             .as_call_node()
             .and_then(|call| self.return_term_dependency_for_call(&call));
-        if let Some(return_type) = self.infer_proc_literal_return_type(&value) {
-            self.bind_local_callable(var_name.clone(), return_type);
-        } else if let Some(alias) = value.as_local_variable_read_node() {
-            let alias_name = String::from_utf8_lossy(alias.name().as_slice()).to_string();
-            if let Some(callable) = self.environment.callables.get(&alias_name).cloned() {
-                self.bind_local_callable(var_name.clone(), callable);
-            } else {
-                self.environment.callables.remove(&var_name);
-            }
-        } else {
-            self.environment.callables.remove(&var_name);
-        }
+        let literal = crate::inference::higher_order::KnownProcType::from_literal(&value, || {
+            self.environment.types.keys().cloned().collect::<Vec<_>>()
+        });
+        self.environment
+            .callables
+            .assign(&var_name, literal, &value);
 
         if let Some((dependency, approximation)) = dependency.filter(|(dependency, _)| {
             !self.returns.inside_control_flow

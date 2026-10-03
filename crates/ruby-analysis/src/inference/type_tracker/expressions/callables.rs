@@ -1,140 +1,13 @@
-use crate::core::{FullyQualifiedName, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason};
+use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
 use crate::inference::control_flow;
+use crate::inference::higher_order::{block_parameter_names, KnownProcType};
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::TypeTracker;
-use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
-
-#[derive(Default)]
-struct EscapedCallableReadCollector {
-    names: HashSet<String>,
-}
-
-impl<'pr> Visit<'pr> for EscapedCallableReadCollector {
-    fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode<'pr>) {
-        self.names
-            .insert(String::from_utf8_lossy(node.name().as_slice()).to_string());
-    }
-
-    fn visit_call_node(&mut self, node: &CallNode<'pr>) {
-        if let Some(receiver) = node.receiver() {
-            let direct_invoke = node.name().as_slice() == b"call"
-                && receiver.as_local_variable_read_node().is_some();
-            if !direct_invoke {
-                self.visit(&receiver);
-            }
-        }
-        if let Some(arguments) = node.arguments() {
-            self.visit_arguments_node(&arguments);
-        }
-        if node
-            .block()
-            .is_some_and(|block| block.as_block_node().is_some())
-        {
-            self.visit(node.block().as_ref().expect("checked block presence"));
-        }
-    }
-}
+use std::collections::{BTreeSet, HashMap};
 
 impl TypeTracker {
-    pub(in crate::inference::type_tracker) fn invalidate_escaped_callables_in_value(
-        &mut self,
-        value: &Node<'_>,
-    ) {
-        if self.environment.callables.is_empty() {
-            return;
-        }
-        if crate::inference::callable_body::is_static_callable_literal(value)
-            || value.as_local_variable_read_node().is_some()
-        {
-            return;
-        }
-        let mut escaped = EscapedCallableReadCollector::default();
-        escaped.visit(value);
-        self.invalidate_callable_names(escaped.names);
-    }
-
-    pub(in crate::inference::type_tracker) fn invalidate_callable_names(
-        &mut self,
-        names: HashSet<String>,
-    ) {
-        for name in names {
-            let Some(identity) = self
-                .environment
-                .callables
-                .get(&name)
-                .map(|callable| callable.identity)
-            else {
-                continue;
-            };
-            for callable in self.environment.callables.values_mut() {
-                if callable.identity == identity {
-                    callable.summary = Err(UnknownReason::EscapedCallableValue);
-                }
-            }
-        }
-    }
-
-    pub(in crate::inference::type_tracker) fn invalidate_escaped_callables_in_call(
-        &mut self,
-        call: &CallNode<'_>,
-    ) {
-        if self.environment.callables.is_empty() {
-            return;
-        }
-        let mut escaped = EscapedCallableReadCollector::default();
-        if let Some(receiver) = call.receiver() {
-            let direct_invoke = call.name().as_slice() == b"call"
-                && receiver.as_local_variable_read_node().is_some();
-            if !direct_invoke {
-                escaped.visit(&receiver);
-            }
-        }
-        if let Some(arguments) = call.arguments() {
-            escaped.visit_arguments_node(&arguments);
-        }
-        if call
-            .block()
-            .is_some_and(|block| block.as_block_node().is_some())
-        {
-            escaped.visit(call.block().as_ref().expect("checked block presence"));
-        }
-        self.invalidate_callable_names(escaped.names);
-    }
-
-    pub(in crate::inference::type_tracker) fn bind_local_callable(
-        &mut self,
-        name: String,
-        mut callable: crate::inference::higher_order::KnownProcType,
-    ) {
-        if callable
-            .summary
-            .as_ref()
-            .is_ok_and(|summary| summary.captures.binary_search(&name).is_ok())
-        {
-            callable.summary = Err(UnknownReason::CallableRecursionUnsupported);
-        }
-        let alias_count = self
-            .environment
-            .callables
-            .iter()
-            .filter(|(existing_name, existing)| {
-                existing_name.as_str() != name && existing.identity == callable.identity
-            })
-            .count();
-        if alias_count >= crate::core::callables::callable_body::MAX_CALLABLE_BODY_ALIASES {
-            callable.summary = Err(UnknownReason::CallableBodyBoundExceeded);
-            for existing in self.environment.callables.values_mut() {
-                if existing.identity == callable.identity {
-                    existing.summary = Err(UnknownReason::CallableBodyBoundExceeded);
-                }
-            }
-        }
-        self.environment.callables.insert(name, callable);
-    }
-
     /// Infer one block body from an explicit environment and return the
     /// post-body value of each tracked parameter only when the same bounded
     /// mutable identity remains proven. This is the shared bridge used by the
@@ -296,23 +169,17 @@ impl TypeTracker {
             self.environment.callables.get(&name)?.clone()
         } else {
             match self.constant_callable_body_for_node(&expression)? {
-                Ok(summary) => crate::inference::higher_order::KnownProcType {
-                    identity: u32::MAX,
-                    summary: Ok(summary),
-                },
+                Ok(summary) => KnownProcType::constant(summary),
                 Err(_) => return None,
             }
         };
-        let mut stack = vec![callable.identity];
-        prepared
-            .finish_known_proc(
+        self.environment
+            .callables
+            .finish_block_argument(
+                prepared,
                 &callable,
-                |capture| self.environment.types.get(capture).cloned(),
-                |capture, arguments| {
-                    let nested = self.environment.callables.get(capture)?.clone();
-                    Some(self.instantiate_known_proc_with_stack(&nested, arguments, &mut stack))
-                },
-                |receiver, method, _arguments| {
+                &|capture| self.environment.types.get(capture).cloned(),
+                &|receiver, method| {
                     self.resolve_static_method_return_outcome(receiver, method.as_str())
                 },
             )
@@ -333,10 +200,7 @@ impl TypeTracker {
             self.environment.callables.get(&name)?.clone()
         } else {
             match self.constant_callable_body_for_node(&receiver)? {
-                Ok(summary) => crate::inference::higher_order::KnownProcType {
-                    identity: u32::MAX,
-                    summary: Ok(summary),
-                },
+                Ok(summary) => KnownProcType::constant(summary),
                 Err(_) => return None,
             }
         };
@@ -350,72 +214,18 @@ impl TypeTracker {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        self.instantiate_known_proc_with_stack(&callable, &argument_types, &mut Vec::new())
+        self.environment
+            .callables
+            .instantiate(
+                &callable,
+                &argument_types,
+                &|capture| self.environment.types.get(capture).cloned(),
+                &|receiver, method| {
+                    self.resolve_static_method_return_outcome(receiver, method.as_str())
+                },
+                &mut Vec::new(),
+            )
             .into_proven_type()
-    }
-
-    pub(in crate::inference::type_tracker) fn instantiate_known_proc_with_stack(
-        &self,
-        callable: &crate::inference::higher_order::KnownProcType,
-        arguments: &[RubyType],
-        stack: &mut Vec<u32>,
-    ) -> TypeInferenceOutcome {
-        if stack.contains(&callable.identity) {
-            return TypeInferenceOutcome::unknown(UnknownReason::CallableRecursionUnsupported);
-        }
-        if stack.len() >= crate::core::callables::callable_body::MAX_CALLABLE_BODY_INSTANTIATIONS {
-            return TypeInferenceOutcome::unknown(UnknownReason::CallableBodyBoundExceeded);
-        }
-        let summary = match &callable.summary {
-            Ok(summary) => summary,
-            Err(reason) => return TypeInferenceOutcome::unknown(*reason),
-        };
-        stack.push(callable.identity);
-        let result = crate::inference::callable_body::instantiate_callable_body(
-            summary,
-            arguments,
-            |capture| self.environment.types.get(capture).cloned(),
-            |capture, nested_arguments| {
-                let nested = self.environment.callables.get(capture)?.clone();
-                Some(self.instantiate_known_proc_with_stack(&nested, nested_arguments, stack))
-            },
-            |receiver, method, _arguments| {
-                self.resolve_static_method_return_outcome(receiver, method.as_str())
-            },
-        );
-        let popped = stack.pop().expect_invariant(
-            "callable instantiation stack underflowed",
-            "every accepted callable pushes exactly one identity",
-            "keep push/evaluate/pop in one function",
-        );
-        invariant_eq!(
-            popped,
-            callable.identity,
-            what = "callable instantiation stack order changed during evaluation",
-            why = "nested evaluation must be strictly LIFO",
-            fix = "do not retain or reorder stack entries",
-        );
-        result
-    }
-
-    pub(in crate::inference::type_tracker) fn infer_proc_literal_return_type(
-        &mut self,
-        value: &Node,
-    ) -> Option<crate::inference::higher_order::KnownProcType> {
-        crate::inference::callable_body::is_static_callable_literal(value).then(|| {
-            let outer_locals = self.environment.types.keys().cloned();
-            crate::inference::higher_order::KnownProcType {
-                identity: u32::try_from(value.location().start_offset()).expect_invariant(
-                    "callable literal offset exceeded u32",
-                    "analysis ranges already require u32 offsets",
-                    "reject oversized source before callable lowering",
-                ),
-                summary: crate::inference::callable_body::lower_callable_literal_with_outer_locals(
-                    value,
-                    outer_locals,
-                ),
-            }
-        })
     }
 
     pub(in crate::inference::type_tracker) fn infer_yielding_block_return_type(
@@ -484,53 +294,4 @@ impl TypeTracker {
 
         (return_type != RubyType::Unknown).then_some(return_type)
     }
-}
-pub(in crate::inference::type_tracker) fn block_parameter_names(
-    block: &BlockNode<'_>,
-) -> Vec<String> {
-    let Some(parameters_node) = block.parameters() else {
-        return Vec::new();
-    };
-    if let Some(numbered) = parameters_node.as_numbered_parameters_node() {
-        return numbered_parameter_names(numbered);
-    }
-    let Some(parameters) = parameters_node
-        .as_block_parameters_node()
-        .and_then(|node| node.parameters())
-    else {
-        return Vec::new();
-    };
-
-    let mut names = Vec::new();
-    for required in parameters.requireds().iter() {
-        if let Some(param) = required.as_required_parameter_node() {
-            names.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
-        }
-    }
-    for optional in parameters.optionals().iter() {
-        if let Some(param) = optional.as_optional_parameter_node() {
-            names.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
-        }
-    }
-    if let Some(rest) = parameters.rest() {
-        if let Some(param) = rest.as_rest_parameter_node() {
-            if let Some(name) = param.name() {
-                names.push(String::from_utf8_lossy(name.as_slice()).to_string());
-            }
-        }
-    }
-    for post in parameters.posts().iter() {
-        if let Some(param) = post.as_required_parameter_node() {
-            names.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
-        }
-    }
-    names
-}
-
-pub(in crate::inference::type_tracker) fn numbered_parameter_names(
-    params: NumberedParametersNode<'_>,
-) -> Vec<String> {
-    (1..=usize::from(params.maximum()))
-        .map(|index| format!("_{index}"))
-        .collect()
 }

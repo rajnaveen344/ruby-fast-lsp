@@ -14,7 +14,7 @@ use ruby_prism::*;
 impl TypeTracker {
     /// Infer the return type of a method call
     pub(in crate::inference::type_tracker) fn infer_call(&mut self, call: &CallNode) -> RubyType {
-        self.invalidate_escaped_callables_in_call(call);
+        self.environment.callables.invalidate_escaped_in_call(call);
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
 
         if let Some(higher_order_type) = self.infer_rbs_higher_order_call(call, &method_name) {
