@@ -14,7 +14,7 @@ use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId,
     SymbolFact, SymbolKind, TextRange,
 };
-use ruby_analysis::engine::{AnalysisEngine, ProjectNeutralFileFactsTemplate};
+use ruby_analysis::engine::{Project, ProjectNeutralFileFactsTemplate};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -55,7 +55,7 @@ fn manifest_with_inputs(
     closure_identities: &[String],
     seed_content: &str,
 ) -> GemDependencyManifest {
-    let mut seed_engine = AnalysisEngine::new();
+    let mut seed_engine = Project::new();
     let seed_file = seed_engine.register_file(ruby_analysis::engine::SourceFileInput {
         path: crate::test::harness::fixture_path("/stubs/cache_seed.rb"),
         content: seed_content.to_string(),
@@ -72,7 +72,7 @@ fn manifest_with_inputs(
         "CacheSeed"
     };
     let seed_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new(seed_constant).unwrap()]);
-    seed_engine.replace_facts(
+    seed_engine.update(
         seed_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -150,7 +150,7 @@ fn fresh_cache_load_rebinds_exact_path_and_corruption_recovers() {
     else {
         panic!("a fresh cache instance must load the published product");
     };
-    let mut second_engine = AnalysisEngine::new();
+    let mut second_engine = Project::new();
     second_product
         .bind_into(&second_manifest, &mut second_engine)
         .unwrap();

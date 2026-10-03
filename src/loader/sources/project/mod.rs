@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use navigation::project_file_matches_navigation_key;
 use parking_lot::Mutex;
 use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
+use ruby_analysis::engine::{Project, SourceFileSnapshot};
 use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -62,10 +62,10 @@ pub struct IndexerProject {
     pending_project_files: Option<Vec<PathBuf>>,
     processed_project_files: HashSet<PathBuf>,
     exhaustive_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
-    exhaustive_analysis_engine: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
+    exhaustive_semantic_context: Option<Arc<parking_lot::RwLock<Project>>>,
     exhaustive_collection_started: bool,
     jruby_replay_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
-    jruby_replay_analysis_engine: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
+    jruby_replay_semantic_context: Option<Arc<parking_lot::RwLock<Project>>>,
     project_navigation_started_at: Option<Instant>,
     project_file_total: Option<u64>,
     project_progress_generation: Option<u64>,
@@ -107,10 +107,10 @@ impl IndexerProject {
             pending_project_files: None,
             processed_project_files: HashSet::new(),
             exhaustive_known_namespaces: None,
-            exhaustive_analysis_engine: None,
+            exhaustive_semantic_context: None,
             exhaustive_collection_started: false,
             jruby_replay_known_namespaces: None,
-            jruby_replay_analysis_engine: None,
+            jruby_replay_semantic_context: None,
             project_navigation_started_at: None,
             project_file_total: None,
             project_progress_generation: None,

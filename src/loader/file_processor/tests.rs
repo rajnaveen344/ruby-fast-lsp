@@ -6,7 +6,7 @@ use ruby_analysis::core::{
     RubyMethod, RubyType, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
     TypeFact, TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SemanticChange};
+use ruby_analysis::engine::{Project, ResolveMode, SemanticChange};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -490,7 +490,7 @@ fn explicit_project_engine_owns_external_gem_source() {
 fn collect_gem_template_facts(source: &str) -> FileAnalysis {
     let server = RubyLanguageServer::default();
     let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
-    let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+    let producer_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     let dependency_uri = crate::test::harness::fixture_uri("/shared/gems/widget/lib/widget.rb");
     let template = processor
         .collect_project_neutral_file_template_as_deferred_resolution_in_engine(
@@ -550,7 +550,7 @@ fn gem_collection_persists_yard_method_returns() {
 fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
     let server = RubyLanguageServer::default();
     let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
-    let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+    let producer_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     let dependency_uri = crate::test::harness::fixture_uri("/shared/gems/widget/lib/widget.rb");
     let source = "class SharedWidget\n  def value\n    'cached'\n  end\nend\n";
 
@@ -564,7 +564,7 @@ fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
         )
         .unwrap();
 
-    let mut consumer = AnalysisEngine::new();
+    let mut consumer = Project::new();
     consumer.register_file(ruby_analysis::engine::SourceFileInput {
         path: crate::test::harness::fixture_path("/consumer/project.rb"),
         content: String::new(),
@@ -575,7 +575,7 @@ fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
         content: source.to_string(),
         kind: SourceKind::Gem,
     });
-    consumer.replace_facts(
+    consumer.update(
         dependency_file,
         template.instantiate(dependency_file),
         ResolveMode::Immediate,

@@ -30,7 +30,7 @@ use anyhow::Result;
 use log::warn;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use ruby_analysis::core::{SourceFileId, SourceKind};
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::stats::StatsRegistry;
 use std::path::{Path, PathBuf};
@@ -142,11 +142,11 @@ pub(crate) const CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES: u64 = 128 * MIB;
 const RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES: usize = 32;
 const RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES: u64 = MIB;
 
-fn new_core_engine_cache() -> BoundedSingleFlightCache<String, AnalysisEngine> {
+fn new_core_engine_cache() -> BoundedSingleFlightCache<String, Project> {
     BoundedSingleFlightCache::new(
         CORE_ENGINE_CACHE_MAX_ENTRIES,
         CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
-        |engine: &AnalysisEngine| {
+        |engine: &Project| {
             u64::try_from(engine.view().estimated_memory_stats().total()).expect_invariant(
                 "a core template heap estimate does not fit u64",
                 "one in-memory engine cannot exceed the process address space",
@@ -160,7 +160,7 @@ fn new_core_engine_cache() -> BoundedSingleFlightCache<String, AnalysisEngine> {
 /// share the same bounded caches; results are bound into isolated engines.
 #[derive(Clone)]
 pub struct SharedProducts {
-    core_templates: BoundedSingleFlightCache<String, AnalysisEngine>,
+    core_templates: BoundedSingleFlightCache<String, Project>,
     stdlib_paths: BoundedSingleFlightCache<RuntimeStdlibPathKey, RuntimeStdlibPaths>,
     gem_dependencies: BoundedSingleFlightCache<GemDependencyProductKey, GemDependencyProduct>,
     classpath_files: crate::environment::runtime::jruby::classpath::ClasspathFileProductCache,
@@ -186,7 +186,7 @@ impl SharedProducts {
             gem_bindings: Arc::default(),
         }
     }
-    pub(crate) fn core_templates(&self) -> &BoundedSingleFlightCache<String, AnalysisEngine> {
+    pub(crate) fn core_templates(&self) -> &BoundedSingleFlightCache<String, Project> {
         &self.core_templates
     }
     pub(crate) fn stdlib_paths(

@@ -17,7 +17,7 @@ use log::info;
 use parking_lot::RwLock;
 use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::engine::{
-    AnalysisEngine, ProjectNeutralFileFactsTemplate, ResolveMode, SemanticChange, SourceFileInput,
+    Project, ProjectNeutralFileFactsTemplate, ResolveMode, SemanticChange, SourceFileInput,
     SourceFileSnapshot, View,
 };
 use ruby_analysis::inference::semantics::Semantics;
@@ -32,10 +32,10 @@ pub struct NamedWrite(());
 /// loader-private scratch engine.
 pub trait LoadTarget: Send + Sync {
     /// Run `read` over the engine under one read guard.
-    fn read_engine(&self, read: &mut dyn FnMut(&AnalysisEngine));
+    fn read_engine(&self, read: &mut dyn FnMut(&Project));
     /// Run `write` over the engine under one write guard. Only the named
     /// operations on `dyn LoadTarget` can call this.
-    fn write_engine(&self, proof: NamedWrite, write: &mut dyn FnMut(&mut AnalysisEngine));
+    fn write_engine(&self, proof: NamedWrite, write: &mut dyn FnMut(&mut Project));
     /// Read-only semantics over this engine for a file walk.
     fn semantics(self: Arc<Self>) -> Arc<dyn Semantics>;
     /// The identity of the engine this target addresses: two targets address
@@ -44,12 +44,12 @@ pub trait LoadTarget: Send + Sync {
 }
 
 /// A loader-private scratch engine is its own target.
-impl LoadTarget for RwLock<AnalysisEngine> {
-    fn read_engine(&self, read: &mut dyn FnMut(&AnalysisEngine)) {
+impl LoadTarget for RwLock<Project> {
+    fn read_engine(&self, read: &mut dyn FnMut(&Project)) {
         read(&self.read());
     }
 
-    fn write_engine(&self, _proof: NamedWrite, write: &mut dyn FnMut(&mut AnalysisEngine)) {
+    fn write_engine(&self, _proof: NamedWrite, write: &mut dyn FnMut(&mut Project)) {
         write(&mut self.write());
     }
 
@@ -100,11 +100,11 @@ impl dyn LoadTarget + '_ {
     pub(crate) fn snapshot_with<T>(
         &self,
         select: impl FnOnce(&View<'_>) -> Option<T>,
-    ) -> Option<(AnalysisEngine, T)> {
+    ) -> Option<(Project, T)> {
         self.read(|engine| select(&engine.view()).map(|selected| (engine.clone(), selected)))
     }
 
-    fn read<R>(&self, read: impl FnOnce(&AnalysisEngine) -> R) -> R {
+    fn read<R>(&self, read: impl FnOnce(&Project) -> R) -> R {
         let mut read = Some(read);
         let mut result = None;
         self.read_engine(&mut |engine| {
@@ -122,7 +122,7 @@ impl dyn LoadTarget + '_ {
         )
     }
 
-    fn write<R>(&self, write: impl FnOnce(&mut AnalysisEngine) -> R) -> R {
+    fn write<R>(&self, write: impl FnOnce(&mut Project) -> R) -> R {
         let mut write = Some(write);
         let mut result = None;
         self.write_engine(NamedWrite(()), &mut |engine| {
@@ -148,13 +148,13 @@ impl dyn LoadTarget + '_ {
         resolution: FileResolution,
     ) -> SemanticChange {
         self.write(|engine| match resolution {
-            FileResolution::Full => engine.replace_facts(file_id, facts, ResolveMode::Immediate),
+            FileResolution::Full => engine.update(file_id, facts, ResolveMode::Immediate),
             FileResolution::CurrentFile => {
-                let semantic_change = engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+                let semantic_change = engine.update(file_id, facts, ResolveMode::Deferred);
                 engine.resolve_file(file_id);
                 semantic_change
             }
-            FileResolution::Deferred => engine.replace_facts(file_id, facts, ResolveMode::Deferred),
+            FileResolution::Deferred => engine.update(file_id, facts, ResolveMode::Deferred),
         })
     }
 
@@ -172,7 +172,7 @@ impl dyn LoadTarget + '_ {
                 return false;
             }
             engine
-                .replace_facts_if_source_snapshot(source_snapshot, facts, ResolveMode::Deferred)
+                .update_if_snapshot(source_snapshot, facts, ResolveMode::Deferred)
                 .is_some()
         })
     }
@@ -241,7 +241,7 @@ impl dyn LoadTarget + '_ {
 
     /// Register an empty project source at each path not yet registered,
     /// then return a copy of the engine taken under the same write guard.
-    pub(crate) fn register_project_paths_and_snapshot(&self, paths: &[PathBuf]) -> AnalysisEngine {
+    pub(crate) fn register_project_paths_and_snapshot(&self, paths: &[PathBuf]) -> Project {
         self.write(|engine| {
             for path in paths {
                 if engine.view().file_id(path).is_none() {
@@ -288,7 +288,7 @@ impl dyn LoadTarget + '_ {
     pub(crate) fn register_project_sources_if_snapshot(
         &self,
         candidates: &[ProjectSourceCandidate<'_>],
-        mirror: Option<&RwLock<AnalysisEngine>>,
+        mirror: Option<&RwLock<Project>>,
     ) -> Vec<Option<SourceFileSnapshot>> {
         self.write(|engine| {
             let mut mirror = mirror.map(RwLock::write);
@@ -354,7 +354,7 @@ impl dyn LoadTarget + '_ {
         self.write(|engine| {
             let file_id = engine.register_file_borrowed(path, content, SourceKind::Signature);
             let facts = index(file_id)?;
-            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            engine.update(file_id, facts, ResolveMode::Deferred);
             Ok(())
         })
     }
@@ -380,7 +380,7 @@ impl dyn LoadTarget + '_ {
                     PathFacts::Facts(facts) => facts,
                     PathFacts::Template(template) => template.instantiate(file_id),
                 };
-                engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+                engine.update(file_id, facts, ResolveMode::Deferred);
             }
             if resolve {
                 engine.resolve();
@@ -390,7 +390,7 @@ impl dyn LoadTarget + '_ {
 
     /// Resolve every deferred registration in the engine.
     pub(crate) fn resolve(&self) {
-        self.write(AnalysisEngine::resolve);
+        self.write(Project::resolve);
     }
 
     /// Resolve the references of `file_ids` only.
@@ -400,12 +400,12 @@ impl dyn LoadTarget + '_ {
 
     /// Release spare capacity once a load completes.
     pub(crate) fn compact(&self) {
-        self.write(AnalysisEngine::shrink_to_fit);
+        self.write(Project::shrink_to_fit);
     }
 
     /// Install `template` when the engine holds no file yet. Returns whether
     /// it was installed.
-    pub(crate) fn install_template_if_empty(&self, template: &AnalysisEngine) -> bool {
+    pub(crate) fn install_template_if_empty(&self, template: &Project) -> bool {
         self.write(|engine| {
             if engine.view().file_count() != 0 {
                 return false;

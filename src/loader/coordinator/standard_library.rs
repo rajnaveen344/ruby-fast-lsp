@@ -11,7 +11,7 @@ use crate::loader::sources::stdlib::IndexerStdlib;
 use crate::utils::admission::{IndexingResourcePriority, IndexingWorkSpec};
 use anyhow::Result;
 use log::info;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -89,7 +89,7 @@ impl IndexingCoordinator {
         &self,
         ctx: &LoadContext,
         ruby_version: Option<RubyVersion>,
-    ) -> Result<AnalysisEngine> {
+    ) -> Result<Project> {
         let analysis_engine = self.load_target(ctx);
         let extension_path = self.config.extension_path.clone();
         let key = format!(
@@ -117,7 +117,7 @@ impl IndexingCoordinator {
                         None,
                         move || {
                             let template_engine =
-                                Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+                                Arc::new(parking_lot::RwLock::new(Project::new()));
                             let mut indexer = IndexerStdlib::new(
                                 crate::loader::file_processor::FileProcessor::new(),
                                 ruby_version,

@@ -51,7 +51,7 @@ impl IndexerProject {
             "replayed files use the same context as provider-aware batches",
             "keep the generation baseline through completion; consume it once in replay",
         );
-        let semantic_read_engine = self.jruby_replay_analysis_engine.take().expect_invariant(
+        let semantic_read_engine = self.jruby_replay_semantic_context.take().expect_invariant(
             "JRuby replay has no immutable pre-collection semantic engine",
             "providerless and provider-aware collection see the same facts",
             "keep the collection baseline through replay; consume it once",
@@ -185,7 +185,7 @@ impl IndexerProject {
 
     pub(crate) fn discard_jruby_replay_semantic_context(&mut self) {
         let known_namespaces = self.jruby_replay_known_namespaces.take();
-        let semantic_engine = self.jruby_replay_analysis_engine.take();
+        let semantic_engine = self.jruby_replay_semantic_context.take();
         invariant_eq!(
             known_namespaces.is_some(),
             semantic_engine.is_some(),

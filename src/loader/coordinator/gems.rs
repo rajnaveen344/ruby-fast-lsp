@@ -12,7 +12,7 @@ use crate::loader::sources::gems::IndexerGem;
 use anyhow::{anyhow, Result};
 use futures::stream::{self, StreamExt};
 use log::info;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -133,7 +133,7 @@ impl IndexingCoordinator {
         cancellation: Option<CancellationToken>,
         analysis_engine: Arc<dyn LoadTarget>,
         gem_indexer: IndexerGem,
-        dependency_seed: AnalysisEngine,
+        dependency_seed: Project,
         priority_keys: HashSet<String>,
         excluded_gems: HashSet<String>,
         navigation_demands: Option<(

@@ -75,7 +75,7 @@ calls them in its own order, so the owner observes the load's write sequence.
 Engine reads and writes go through the `LoadTarget` that
 `LoadSink::target_for_uri` returns for a project. The trait is defined here and
 the server implements it for `ProjectHandle`; a scratch engine
-(`parking_lot::RwLock<AnalysisEngine>`) implements it too, for semantic
+(`parking_lot::RwLock<Project>`) implements it too, for semantic
 contexts and dependency products the loader builds privately. The loader
 writes only through the named operations on `dyn LoadTarget`: fact replacement
 (`replace_file_facts`, `replace_facts_by_path`, and

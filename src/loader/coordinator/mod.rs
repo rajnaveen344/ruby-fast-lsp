@@ -19,7 +19,7 @@ use log::info;
 pub(crate) use priority::dependency_priority_key;
 use priority::open_project_constant_priority_keys;
 use resources::{release_allocator_free_pages, run_cpu_indexing_task, IndexingWorkClass};
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -90,7 +90,7 @@ pub struct IndexingCoordinator {
 
     // The main indexing engine
     file_processor: Option<FileProcessor>,
-    dependency_seed_engine: Option<AnalysisEngine>,
+    dependency_seed_engine: Option<Project>,
 
     // Project-specific indexer
     project_indexer: Option<IndexerProject>,

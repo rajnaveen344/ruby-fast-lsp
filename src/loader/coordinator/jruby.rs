@@ -30,7 +30,7 @@ use crate::utils::persistent_cache::{PersistentDerivedProductCache, PersistentPr
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -416,7 +416,7 @@ fn index_jruby_runtime_sources_blocking(
     user_cache_root_override: Option<PathBuf>,
     processor: FileProcessor,
     analysis_engine: Arc<dyn LoadTarget>,
-    dependency_seed_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+    dependency_seed_engine: Arc<parking_lot::RwLock<Project>>,
 ) -> Result<()> {
     let cache_root = jruby_cache_root_for_project(
         &workspace_root,
@@ -473,7 +473,7 @@ impl IndexingCoordinator {
     pub(super) async fn index_jruby_runtime_sources_off_reactor(
         &self,
         ctx: &LoadContext,
-        dependency_seed_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        dependency_seed_engine: Arc<parking_lot::RwLock<Project>>,
     ) -> Result<()> {
         let Some(artifact) = self.jruby_runtime_archive.clone() else {
             return Ok(());

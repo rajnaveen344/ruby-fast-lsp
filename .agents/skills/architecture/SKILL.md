@@ -16,7 +16,7 @@ and `docs/development/server-state.md`; follow their source links as needed.
    `src/features/` converts context and responses behind `handle(server, params)`;
    it must not introduce a second semantic resolution policy. `src/lsp/` only
    routes protocol messages and runs the document lifecycle.
-3. Read through `AnalysisQuery`; write through the existing file-fact
+3. Read through `View`; write through the existing file-fact
    lifecycle. Expose domain operations, not mutable stores. Engine and inference
    can cooperate inside the analysis crate while preserving engine state ownership.
 4. Preserve source snapshots, project isolation, lock lifetimes, resource

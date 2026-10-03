@@ -13,7 +13,7 @@ use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
 use ruby_analysis::core::{FileAnalysis, FullyQualifiedName};
-use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileSnapshot};
+use ruby_analysis::engine::{Project, ResolveMode, SourceFileSnapshot};
 use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -77,7 +77,7 @@ impl IndexerProject {
             "all project files read one immutable semantic context",
             "initialize the baseline before the first file; keep it to completion",
         );
-        let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect_invariant(
+        let semantic_context_engine = self.exhaustive_semantic_context.clone().expect_invariant(
             "exhaustive project collection has no immutable pre-collection read engine",
             "project writes must not feed later fact construction",
             "initialize the baseline before the first file; keep it to completion",
@@ -102,7 +102,7 @@ impl IndexerProject {
             fix = "replay or discard the completed generation before starting another project pass",
         );
         invariant!(
-            self.jruby_replay_analysis_engine
+            self.jruby_replay_semantic_context
                 .replace(semantic_context_engine)
                 .is_none(),
             what =
@@ -110,7 +110,7 @@ impl IndexerProject {
             why = "one IndexerProject cannot retain read context from two generations",
             fix = "replay or discard the completed generation before starting another project pass",
         );
-        self.exhaustive_analysis_engine = None;
+        self.exhaustive_semantic_context = None;
         info!(
             "Exhaustive project fact collection completed in {:?} for {} file(s). Found {} stdlib \
              deps, {} gem deps",
@@ -163,7 +163,7 @@ impl IndexerProject {
             "every demanded and exhaustive batch belongs to one project generation",
             "keep the baseline until finish_remaining_project_facts",
         );
-        let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect_invariant(
+        let semantic_context_engine = self.exhaustive_semantic_context.clone().expect_invariant(
             "bounded project batch has no immutable pre-collection read engine",
             "demand and batch boundaries must not affect facts",
             "initialize the baseline first; keep it through finish_remaining_project_facts",
@@ -261,7 +261,7 @@ impl IndexerProject {
             "the baseline and pending tail have one lifecycle",
             "retain both until the deterministic batch loop finishes",
         );
-        let semantic_context_engine = self.exhaustive_analysis_engine.take().expect_invariant(
+        let semantic_context_engine = self.exhaustive_semantic_context.take().expect_invariant(
             "exhaustive project completion has no immutable semantic read engine",
             "the context and pending tail have one lifecycle",
             "retain both until every deterministic batch is consumed",
@@ -275,7 +275,7 @@ impl IndexerProject {
             fix = "finish the prior replay before completing another project pass",
         );
         invariant!(
-            self.jruby_replay_analysis_engine
+            self.jruby_replay_semantic_context
                 .replace(semantic_context_engine)
                 .is_none(),
             what = "project completion replaced an unconsumed JRuby replay semantic engine",
@@ -322,7 +322,7 @@ impl IndexerProject {
         ctx: &LoadContext,
         resolve_open_documents: bool,
         known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
-        semantic_context_engine: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
+        semantic_context_engine: Option<Arc<parking_lot::RwLock<Project>>>,
     ) -> Result<()> {
         info!("Collecting facts in one parallel pass");
 
@@ -452,7 +452,7 @@ impl IndexerProject {
                         // identity because the seed below addresses them by
                         // path, so this is an empty update rather than a removal.
                         for file_id in stale_file_ids {
-                            snapshot.replace_facts(
+                            snapshot.update(
                                 file_id,
                                 FileAnalysis::default(),
                                 ResolveMode::Deferred,

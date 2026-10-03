@@ -439,7 +439,7 @@ impl IndexerStdlib {
                 unreachable_invariant!(
                     what = "stdlib collision lookup found file id {:?} for {} without a registered source file",
                     why = "file-path and file-record ownership must be updated atomically",
-                    fix = "preserve the AnalysisEngine file lifecycle",
+                    fix = "preserve the Project file lifecycle",
                     file_id,
                     path.display(),
                 )

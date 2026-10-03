@@ -3,7 +3,7 @@ use crate::utils::persistent_cache::{PersistentProduct, PersistentProductKind};
 use anyhow::{anyhow, Result};
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{
-    AnalysisEngine, ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate, ResolveMode,
+    Project, ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate, ResolveMode,
     SemanticExportFingerprint, SourceFileInput,
 };
 use ruby_analysis::stats::{self, StatsRegistry};
@@ -380,7 +380,7 @@ impl GemDependencyProduct {
     pub(crate) fn bind_into(
         &self,
         manifest: &GemDependencyManifest,
-        engine: &mut AnalysisEngine,
+        engine: &mut Project,
     ) -> Result<Vec<Url>> {
         Ok(self.bind_into_measured(manifest, engine)?.uris)
     }
@@ -389,7 +389,7 @@ impl GemDependencyProduct {
     fn bind_into_measured(
         &self,
         manifest: &GemDependencyManifest,
-        engine: &mut AnalysisEngine,
+        engine: &mut Project,
     ) -> Result<GemDependencyBinding> {
         let validation_started = Instant::now();
         if self.key != manifest.key {
@@ -446,7 +446,7 @@ impl GemDependencyProduct {
                 },
                 source.library_package(),
             );
-            engine.replace_facts(
+            engine.update(
                 file_id,
                 template.facts.instantiate(file_id),
                 ResolveMode::Deferred,
@@ -466,7 +466,7 @@ impl GemDependencyProduct {
     pub fn bind_owned_deferred_into_measured(
         &self,
         manifest: GemDependencyManifest,
-        engine: &mut AnalysisEngine,
+        engine: &mut Project,
     ) -> Result<GemDependencyBinding> {
         self.bind_owned_into_measured_with_resolution(manifest, engine, false)
     }
@@ -474,7 +474,7 @@ impl GemDependencyProduct {
     fn bind_owned_into_measured_with_resolution(
         &self,
         manifest: GemDependencyManifest,
-        engine: &mut AnalysisEngine,
+        engine: &mut Project,
         resolve: bool,
     ) -> Result<GemDependencyBinding> {
         let validation_started = Instant::now();
@@ -532,7 +532,7 @@ impl GemDependencyProduct {
                 },
                 package,
             );
-            engine.replace_facts(
+            engine.update(
                 file_id,
                 template.facts.instantiate(file_id),
                 ResolveMode::Deferred,
@@ -687,7 +687,7 @@ mod tests {
     use ruby_analysis::engine::ProjectNeutralFileFactsTemplate;
 
     fn empty_seed() -> SemanticExportFingerprint {
-        AnalysisEngine::new().view().semantic_context_fingerprint()
+        Project::new().view().semantic_context_fingerprint()
     }
 
     fn source(path: &str, physical: &str, content: &str) -> GemDependencySource {
@@ -747,7 +747,7 @@ mod tests {
         .unwrap();
         assert_ne!(first.key(), changed_batch.key());
 
-        let mut seed_engine = AnalysisEngine::new();
+        let mut seed_engine = Project::new();
         let seed_file = seed_engine.register_file(SourceFileInput {
             path: crate::test::harness::fixture_path("/seed.rb"),
             content: "class Seed; end".to_string(),
@@ -755,7 +755,7 @@ mod tests {
         });
         let seed_range = TextRange::new(seed_file, 0, 12);
         let seed_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Seed").unwrap()]);
-        seed_engine.replace_facts(
+        seed_engine.update(
             seed_file,
             FileAnalysis {
                 symbols: vec![SymbolFact::new(seed_fqn, SymbolKind::Class, seed_range)],
@@ -886,9 +886,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut first = AnalysisEngine::new();
+        let mut first = Project::new();
         product.bind_into(&first_manifest, &mut first).unwrap();
-        let mut second = AnalysisEngine::new();
+        let mut second = Project::new();
         second.register_file(SourceFileInput {
             path: crate::test::harness::fixture_path("/projects/two/project.rb"),
             content: String::new(),
@@ -934,7 +934,7 @@ mod tests {
         .unwrap();
         product.files.clear();
 
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let error = product.bind_into(&manifest, &mut engine).unwrap_err();
 
         assert!(error

@@ -1,6 +1,6 @@
 use super::*;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{AnalysisEngine, SourceFileInput};
+use ruby_analysis::engine::{Project, SourceFileInput};
 
 #[test]
 fn finds_static_require_string_under_cursor() {
@@ -155,7 +155,7 @@ fn require_prefers_configured_load_path_before_lib() {
 
 #[test]
 fn require_can_resolve_engine_registered_virtual_files() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let path = PathBuf::from("/project/lib/foo.rb");
     engine.register_file(SourceFileInput {
         path: path.clone(),
@@ -416,7 +416,7 @@ fn reresolve_keeps_require_relative_kind_from_the_stored_message() {
 
 #[test]
 fn reresolve_clears_from_engine_indexed_files_without_disk() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let gem_lib = PathBuf::from("/gems/demo-1.0.0/lib");
     let path = gem_lib.join("platform/helpers/json.rb");
     engine.register_file(SourceFileInput {
@@ -461,7 +461,7 @@ fn engine_present_build_skips_unindexed_disk_files() {
     std::fs::create_dir_all(&gem_lib).unwrap();
     std::fs::write(&disk_only, "# disk\n").unwrap();
     std::fs::write(&engine_path, "# engine\n").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     engine.register_file(SourceFileInput {
         path: engine_path.clone(),
         content: "# engine\n".to_string(),

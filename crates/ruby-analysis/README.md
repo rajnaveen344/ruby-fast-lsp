@@ -9,7 +9,7 @@ the module that owns it.
 | `core` | Names, source identities, byte ranges, types, semantic facts, and the per-file analysis value | `FileAnalysis`, `RubyType`, `TextRange`, `SourceFileId`, `MethodFact` |
 | `indexer` | Parse source and collect file-owned facts | `AnalysisIndexer`, `fact_collector::FactCollector`, `index_rbs` |
 | `inference` | Derive types from expressions, flow, calls, and signatures | `type_tracker::TypeTracker`, `method`, `rbs` |
-| `engine` | Own project state, resolve facts, and answer semantic queries | `AnalysisEngine`, `AnalysisQuery` |
+| `engine` | Own project state, resolve facts, and answer semantic queries | `Project`, `View` |
 | `stats` | Named counters and timers for profiler, log, and test evidence | `stat_set!`, `StatsRegistry`, `StatsSnapshot` |
 
 `RubyType` belongs to `core`, including when inference produces it. Engine
@@ -64,39 +64,39 @@ owners and traversal flow.
 
 ```rust
 use ruby_analysis::core::{FileAnalysis, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use ruby_analysis::engine::{Project, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer::AnalysisIndexer;
 
-let mut engine = AnalysisEngine::new();
+let mut project = Project::new();
 let source = "class Lantern; end";
-let file_id = engine.register_file(SourceFileInput {
+let file_id = project.register_file(SourceFileInput {
     path: "lantern.rb".into(),
     content: source.into(),
     kind: SourceKind::Project,
 });
 let analysis = AnalysisIndexer::new(file_id).index_source(source);
-engine.update(file_id, analysis, ResolveMode::Immediate);
+project.update(file_id, analysis, ResolveMode::Immediate);
 
-assert_eq!(engine.view().symbol_facts_in_file(file_id).len(), 1);
+assert_eq!(project.view().symbol_facts_in_file(file_id).len(), 1);
 
 // Replacing a file also removes its old semantic facts.
-let edited_id = engine.register_file(SourceFileInput {
+let edited_id = project.register_file(SourceFileInput {
     path: "lantern.rb".into(),
     content: String::new(),
     kind: SourceKind::Project,
 });
 assert_eq!(edited_id, file_id);
-engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-assert!(engine.view().symbol_facts_in_file(file_id).is_empty());
+project.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+assert!(project.view().symbol_facts_in_file(file_id).is_empty());
 ```
 
-Use deferred replacement followed by one `engine.resolve()` for a batch. Delayed
+Use deferred replacement followed by one `project.resolve()` for a batch. Delayed
 background producers must retain `SourceFileSnapshot` and use
 `update_if_snapshot`; an obsolete producer cannot replace newer
 source facts.
 
-`AnalysisEngine` exposes writes and `view()`; every read goes through the
-`AnalysisQuery` it returns (`engine.view().file_id(path)`). A view reads an
+`Project` exposes writes and `view()`; every read goes through the
+`View` it returns (`project.view().file_id(path)`). A view reads an
 engine snapshot, including file-scoped type facts (`type_at`,
 `local_variable_type_at`), statistics, and fingerprints; it does not trigger
 inference or copy stores. During collection, extensions use `FactCollector::add_type_fact` and
@@ -112,9 +112,9 @@ use ruby_analysis::core::TypeStore;
 ```
 
 ```compile_fail
-use ruby_analysis::engine::AnalysisEngine;
-let engine = AnalysisEngine::new();
-let storage = engine.type_store();
+use ruby_analysis::engine::Project;
+let project = Project::new();
+let storage = project.type_store();
 ```
 
 ```compile_fail

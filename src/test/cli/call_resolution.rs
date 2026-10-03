@@ -263,15 +263,15 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
 
     let unchanged_equation = format!("{even_source}# body-independent edit\n");
     editor.set("cycle_even.rb", &unchanged_equation).await;
-    let analysis_engine = editor
+    let project_handle = editor
         .server()
         .project_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
-    let even_file_id = analysis_engine
+    let even_file_id = project_handle
         .test_read()
         .view()
         .file_id(&crate::test::harness::fixture_path("/cycle_even.rb"))
         .expect("cycle fixture must be registered in the analysis engine");
-    let equations_before_unchanged_edit = analysis_engine
+    let equations_before_unchanged_edit = project_handle
         .test_read()
         .view()
         .method_return_equations_in_file(even_file_id)
@@ -279,7 +279,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         .to_vec();
     editor.set("cycle_even.rb", &unchanged_equation).await;
     assert_eq!(
-        analysis_engine
+        project_handle
             .test_read()
             .view()
             .method_return_equations_in_file(even_file_id)
@@ -288,7 +288,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         "a body-independent edit must not alter the method-return equation IR"
     );
     assert_eq!(
-        analysis_engine
+        project_handle
             .test_read()
             .view()
             .last_resolve_stats()
@@ -310,7 +310,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         "class Cycle\n  def even(n)\n    return 1 if n.zero?\n    odd(n - 1)\n  end\nend\n";
     editor.set("cycle_even.rb", integer_even_source).await;
     assert_eq!(
-        analysis_engine
+        project_handle
             .test_read()
             .view()
             .last_resolve_stats()

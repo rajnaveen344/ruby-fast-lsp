@@ -6,7 +6,7 @@ use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeKind, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod,
     RubyType,
 };
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -24,7 +24,7 @@ fn bundled_jruby_core_seed_is_cross_process_stable() {
             )),
         );
         indexer.set_extension_path(extension_root);
-        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        let engine = Arc::new(RwLock::new(Project::new()));
         indexer
             .index_core_stubs_blocking(engine.clone())
             .expect("bundled JRuby core stubs must index");
@@ -78,7 +78,7 @@ async fn bundled_ruby_25_signatures_match_observed_runtime_arities() {
     let extension_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("editors/vscode/vsix");
     let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(2, 5)));
     indexer.set_extension_path(extension_root);
-    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let engine = Arc::new(RwLock::new(Project::new()));
     indexer
         .index_core_stubs(engine.clone())
         .await
@@ -204,7 +204,7 @@ async fn every_supported_jruby_series_composes_its_exact_runtime_overlay() {
             )),
         );
         indexer.set_extension_path(extension.path().to_path_buf());
-        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        let engine = Arc::new(RwLock::new(Project::new()));
         indexer.index_core_stubs(engine.clone()).await.unwrap();
 
         let java_import = FullyQualifiedName::method(
@@ -254,7 +254,7 @@ async fn bundled_stub_navigation_retains_source_positions() {
     fs::write(&path, "# 😀\nclass Thread\nend\n").unwrap();
     let mut indexer = IndexerStdlib::new(FileProcessor::new(), None);
     indexer.set_extension_path(extension.path().to_path_buf());
-    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let engine = Arc::new(RwLock::new(Project::new()));
     indexer.index_core_stubs(engine.clone()).await.unwrap();
     let engine = engine.read();
     let ranges = engine
@@ -299,7 +299,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
 
     let mut indexer = IndexerStdlib::new(FileProcessor::new(), None);
     indexer.set_extension_path(extension.path().to_path_buf());
-    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let engine = Arc::new(RwLock::new(Project::new()));
 
     indexer
         .index_core_stubs(engine.clone())
@@ -406,7 +406,7 @@ fn runtime_stdlib_cannot_replace_bundled_stub_ownership() {
     fs::write(&path, "class RuntimeProbe\nend\n").expect("stdlib fixture must be written");
 
     let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(3, 0)));
-    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let engine = Arc::new(RwLock::new(Project::new()));
     indexer
         .index_stub_files_deterministically(std::slice::from_ref(&path), engine.clone())
         .expect("stub fixture must index");
@@ -483,7 +483,7 @@ fn runtime_stdlib_deferred_collection_leaves_resolution_to_the_coordinator() {
     let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(3, 0)));
     indexer.stdlib_paths.push(fixture.path().to_path_buf());
     indexer.add_required_module("runtime_probe/root".to_string());
-    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let engine = Arc::new(RwLock::new(Project::new()));
 
     indexer
         .index_required_modules_blocking_with_resolution(engine.clone(), false)
@@ -573,7 +573,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         )),
     );
     jruby_indexer.set_extension_path(extension.path().to_path_buf());
-    let jruby_engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let jruby_engine = Arc::new(RwLock::new(Project::new()));
     jruby_indexer
         .index_core_stubs(jruby_engine.clone())
         .await
@@ -675,7 +675,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
 
     let mut mri_indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(2, 5)));
     mri_indexer.set_extension_path(extension.path().to_path_buf());
-    let mri_engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    let mri_engine = Arc::new(RwLock::new(Project::new()));
     mri_indexer
         .index_core_stubs(mri_engine.clone())
         .await

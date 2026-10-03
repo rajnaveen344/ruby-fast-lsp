@@ -54,9 +54,3 @@ pub use state::{
     AnalysisStat, Project, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,
 };
-
-/// Former name of [`Project`]; kept while callers migrate.
-pub type AnalysisEngine = Project;
-
-/// Former name of [`View`]; kept while callers migrate.
-pub type AnalysisQuery<'a> = View<'a>;

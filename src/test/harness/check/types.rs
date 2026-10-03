@@ -185,7 +185,7 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
 }
 
 fn latest_variable_type(
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::Project,
     subject_matches: impl Fn(&TypeSubject) -> bool,
 ) -> Option<RubyType> {
     engine

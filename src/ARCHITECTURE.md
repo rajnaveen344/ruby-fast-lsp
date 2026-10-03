@@ -44,7 +44,7 @@ representations remain internal.
 
 Engine resolution invokes inference's AST-free constant and method-return
 solvers and stores their outcomes. Inference may consult engine queries, but
-lookup policy and file replacement remain engine-owned. `AnalysisQuery`
+lookup policy and file replacement remain engine-owned. `View`
 borrows engine state; callers never clone or obtain a
 store to read it. Profiler representation sizes are detached numeric evidence.
 
@@ -170,7 +170,7 @@ its nearest nested Gemfile roots unless `indexing.projectRoots` explicitly
 defines non-overlapping roots. `.git` is never a project marker. Discovery and
 workspace-folder ownership live in `src/`, not `ruby-analysis`.
 
-Each registered project owns an `Arc<RwLock<AnalysisEngine>>`. Document,
+Each registered project owns an `Arc<RwLock<Project>>`. Document,
 watcher, hierarchy, rename, completion, diagnostics, and extension queries use
 the engine selected by longest project-root prefix. Files outside every project
 use a separate orphan engine. Workspace-symbol search is the intentional
@@ -393,7 +393,7 @@ product has three distinct layers:
 3. **Project binding** in `src/loader`: register the requesting project's exact
    source path/content/kind, instantiate every template with that engine's file
    ID, validate provenance and source precedence, then use the ordinary
-   `AnalysisEngine::update` lifecycle.
+   `Project::update` lifecycle.
 
 `ProjectNeutralFileFactsTemplate` is the first engine primitive for this
 boundary. It accepts only ranges owned by one template source and rejects
@@ -507,7 +507,7 @@ responsibilities, shared lifetimes, and test boundaries.
   analysis module imports or depends on `tower-lsp`.
 - The server delegates actual implementation to feature modules
 - Server clones share owner handles and preserve existing lock identities.
-  Each project still owns a separate `AnalysisEngine`; unowned documents use
+  Each project still owns a separate `Project`; unowned documents use
   the registry's orphan engine. Open buffers are distinct from indexed facts.
 - No `RubyLanguageServer` field is publicly accessible outside the library.
   Six use `pub(crate)` for sibling-module callers; routing, diagnostics, watched
@@ -708,7 +708,7 @@ from its effective runtime selection.
 4. The loader finds all Ruby files and processes each one:
    - Parse the file using Ruby Prism
    - Traverse the AST once to collect facts and candidates
-   - Replace that file's facts in `AnalysisEngine`
+   - Replace that file's facts in `Project`
 
 ### 2. Go to Definition
 
@@ -731,7 +731,7 @@ from its effective runtime selection.
    - Asks the loader to reindex the file
 3. Loader:
    - Parses the updated content
-   - Replaces that file's facts in `AnalysisEngine`
+   - Replaces that file's facts in `Project`
    - Recomputes engine diagnostics
    - Compares an engine-owned semantic export fingerprint that excludes method
      bodies, source ranges, references, locals, and diagnostics
@@ -790,7 +790,7 @@ Features use the Query Engine as their primary data service:
 - The Indexer builds an in-memory index for fast lookups
 - Document changes trigger targeted reindexing
 - Analysis is performed on-demand rather than eagerly
-- `AnalysisEngine::update` records a deterministic per-file semantic
+- `Project::update` records a deterministic per-file semantic
   export fingerprint and reports initial, body-only, or exported-API change.
 - Shared symbol/type subject indexes retain deterministic `(SourceFileId,
   range...)` ordering without re-sorting an existing bucket for every file.

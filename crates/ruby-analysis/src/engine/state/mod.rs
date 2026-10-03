@@ -150,7 +150,7 @@ pub struct Project {
 
 static NEXT_ANALYSIS_ENGINE_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 
-fn next_analysis_engine_instance_id() -> u64 {
+fn next_project_instance_id() -> u64 {
     NEXT_ANALYSIS_ENGINE_INSTANCE_ID
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(1)
@@ -167,7 +167,7 @@ fn next_analysis_engine_instance_id() -> u64 {
 impl Default for Project {
     fn default() -> Self {
         Self {
-            instance_id: next_analysis_engine_instance_id(),
+            instance_id: next_project_instance_id(),
             semantic_revision: 0,
             files: Files::default(),
             names: Names::default(),
@@ -185,7 +185,7 @@ impl Default for Project {
 impl Clone for Project {
     fn clone(&self) -> Self {
         Self {
-            instance_id: next_analysis_engine_instance_id(),
+            instance_id: next_project_instance_id(),
             semantic_revision: self.semantic_revision,
             files: self.files.clone(),
             names: self.names.clone(),

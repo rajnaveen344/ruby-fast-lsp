@@ -156,10 +156,10 @@ impl IndexerProject {
         self.project_file_total = None;
         self.project_file_completed.store(0, Ordering::Relaxed);
         self.exhaustive_known_namespaces = None;
-        self.exhaustive_analysis_engine = None;
+        self.exhaustive_semantic_context = None;
         self.exhaustive_collection_started = false;
         self.jruby_replay_known_namespaces = None;
-        self.jruby_replay_analysis_engine = None;
+        self.jruby_replay_semantic_context = None;
 
         let mut project_files = self.collect_project_files()?;
         let all_project_files = project_files.clone();
@@ -195,18 +195,19 @@ impl IndexerProject {
                 "every project file must use one generation-owned semantic universe",
                 "initialize the baseline before collecting the first project batch",
             );
-        let collection_analysis_engine = self.exhaustive_analysis_engine.clone().expect_invariant(
-            "project collection baseline has no analysis engine after initialization",
-            "every project file must use one generation-owned semantic universe",
-            "initialize the baseline before collecting the first project batch",
-        );
+        let collection_semantic_context =
+            self.exhaustive_semantic_context.clone().expect_invariant(
+                "project collection baseline has no analysis engine after initialization",
+                "every project file must use one generation-owned semantic universe",
+                "initialize the baseline before collecting the first project batch",
+            );
         self.collect_facts_and_track_dependencies(
             &selection.files,
             selection.files.len(),
             ctx,
             true,
             Some(collection_known_namespaces),
-            Some(collection_analysis_engine),
+            Some(collection_semantic_context),
         )?;
         self.record_processed_project_files(&selection.files, ctx.sink.as_ref());
         self.pending_project_navigation_files = Some(ruby_files);
@@ -248,7 +249,7 @@ impl IndexerProject {
                 "frontier ordering must not change collected facts",
                 "retain the baseline through project completion",
             )),
-            Some(self.exhaustive_analysis_engine.clone().expect_invariant(
+            Some(self.exhaustive_semantic_context.clone().expect_invariant(
                 "active project frontier lost the generation-owned analysis baseline",
                 "frontier ordering must not change collected facts",
                 "retain the baseline through project completion",

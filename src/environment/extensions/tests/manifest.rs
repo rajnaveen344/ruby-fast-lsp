@@ -56,7 +56,7 @@ frame = true
 /// already holds the seed for this applicability.
 fn produced_seed(
     registry: &ExtensionRegistryHandle,
-    engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    engine: &Arc<RwLock<ruby_analysis::engine::Project>>,
     project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
 ) -> Option<ExtensionSemanticSeed> {
     let mut produced = None;
@@ -84,9 +84,9 @@ fn semantic_seed_facts_are_produced_for_every_applicable_isolated_project_engine
         ..RubyFastLspConfig::default()
     };
     let registry = ExtensionRegistryHandle::from_config(&config);
-    let first = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
-    let second = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
-    let ineligible = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+    let first = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
+    let second = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
+    let ineligible = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
     let project = |project_uri: &str, version: &str| ruby_fast_lsp_extension_api::ProjectContext {
         project_uri: project_uri.to_string(),
         source_uri: format!("{project_uri}/spec/example_spec.rb"),
@@ -183,8 +183,7 @@ fn cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh() {
         true,
         Some("3.3.0".to_string()),
     );
-    let engine: Arc<dyn Send + Sync> =
-        Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+    let engine: Arc<dyn Send + Sync> = Arc::new(RwLock::new(ruby_analysis::engine::Project::new()));
 
     let eligible = seed.context_snapshot(
         "file:///umbrella/app/spec/example_spec.rb".to_string(),

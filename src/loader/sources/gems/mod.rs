@@ -115,7 +115,7 @@ pub struct IndexerGem {
     java_home: Option<PathBuf>,
     cached_gem_root_override: Option<PathBuf>,
     file_processor: Option<FileProcessor>,
-    dependency_seed_engine: Option<ruby_analysis::engine::AnalysisEngine>,
+    dependency_seed_engine: Option<ruby_analysis::engine::Project>,
     runtime_provider_fingerprint: Option<String>,
     discovery_stage: GemDiscoveryStage,
 }
@@ -157,7 +157,7 @@ impl IndexerGem {
 
     pub fn set_dependency_seed_engine(
         &mut self,
-        dependency_seed_engine: ruby_analysis::engine::AnalysisEngine,
+        dependency_seed_engine: ruby_analysis::engine::Project,
     ) {
         self.dependency_seed_engine = Some(dependency_seed_engine);
     }

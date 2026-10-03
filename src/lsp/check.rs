@@ -3,7 +3,7 @@
 //! This module owns filesystem discovery and terminal/JSON-ready projection.
 //! Runtime/project loading, parsing, fact collection, method lookup, inference,
 //! and semantic diagnostics remain in the same `IndexingCoordinator`,
-//! `FileProcessor`, and `AnalysisEngine` used by the LSP.
+//! `FileProcessor`, and `Project` used by the LSP.
 
 use crate::environment::config::{IndexingConfig, RubyFastLspConfig};
 use crate::invariant::ExpectInvariant;

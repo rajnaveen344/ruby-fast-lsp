@@ -21,7 +21,7 @@ use crate::loader::require_paths::RequireFeatureIndex;
 use parking_lot::RwLock;
 use ruby_analysis::core::{DiagnosticFact, FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::engine::{
-    AnalysisEngine, ResolveMode, SourceFile, SourceFileInput, SourceFileSnapshot, View,
+    Project, ResolveMode, SourceFile, SourceFileInput, SourceFileSnapshot, View,
 };
 use ruby_analysis::inference::semantics::Semantics;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ProjectHandle {
-    engine: Arc<RwLock<AnalysisEngine>>,
+    engine: Arc<RwLock<Project>>,
     /// Runtime selection, detected Ruby version, and JRuby add-on, each under
     /// its own lock and never under the engine guard.
     runtime: ProjectRuntimeState,
@@ -39,7 +39,7 @@ pub struct ProjectHandle {
 }
 
 impl ProjectHandle {
-    pub(crate) fn new(engine: AnalysisEngine) -> Self {
+    pub(crate) fn new(engine: Project) -> Self {
         Self {
             engine: Arc::new(RwLock::new(engine)),
             runtime: ProjectRuntimeState::default(),
@@ -99,7 +99,7 @@ impl ProjectHandle {
 
     /// Apply one owner write to the project's engine. Writes are serialized;
     /// readers observe either the state before or after the whole closure.
-    pub fn update<R>(&self, write: impl FnOnce(&mut AnalysisEngine) -> R) -> R {
+    pub fn update<R>(&self, write: impl FnOnce(&mut Project) -> R) -> R {
         write(&mut self.engine.write())
     }
 
@@ -122,13 +122,13 @@ impl ProjectHandle {
 
     /// Resolve the whole project after deferred registrations.
     pub fn resolve(&self) {
-        self.update(AnalysisEngine::resolve);
+        self.update(Project::resolve);
     }
 
     /// Replace the project's semantic state with an empty engine before a
     /// full rebuild.
     pub fn reset(&self) {
-        self.update(|engine| *engine = AnalysisEngine::new());
+        self.update(|engine| *engine = Project::new());
     }
 
     /// Remove the file registered at `path`, of any kind. Returns whether a
@@ -243,24 +243,24 @@ impl ProjectHandle {
     /// Test-only owned read guard, for assertions that inspect engine state
     /// across many statements. Production readers use [`Self::view`].
     #[cfg(test)]
-    pub(crate) fn test_read(&self) -> ArcRwLockReadGuard<RawRwLock, AnalysisEngine> {
+    pub(crate) fn test_read(&self) -> ArcRwLockReadGuard<RawRwLock, Project> {
         self.engine.read_arc()
     }
 
     /// Test-only owned write guard, for fixtures that seed engine state
     /// directly. Production writers use [`Self::update`].
     #[cfg(test)]
-    pub(crate) fn test_write(&self) -> ArcRwLockWriteGuard<RawRwLock, AnalysisEngine> {
+    pub(crate) fn test_write(&self) -> ArcRwLockWriteGuard<RawRwLock, Project> {
         self.engine.write_arc()
     }
 }
 
 impl LoadTarget for ProjectHandle {
-    fn read_engine(&self, read: &mut dyn FnMut(&AnalysisEngine)) {
+    fn read_engine(&self, read: &mut dyn FnMut(&Project)) {
         read(&self.engine.read());
     }
 
-    fn write_engine(&self, _proof: NamedWrite, write: &mut dyn FnMut(&mut AnalysisEngine)) {
+    fn write_engine(&self, _proof: NamedWrite, write: &mut dyn FnMut(&mut Project)) {
         self.update(|engine| write(engine));
     }
 
@@ -274,7 +274,7 @@ impl LoadTarget for ProjectHandle {
 }
 
 fn registered_file_of_kind(
-    engine: &AnalysisEngine,
+    engine: &Project,
     path: &Path,
     kind: SourceKind,
 ) -> Option<SourceFileId> {

@@ -2,7 +2,7 @@ use crate::loader::context::{CORE_ENGINE_CACHE_MAX_ENTRIES, CORE_ENGINE_CACHE_MA
 use crate::utils::single_flight::SingleFlightStat;
 
 use crate::server::RubyLanguageServer;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use std::sync::Arc;
 
 #[test]
@@ -52,7 +52,7 @@ async fn core_engine_template_retention_is_bounded_by_entries_and_estimated_heap
             .products
             .core_templates()
             .get_or_try_init(format!("core-{index}"), || async {
-                Ok(ruby_analysis::engine::AnalysisEngine::new())
+                Ok(ruby_analysis::engine::Project::new())
             })
             .await
             .unwrap();
@@ -83,9 +83,7 @@ async fn server_ownership_clones_reuse_products_with_one_ordinary_cache_root() {
     let first = server
         .products
         .core_templates()
-        .get_or_try_init("shared-core".to_string(), || async {
-            Ok(AnalysisEngine::new())
-        })
+        .get_or_try_init("shared-core".to_string(), || async { Ok(Project::new()) })
         .await
         .unwrap();
     let second = clone

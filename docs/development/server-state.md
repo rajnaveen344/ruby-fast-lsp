@@ -11,7 +11,7 @@ handlers; the server keeps state and state operations only and imports neither
 `crate::lsp` nor `crate::features`. The cached namespace-tree response is the engine's
 `NamespaceTreeResponse`; the request parameters stay with the namespace-tree feature. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
-[AnalysisEngine](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
+[Project](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
 project, with a separate orphan project for unowned documents.
 
 Each project's engine is reached only through a
@@ -115,9 +115,9 @@ flowchart TD
     LSP[Editor requests and notifications] --> Service[lsp/service.rs: protocol facade] --> Server[RubyLanguageServer: state owners]
     Server --> Documents[OpenDocuments: buffers and lifecycle locks]
     Server --> Projects[ProjectRegistry: routing and provenance]
-    Projects --> A[Project A: isolated AnalysisEngine]
-    Projects --> B[Project B: isolated AnalysisEngine]
-    Projects --> Orphan[Unowned documents: orphan AnalysisEngine]
+    Projects --> A[Project A: isolated engine::Project]
+    Projects --> B[Project B: isolated engine::Project]
+    Projects --> Orphan[Unowned documents: orphan engine::Project]
     Server --> Services[Indexing, runtime products, extensions]
     Server --> Output[Diagnostic and status publishers, namespace tree]
 ```

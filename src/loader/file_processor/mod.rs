@@ -473,7 +473,7 @@ impl AnalyzedFile {
             .expect_invariant(
                 "processed file has no semantic export fingerprint",
                 "every engine fact replacement must record its exported API",
-                "route final file facts through AnalysisEngine::replace_facts",
+                "route final file facts through Project::update",
             );
         let semantic_change =
             SemanticChange::classify(previous_export_fingerprint, current_export_fingerprint);

@@ -436,7 +436,7 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
                 .semantic_export_fingerprint(first_signature_id)
                 .expect_invariant(
                     "generated First signature has no export fingerprint",
-                    "every indexed signature enters through replace_facts",
+                    "every indexed signature enters through Project::update",
                     "retain the ordinary file-owned signature lifecycle in the fixture",
                 ),
             engine.view().semantic_result_fingerprint(),

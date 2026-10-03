@@ -1,6 +1,6 @@
 use super::*;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use ruby_analysis::engine::{Project, ResolveMode, SourceFileInput};
 use ruby_fast_lsp_jvm_metadata::{
     locate_java_source_declarations, parse_class, ClassLimits, JavaSourceLimits,
 };
@@ -331,7 +331,7 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
     let location = locate_java_source_declarations(&class, source, JavaSourceLimits::default())
         .expect("checked source must parse")
         .expect("checked source must match the class");
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/external/fixtures/RichFixture.java"),
         content: source.to_string(),

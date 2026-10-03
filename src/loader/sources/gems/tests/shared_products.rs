@@ -29,11 +29,11 @@ fn shared_dependency_indexer(project_root: &Path, gem_root: &Path) -> IndexerGem
         }],
     );
     indexer.set_file_processor(FileProcessor::new());
-    indexer.set_dependency_seed_engine(AnalysisEngine::new());
+    indexer.set_dependency_seed_engine(Project::new());
     indexer
 }
 
-fn assert_shared_dependency_semantics(engine: &AnalysisEngine, expected_path: &Path) {
+fn assert_shared_dependency_semantics(engine: &Project, expected_path: &Path) {
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("SharedWidget").unwrap()]);
     let method = RubyMethod::new("label").unwrap();
     let query = engine.view();
@@ -82,7 +82,7 @@ fn ordinary_gem_products_ignore_unrelated_jruby_classpaths_but_java_gems_do_not(
     first.set_runtime_provider_fingerprint(Some("classpath-a".to_string()));
     let mut second = shared_dependency_indexer(&second_project, &second_gem);
     second.set_runtime_provider_fingerprint(Some("classpath-b".to_string()));
-    let seed = AnalysisEngine::new().view().semantic_context_fingerprint();
+    let seed = Project::new().view().semantic_context_fingerprint();
     let first_key = first.required_gem_manifests(seed).unwrap()[0].key().clone();
     let second_key = second.required_gem_manifests(seed).unwrap()[0]
         .key()
@@ -145,8 +145,8 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     let second_indexer = shared_dependency_indexer(&second_project, &second_gem);
     let server = RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
         .expect("construct isolated cache server");
-    let first_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
-    let second_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+    let first_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
+    let second_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
 
     let ctx = server.load_context_for_project(fixture.path());
     let (first_result, second_result) = tokio::join!(
@@ -186,7 +186,7 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
         second_path
     );
 
-    first_engine.write().replace_facts(
+    first_engine.write().update(
         first_file_id,
         FileAnalysis::default(),
         ResolveMode::Immediate,
@@ -202,7 +202,7 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     assert_shared_dependency_semantics(&second_engine.read(), &second_path);
 
     let third_indexer = shared_dependency_indexer(&third_project, &third_gem);
-    let third_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+    let third_engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     assert_eq!(
         third_indexer
             .index_required_gems_with_shared_product(
@@ -292,7 +292,7 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     });
     runtime_started_rx.await.unwrap();
 
-    let engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+    let engine = Arc::new(parking_lot::RwLock::new(Project::new()));
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         indexer.index_required_gems_with_shared_product(

@@ -26,7 +26,7 @@ impl IndexerProject {
             why = "every project file reads one immutable generation engine",
             fix = "initialize the baseline first; validate it after the frontier, before the first tail batch",
         );
-        let snapshot = self.exhaustive_analysis_engine.as_ref().expect_invariant(
+        let snapshot = self.exhaustive_semantic_context.as_ref().expect_invariant(
             "project completion lost the pre-collection semantic baseline",
             "rebuilding it later makes results depend on navigation demand",
             "initialize one baseline before collecting any project file",
@@ -61,7 +61,8 @@ impl IndexerProject {
         project_files: &[PathBuf],
     ) -> Result<()> {
         invariant!(
-            self.exhaustive_known_namespaces.is_none() && self.exhaustive_analysis_engine.is_none(),
+            self.exhaustive_known_namespaces.is_none()
+                && self.exhaustive_semantic_context.is_none(),
             what = "one project generation initialized its semantic collection baseline twice",
             why = "every Ruby file must read exactly one immutable pre-collection universe",
             fix = "clear the prior generation before starting project collection",
@@ -102,7 +103,7 @@ impl IndexerProject {
         // below addresses them by path; the live engine is untouched, so this
         // is an empty update rather than a removal.
         for file_id in stale_project_file_ids {
-            snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
+            snapshot.update(file_id, FileAnalysis::default(), ResolveMode::Deferred);
         }
         let semantic_context = Arc::new(parking_lot::RwLock::new(snapshot));
         let semantic_target: Arc<dyn LoadTarget> = semantic_context.clone();
@@ -153,7 +154,7 @@ impl IndexerProject {
                         path.display(),
                     )
                 });
-                engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+                engine.update(file_id, facts, ResolveMode::Deferred);
                 seeded = true;
             }
             if seeded {
@@ -190,7 +191,7 @@ impl IndexerProject {
             known_namespaces.len()
         );
         self.exhaustive_known_namespaces = Some(known_namespaces);
-        self.exhaustive_analysis_engine = Some(semantic_context);
+        self.exhaustive_semantic_context = Some(semantic_context);
         Ok(())
     }
 

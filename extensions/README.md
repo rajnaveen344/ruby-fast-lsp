@@ -23,9 +23,9 @@ flowchart TD
 
     Patches --> Validate[Core validates patch\nnamespaces, method names, ABI version]
     Validate --> Apply[Core applies to analysis facts]
-    Apply --> Engine[AnalysisEngine]
+    Apply --> Engine[Project]
 
-    Engine --> Query[AnalysisQuery]
+    Engine --> Query[View]
     Query --> LspFeatures[LSP features\ngoto, refs, hover, completion,\ndiagnostics]
 ```
 
@@ -35,7 +35,7 @@ sequenceDiagram
     participant H as Extension Host
     participant A as crates/extension-api
     participant R as Extension
-    participant I as AnalysisEngine
+    participant I as Project
 
     V->>H: process_call_node(CallNode)
     H->>R: indexed_call_names()

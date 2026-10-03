@@ -2,9 +2,10 @@
 
 `mod.rs` preserves the public API: register source and replace a file's
 `core::FileAnalysis` through `Project`, then read domain results through
-`View`. `AnalysisEngine` and `AnalysisQuery` remain as type aliases of
-`Project` and `View` until the remaining callers migrate. The engine has no
-per-file type of its own; `update` takes the core value. `remove` (and
+`View`, which `Project::view()` returns. `Project` keeps writes (`update`,
+`update_if_snapshot`, `remove`, `remove_if_snapshot`), `resolve*`, and
+`view()`. The engine has no per-file type of its own; `update` takes the core
+value. `remove` (and
 `remove_if_snapshot`) drops a file from every component and from `Files`;
 file ids are never reissued, so snapshots of a removed file stay stale.
 Implementation folders are private to the engine.

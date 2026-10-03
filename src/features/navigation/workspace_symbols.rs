@@ -116,13 +116,13 @@ mod tests {
         FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
         SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
     };
-    use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+    use ruby_analysis::engine::{Project, ResolveMode, SourceFileInput};
 
     use super::*;
 
-    fn engine_with_analysis_symbols() -> AnalysisEngine {
+    fn engine_with_analysis_symbols() -> Project {
         let source = "class User\n  def name\n  end\nend";
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: crate::test::harness::fixture_path("/tmp/user.rb"),
             content: source.into(),
@@ -132,7 +132,7 @@ mod tests {
             file_id,
             SourceFileId(0),
             what = "first test analysis file id changed",
-            why = "this test assumes a fresh AnalysisEngine",
+            why = "this test assumes a fresh Project",
             fix = "update the expected file id or avoid asserting it",
         );
 
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_symbols_can_read_analysis_engine_without_index_entries() {
+    fn workspace_symbols_can_read_project_without_index_entries() {
         let engine = engine_with_analysis_symbols();
 
         let symbols = search_symbols(&engine.view(), "name");
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn top_level_symbols_can_read_analysis_engine_without_index_entries() {
+    fn top_level_symbols_can_read_project_without_index_entries() {
         let engine = engine_with_analysis_symbols();
 
         let symbols = top_level_symbols(&engine.view());

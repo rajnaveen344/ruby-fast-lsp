@@ -103,29 +103,6 @@ impl Project {
         self.remove(snapshot.file_id, mode)
     }
 
-    /// Former name of [`Project::update`]; removed once loader callers migrate.
-    #[inline]
-    pub fn replace_facts(
-        &mut self,
-        file_id: SourceFileId,
-        facts: FileAnalysis,
-        mode: ResolveMode,
-    ) -> SemanticChange {
-        self.update(file_id, facts, mode)
-    }
-
-    /// Former name of [`Project::update_if_snapshot`]; removed once loader
-    /// callers migrate.
-    #[inline]
-    pub fn replace_facts_if_source_snapshot(
-        &mut self,
-        expected_snapshot: SourceFileSnapshot,
-        facts: FileAnalysis,
-        mode: ResolveMode,
-    ) -> Option<SemanticChange> {
-        self.update_if_snapshot(expected_snapshot, facts, mode)
-    }
-
     pub fn resolve(&mut self) {
         let mut stats = StatsSnapshot::default();
         let graph_retry_started = Instant::now();

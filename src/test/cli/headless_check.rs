@@ -32,7 +32,7 @@ greet
             .any(|diagnostic| diagnostic.code.as_deref() == Some("wrong-arity")),
         what = "the headless check session did not report the engine's wrong-arity diagnostic",
         why = "CLI and LSP must consume the same semantic facts without starting an LSP client",
-        fix = "route check inputs through the shared FileProcessor and AnalysisEngine lifecycle",
+        fix = "route check inputs through the shared FileProcessor and Project lifecycle",
     );
 }
 

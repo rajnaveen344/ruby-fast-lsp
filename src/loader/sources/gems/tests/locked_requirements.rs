@@ -191,7 +191,7 @@ fn required_gem_manifest_preparation_is_lazy_and_root_first() {
 
     let names = indexer.required_gems_with_dependencies();
     assert_eq!(names, ["first", "later"]);
-    let seed = AnalysisEngine::new().view().semantic_context_fingerprint();
+    let seed = Project::new().view().semantic_context_fingerprint();
     let first_manifest = indexer
         .required_gem_manifest("first", seed)
         .unwrap()

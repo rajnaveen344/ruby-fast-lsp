@@ -25,7 +25,7 @@ pub(super) const GEM_PRODUCT_TRANSIENT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 
 fn build_gem_dependency_product(
     manifest: &GemDependencyManifest,
-    dependency_seed: ruby_analysis::engine::AnalysisEngine,
+    dependency_seed: ruby_analysis::engine::Project,
     processor: FileProcessor,
 ) -> Result<GemDependencyProduct> {
     let producer_engine = std::sync::Arc::new(parking_lot::RwLock::new(dependency_seed));

@@ -139,7 +139,7 @@ Delete this file when the last task is done. Git history keeps the record.
   commit changes the gem producer fingerprint in `build.rs`, which forces one
   cold gem reindex; that is expected. Semantic fingerprints must hash the same
   data in the same order (`state/tests/fingerprints.rs`).
-- [ ] B4. Reduce `AnalysisEngine` to `Project` with `update`, `remove`,
+- [x] B4. Reduce `AnalysisEngine` to `Project` with `update`, `remove`,
       `resolve`, and `view`.
   - [x] B4a. Rename `AnalysisEngine` to `Project` and `AnalysisQuery` to
         `View`; keep `pub type` aliases in `engine/mod.rs` until C1 lands.
@@ -197,7 +197,7 @@ Delete this file when the last task is done. Git history keeps the record.
         they withhold facts on a private snapshot whose seed addresses the
         same files by path, and no file leaves the project there. Unreadable
         or unparsable files that still exist also stay registered and empty.
-  - [ ] B4h. Remove the aliases; update the engine and crate READMEs.
+  - [x] B4h. Remove the aliases; update the engine and crate READMEs.
 - [x] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
       the method-lookup variants with it.
   - [x] B5a. Add `engine/lookup/` with `MethodRequest { receiver, method,

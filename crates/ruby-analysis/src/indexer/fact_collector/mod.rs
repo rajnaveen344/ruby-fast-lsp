@@ -51,11 +51,11 @@ impl FactCollector {
     pub fn analysis_only(
         document: RubyDocument,
         extension_host: Arc<dyn FactCollectorExtensionHost>,
-        analysis_engine: Arc<dyn Semantics>,
+        project_semantics: Arc<dyn Semantics>,
     ) -> Self {
         // Each mid-walk read goes through the walk handle; the shared engine
         // takes its own short read guard per read.
-        let semantics = SemanticContext::new(&document, analysis_engine);
+        let semantics = SemanticContext::new(&document, project_semantics);
         Self {
             document,
             scope_tracker: ScopeTracker::new(),

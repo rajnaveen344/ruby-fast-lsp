@@ -15,7 +15,7 @@ use crate::loader::scheduling::status::{IndexingRun, ProjectIndexingStatus};
 pub use handle::ProjectHandle;
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::Project;
 use ruby_fast_lsp_extension_api::ProjectContext;
 pub use runtime::ProjectRuntimeState;
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
 fn new_orphan_project() -> ProjectHandle {
-    let project = ProjectHandle::new(AnalysisEngine::new());
+    let project = ProjectHandle::new(Project::new());
     crate::loader::sources::stdlib::IndexerStdlib::new(
         crate::loader::file_processor::FileProcessor::new(),
         None,
@@ -76,7 +76,7 @@ impl Workspace {
             root_uri,
             indexing_status: Arc::new(ProjectIndexingStatus::new(root_path.clone())),
             root_path,
-            handle: ProjectHandle::new(AnalysisEngine::new()),
+            handle: ProjectHandle::new(Project::new()),
             extension_project_context_seed,
             navigation_demands: NavigationDemandController::default(),
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([

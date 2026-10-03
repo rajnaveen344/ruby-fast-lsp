@@ -6,7 +6,7 @@ use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, ReferenceCandidateKind, RubyConstant, RubyType,
     SourceFileId, SourceKind, SymbolKind, TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{AnalysisEngine, SourceFileInput};
+use ruby_analysis::engine::{Project, SourceFileInput};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_jvm_metadata::{
@@ -88,7 +88,7 @@ fn collect_with_catalog(source: &str, catalog: Arc<ProjectJavaCatalog>) -> FactC
 fn collect_with_provider(source: &str, provider: Arc<JrubyImportProvider>) -> FactCollector {
     let path = crate::test::harness::fixture_path("/workspace/admin/imports.rb");
     let uri = Url::from_file_path(&path).expect("fixture path must be a file URI");
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path,
         content: source.to_string(),

@@ -58,7 +58,7 @@ returns `Unknown[callable_body_bound_exceeded]`.
 The indexer lowers the already parsed Prism tree once into a compact
 `CallableBodySummary`; it retains no AST node or source instruction. Local
 identities stay in bounded flow state. Capture-free constants become ordinary
-file-owned inference facts, resolve through `AnalysisQuery`, and participate in
+file-owned inference facts, resolve through `View`, and participate in
 semantic fingerprints and persistent dependency products.
 
 One inference evaluator binds Ruby arity, resolves captures, applies canonical
