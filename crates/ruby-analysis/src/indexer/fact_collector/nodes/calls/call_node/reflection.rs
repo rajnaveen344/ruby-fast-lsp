@@ -94,10 +94,6 @@ impl FactCollector {
                 }
                 None => (current_namespace, NamespaceKind::Instance),
             },
-            b"delegate" | b"def_delegator" | b"def_delegators" | b"class_attribute"
-            | b"attr_reader" | b"attr_writer" | b"attr_accessor" | b"module_function"
-            | b"alias_method" | b"define_method" | b"include" | b"prepend" | b"extend"
-            | b"send" | b"public_send" | b"__send__" => return,
             _ => return,
         };
 

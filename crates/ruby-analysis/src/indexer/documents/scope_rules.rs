@@ -235,6 +235,38 @@ pub fn eval_block(
     })
 }
 
+/// The side a receiverless `define_method` or `define_singleton_method`
+/// call defines on. `define_method` directly in a `class << self` body
+/// defines a singleton method; in a block or method body it defines on the
+/// instance side of the namespace `self` names.
+pub fn receiverless_definition_kind(
+    name: &[u8],
+    scope_tracker: &ScopeTracker,
+) -> Option<NamespaceKind> {
+    match name {
+        b"define_method"
+            if !scope_tracker.execution_context_active() && scope_tracker.in_singleton() =>
+        {
+            Some(NamespaceKind::Singleton)
+        }
+        b"define_method" => Some(NamespaceKind::Instance),
+        b"define_singleton_method" => Some(NamespaceKind::Singleton),
+        _ => None,
+    }
+}
+
+/// The side `receiver.send(:selector, ...)` defines a method on.
+/// `define_method` is private, so `public_send` cannot call it.
+pub fn sent_definition_kind(sender: &[u8], selector: &str) -> Option<NamespaceKind> {
+    match (sender, selector) {
+        (b"send" | b"__send__", "define_method") => Some(NamespaceKind::Instance),
+        (b"send" | b"public_send" | b"__send__", "define_singleton_method") => {
+            Some(NamespaceKind::Singleton)
+        }
+        _ => None,
+    }
+}
+
 /// A `define_method`/`define_singleton_method` block, called directly or
 /// through `send`. `self` inside the block is the defined method's receiver;
 /// a `def` inside it still lands in the enclosing definition owner.
@@ -245,20 +277,10 @@ pub fn dynamic_definition_block(
 ) -> Option<BlockExecution> {
     node.block()?;
     let (implicit_namespace, implicit_kind) = match node.receiver() {
-        None => {
-            let kind = match node.name().as_slice() {
-                b"define_method"
-                    if !scope_tracker.execution_context_active()
-                        && scope_tracker.in_singleton() =>
-                {
-                    NamespaceKind::Singleton
-                }
-                b"define_method" => NamespaceKind::Instance,
-                b"define_singleton_method" => NamespaceKind::Singleton,
-                _ => return None,
-            };
-            (implicit_singleton_namespace(scope_tracker)?, kind)
-        }
+        None => (
+            implicit_singleton_namespace(scope_tracker)?,
+            receiverless_definition_kind(node.name().as_slice(), scope_tracker)?,
+        ),
         Some(receiver) if node.name().as_slice() == b"define_singleton_method" => {
             (resolve_receiver(&receiver)?, NamespaceKind::Singleton)
         }
@@ -270,14 +292,7 @@ pub fn dynamic_definition_block(
         {
             let arguments = node.arguments()?;
             let selector = static_name(&arguments.arguments().iter().next()?)?;
-            let kind = match selector.as_str() {
-                "define_method" => NamespaceKind::Instance,
-                "define_singleton_method" => NamespaceKind::Singleton,
-                _ => return None,
-            };
-            if node.name().as_slice() == b"public_send" && kind == NamespaceKind::Instance {
-                return None;
-            }
+            let kind = sent_definition_kind(node.name().as_slice(), &selector)?;
             (resolve_receiver(&receiver)?, kind)
         }
         Some(_) => return None,

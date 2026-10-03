@@ -5,7 +5,8 @@ use crate::core::{
     TypeSubject,
 };
 use crate::indexer::documents::scope_rules::{
-    implicit_singleton_namespace, resolve_receiver_namespace,
+    implicit_singleton_namespace, receiverless_definition_kind, resolve_receiver_namespace,
+    sent_definition_kind,
 };
 use ruby_prism::{CallNode, Node};
 
@@ -22,16 +23,12 @@ impl FactCollector {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-        if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+        let Some(namespace) = implicit_singleton_namespace(&self.scope_tracker) else {
             return;
-        }
-        let owner_kind = if !self.scope_tracker.execution_context_active()
-            && self.scope_tracker.in_singleton()
-        {
-            NamespaceKind::Singleton
-        } else {
-            NamespaceKind::Instance
+        };
+        let Some(owner_kind) = receiverless_definition_kind(b"define_method", &self.scope_tracker)
+        else {
+            return;
         };
         self.direct_push_method_fact_with_visibility(
             namespace.clone(),
@@ -102,10 +99,8 @@ impl FactCollector {
         else {
             return;
         };
-        let owner_kind = match selector.as_str() {
-            "define_method" if node.name().as_slice() != b"public_send" => NamespaceKind::Instance,
-            "define_singleton_method" => NamespaceKind::Singleton,
-            _ => return,
+        let Some(owner_kind) = sent_definition_kind(node.name().as_slice(), &selector) else {
+            return;
         };
         let Some(receiver) = node.receiver() else {
             return;

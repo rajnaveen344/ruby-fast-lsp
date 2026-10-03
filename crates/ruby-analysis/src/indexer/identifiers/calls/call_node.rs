@@ -3,6 +3,9 @@ use ruby_prism::{CallNode, Node};
 use crate::core::MethodReceiver;
 use crate::core::RubyType;
 use crate::core::{NamespaceKind, RubyConstant, RubyMethod};
+use crate::indexer::documents::scope_rules::{
+    implicit_singleton_namespace, receiverless_definition_kind, sent_definition_kind,
+};
 use crate::indexer::{queries::syntax, Identifier, LVScopeKind};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
@@ -259,34 +262,15 @@ impl IdentifierVisitor<'_> {
 
     fn process_define_method_symbol(&mut self, node: &CallNode) -> bool {
         let (name_index, namespace, owner_kind) = if node.receiver().is_none() {
-            match node.name().as_slice() {
-                b"define_method" => (
-                    0,
-                    {
-                        let (namespace, receiver_kind) =
-                            self.scope_tracker.implicit_receiver_context();
-                        if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
-                            return false;
-                        }
-                        namespace
-                    },
-                    if !self.scope_tracker.execution_context_active()
-                        && self.scope_tracker.in_singleton()
-                    {
-                        NamespaceKind::Singleton
-                    } else {
-                        NamespaceKind::Instance
-                    },
-                ),
-                b"define_singleton_method" => {
-                    let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-                    if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
-                        return false;
-                    }
-                    (0, namespace, NamespaceKind::Singleton)
-                }
-                _ => return false,
-            }
+            let Some(owner_kind) =
+                receiverless_definition_kind(node.name().as_slice(), &self.scope_tracker)
+            else {
+                return false;
+            };
+            let Some(namespace) = implicit_singleton_namespace(&self.scope_tracker) else {
+                return false;
+            };
+            (0, namespace, owner_kind)
         } else {
             let Some(receiver) = node.receiver() else {
                 return false;
@@ -300,12 +284,9 @@ impl IdentifierVisitor<'_> {
                     let Some((selector, _)) = call_arg_name_and_location(node, 0) else {
                         return false;
                     };
-                    let owner_kind = match selector.as_str() {
-                        "define_method" if node.name().as_slice() != b"public_send" => {
-                            NamespaceKind::Instance
-                        }
-                        "define_singleton_method" => NamespaceKind::Singleton,
-                        _ => return false,
+                    let Some(owner_kind) = sent_definition_kind(node.name().as_slice(), &selector)
+                    else {
+                        return false;
                     };
                     (1, namespace, owner_kind)
                 }
@@ -634,10 +615,6 @@ impl IdentifierVisitor<'_> {
                 );
                 true
             }
-            b"delegate" | b"def_delegator" | b"def_delegators" | b"class_attribute"
-            | b"attr_reader" | b"attr_writer" | b"attr_accessor" | b"module_function"
-            | b"alias_method" | b"define_method" | b"include" | b"prepend" | b"extend"
-            | b"send" | b"public_send" | b"__send__" => false,
             _ => false,
         }
     }

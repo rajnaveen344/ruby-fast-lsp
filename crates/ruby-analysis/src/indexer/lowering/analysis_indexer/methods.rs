@@ -3,8 +3,8 @@
 
 use crate::core::{
     FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, MethodVisibility,
-    MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, SymbolFact, SymbolKind,
-    TextRange, TypeFact, TypeSubject,
+    MethodVisibilityOverrideFact, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange,
+    TypeFact, TypeSubject,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
@@ -15,7 +15,9 @@ use super::syntax::{
     text_range,
 };
 use super::AnalysisIndexer;
-use crate::indexer::documents::scope_rules::implicit_singleton_namespace;
+use crate::indexer::documents::scope_rules::{
+    implicit_singleton_namespace, receiverless_definition_kind, sent_definition_kind,
+};
 
 impl AnalysisIndexer {
     fn push_method_fact(
@@ -292,10 +294,8 @@ impl AnalysisIndexer {
         let Some(namespace) = implicit_singleton_namespace(&self.scope) else {
             return;
         };
-        let owner_kind = if !self.scope.execution_context_active() && self.scope.in_singleton() {
-            NamespaceKind::Singleton
-        } else {
-            NamespaceKind::Instance
+        let Some(owner_kind) = receiverless_definition_kind(b"define_method", &self.scope) else {
+            return;
         };
         self.push_method_fact_without_parameter_shape(namespace, owner_kind, method, range);
     }
@@ -356,12 +356,8 @@ impl AnalysisIndexer {
         else {
             return;
         };
-        let owner_kind = match selector.as_str() {
-            "define_method" if node.name().as_slice() != b"public_send" => {
-                crate::core::NamespaceKind::Instance
-            }
-            "define_singleton_method" => crate::core::NamespaceKind::Singleton,
-            _ => return,
+        let Some(owner_kind) = sent_definition_kind(node.name().as_slice(), &selector) else {
+            return;
         };
         let Some(receiver) = node.receiver() else {
             return;
