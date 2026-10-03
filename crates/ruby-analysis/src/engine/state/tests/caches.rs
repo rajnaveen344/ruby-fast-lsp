@@ -30,7 +30,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
         ..Default::default()
     };
     engine.update(file_id, facts(RubyType::string()), ResolveMode::Immediate);
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
 
     assert_eq!(
         ask_any(
@@ -125,7 +125,7 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
         ResolveMode::Immediate,
     );
 
-    let first_cache = AnalysisQueryCache::default();
+    let first_cache = ViewCache::default();
     assert_eq!(
         ask_any(
             &engine.view().with_memo(&first_cache),
@@ -138,7 +138,7 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
     );
     assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
 
-    let second_cache = AnalysisQueryCache::default();
+    let second_cache = ViewCache::default();
     assert_eq!(
         ask_any(&engine.view().with_memo(&second_cache), &owner, &method_name, MethodWant::Return).into_return_type(),
         Some(RubyType::string()),
@@ -197,7 +197,7 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
         ResolveMode::Immediate,
     );
 
-    let first_cache = AnalysisQueryCache::default();
+    let first_cache = ViewCache::default();
     assert_eq!(
         ask_any(
             &engine.view().with_memo(&first_cache),
@@ -209,7 +209,7 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
         Some(RubyType::string())
     );
 
-    let second_cache = AnalysisQueryCache::default();
+    let second_cache = ViewCache::default();
     assert_eq!(
         ask_any(
             &engine.view().with_memo(&second_cache),
@@ -262,7 +262,7 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
         ResolveMode::Immediate,
     );
 
-    let first_cache = AnalysisQueryCache::default();
+    let first_cache = ViewCache::default();
     assert_eq!(
         ask(
             &engine.view().with_memo(&first_cache),
@@ -278,7 +278,7 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
     );
     assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
 
-    let second_cache = AnalysisQueryCache::default();
+    let second_cache = ViewCache::default();
     assert_eq!(
         ask(
             &engine.view().with_memo(&second_cache),
@@ -359,7 +359,7 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
         ResolveMode::Immediate,
     );
 
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
     assert_eq!(
         ask(
             &engine.view().with_memo(&cache),
@@ -403,7 +403,7 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
         },
         ResolveMode::Immediate,
     );
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
 
     for index in 0..300 {
         let method = RubyMethod::new(&format!("missing_{index}")).unwrap();
@@ -447,7 +447,7 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
         ..Default::default()
     };
     engine.update(file_id, facts(first_range), ResolveMode::Immediate);
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
 
     let uncached =
         ask_any(&engine.view(), &owner, &method_name, MethodWant::Signatures).into_signature_vec();
@@ -500,7 +500,7 @@ fn method_signature_fact_cache_is_bounded_per_source_collection() {
         },
         ResolveMode::Immediate,
     );
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
 
     for index in 0..300 {
         let method = RubyMethod::new(&format!("missing_{index}")).unwrap();

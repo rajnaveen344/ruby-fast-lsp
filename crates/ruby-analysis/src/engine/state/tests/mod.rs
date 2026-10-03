@@ -16,9 +16,9 @@ use crate::engine::resolution::{
     method_lookup_chain_uncached_construction_count, namespace_target_exists,
     MethodLookupChainCache,
 };
-use crate::engine::AnalysisQueryCache;
 use crate::engine::ConstantLookupRequest;
 use crate::engine::View;
+use crate::engine::ViewCache;
 use crate::inference::semantics::ReceiverAccess;
 use std::path::PathBuf;
 

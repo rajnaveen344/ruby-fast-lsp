@@ -15,7 +15,7 @@ const MAX_THREAD_METHOD_RETURN_CACHE_ENTRIES: usize = 8192;
 ///
 /// Parallel project collection keeps this cache on the worker thread so identical
 /// `Integer#to_s` / `User#new` lookups reuse the same bounded result without
-/// sharing `AnalysisQueryCache` across a file batch. Explicit calls use the
+/// sharing `ViewCache` across a file batch. Explicit calls use the
 /// public cache when the receiver chain has no private/protected method of that
 /// name, so caller namespace is not part of the hot key. Identity changes drop
 /// the entries. A 256-entry cap left ~52k misses and ~4s of engine return

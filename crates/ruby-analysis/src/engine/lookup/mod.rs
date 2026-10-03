@@ -15,7 +15,7 @@
 //! closed on `Unknown`.
 //!
 //! Requests delegate to the engine's resolution functions. A `View` that
-//! carries an `AnalysisQueryCache` memoizes namespace callee, return-type,
+//! carries an `ViewCache` memoizes namespace callee, return-type,
 //! and signature answers in it, keyed on the request and the engine
 //! identity; `View::with_memo` attaches a cache to a view. The tests pin
 //! every answer for one fixture in an expected table per receiver, method,

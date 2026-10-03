@@ -70,13 +70,13 @@ fn entry_cap(want: MethodWant) -> Option<usize> {
 }
 
 #[derive(Debug, Default)]
-struct AnalysisQueryCacheState {
+struct ViewCacheState {
     engine_identity: Option<(u64, u64)>,
     methods: HashMap<MethodMemoKey, MethodAnswer>,
     entries_per_want: HashMap<MethodWant, usize>,
 }
 
-impl AnalysisQueryCacheState {
+impl ViewCacheState {
     fn bind_engine_identity(&mut self, engine_identity: (u64, u64)) {
         if self.engine_identity != Some(engine_identity) {
             self.engine_identity = Some(engine_identity);
@@ -104,17 +104,17 @@ impl AnalysisQueryCacheState {
 /// cannot accidentally reuse results across isolated project engines.
 /// Return lookups additionally reuse a thread-local 8192-entry FIFO keyed by
 /// that same identity so parallel file collection can share identical
-/// receiver/method results without one `AnalysisQueryCache` mutex spanning
+/// receiver/method results without one `ViewCache` mutex spanning
 /// the batch. Explicit `foo.bar` return lookups reuse the public-access entry
 /// when the receiver chain has no private/protected method of that name, so
 /// caller namespace is not part of the hot key. Hits are O(1). Do not raise
 /// the caps without an RSS measurement.
 #[derive(Debug, Default)]
-pub struct AnalysisQueryCache {
-    state: Mutex<AnalysisQueryCacheState>,
+pub struct ViewCache {
+    state: Mutex<ViewCacheState>,
 }
 
-impl AnalysisQueryCache {
+impl ViewCache {
     /// The memoized answer for `key`, computing it with `compute` on a miss.
     /// `compute` runs without the lock held, so it may itself look up
     /// through this cache.

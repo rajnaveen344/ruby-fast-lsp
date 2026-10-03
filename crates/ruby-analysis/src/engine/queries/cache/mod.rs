@@ -7,7 +7,7 @@ mod method_returns;
 mod namespaces;
 mod thread_memo;
 
-pub use memo::AnalysisQueryCache;
+pub use memo::ViewCache;
 pub(in crate::engine) use memo::{memoizes, MethodMemoKey};
 
 #[cfg(test)]

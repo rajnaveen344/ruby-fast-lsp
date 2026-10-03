@@ -9,7 +9,7 @@ use crate::core::{
     UnknownReason, VariableTypeKind,
 };
 use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use crate::engine::{AnalysisQueryCache, Project, View};
+use crate::engine::{Project, View, ViewCache};
 use crate::inference::higher_order::PreparedCallableSet;
 use crate::inference::method::constructor::ConstructorResult;
 use crate::inference::method::return_type::method_call_return_type;
@@ -323,7 +323,7 @@ impl ProjectReads for RwLock<Project> {
     {
         Arc::new(ProjectWalk {
             project: self,
-            memo: AnalysisQueryCache::default(),
+            memo: ViewCache::default(),
         })
     }
 }
@@ -333,7 +333,7 @@ impl ProjectReads for RwLock<Project> {
 /// identity, so a write between reads drops stale entries.
 struct ProjectWalk {
     project: Arc<RwLock<Project>>,
-    memo: AnalysisQueryCache,
+    memo: ViewCache,
 }
 
 impl ProjectReads for ProjectWalk {

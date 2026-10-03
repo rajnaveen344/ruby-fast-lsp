@@ -13,7 +13,7 @@ use super::{MethodRequest, MethodWant};
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceKind,
 };
-use crate::engine::{AnalysisQueryCache, Project, ResolveMode, SourceFileInput, View};
+use crate::engine::{Project, ResolveMode, SourceFileInput, View, ViewCache};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
 use crate::inference::semantics::ReceiverAccess;
@@ -557,7 +557,7 @@ fn private_and_protected_methods_follow_access() {
 fn memoized_answers_equal_direct_answers() {
     let engine = project();
     let view = engine.view();
-    let cache = AnalysisQueryCache::default();
+    let cache = ViewCache::default();
     let memoized = engine.view().with_memo(&cache);
     let (child, other) = (namespace("Child"), namespace("Other"));
     let types = receiver_types();

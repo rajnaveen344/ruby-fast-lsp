@@ -17,13 +17,13 @@ use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, RubyType, SourceFileId, TextRange, UnknownReason,
 };
 
-use crate::engine::{AnalysisQueryCache, Project};
+use crate::engine::{Project, ViewCache};
 
 pub struct View<'a> {
     pub(crate) engine: &'a Project,
     /// The method lookup memo a file walk shares across its reads; a view
     /// without one answers every lookup uncached.
-    pub(in crate::engine) memo: Option<&'a AnalysisQueryCache>,
+    pub(in crate::engine) memo: Option<&'a ViewCache>,
 }
 
 impl<'a> View<'a> {
@@ -33,7 +33,7 @@ impl<'a> View<'a> {
     }
 
     /// This view with `memo` serving its method lookups.
-    pub(in crate::engine) fn with_memo(self, memo: &'a AnalysisQueryCache) -> Self {
+    pub(in crate::engine) fn with_memo(self, memo: &'a ViewCache) -> Self {
         Self {
             memo: Some(memo),
             ..self
