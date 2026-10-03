@@ -68,7 +68,7 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
         1,
         "concurrent projects selecting the same immutable runtime must execute one probe"
     );
-    let cache = server.products.stdlib_paths().snapshot();
+    let cache = server.shared_products().stdlib_paths().snapshot();
     assert_eq!(cache.get(SingleFlightStat::Lookups), 2);
     assert_eq!(cache.get(SingleFlightStat::Producers), 1);
     assert_eq!(cache.get(SingleFlightStat::JoinedFlights), 1);

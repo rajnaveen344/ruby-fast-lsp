@@ -91,7 +91,7 @@ pub struct Server {
     pub(crate) documents: OpenDocuments,
     pub(self) projects: ProjectRegistry,
     pub(crate) indexing: IndexingServices,
-    pub(crate) products: RuntimeProducts,
+    pub(self) products: RuntimeProducts,
     pub(crate) extensions: ExtensionServices,
     pub(self) diagnostics: DiagnosticPublisher,
     pub(self) file_changes: WatchedFileChanges,
@@ -107,6 +107,12 @@ impl Server {
     /// The editor connection; an embedded server has none.
     pub(crate) fn client(&self) -> Option<&Client> {
         self.client.as_ref()
+    }
+
+    /// Shared runtime products, for tests that observe reuse across projects.
+    #[cfg(test)]
+    pub(crate) fn shared_products(&self) -> crate::loader::context::SharedProducts {
+        self.products.shared()
     }
 
     pub(crate) fn document_semantic_lock(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {

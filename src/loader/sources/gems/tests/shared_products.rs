@@ -155,7 +155,7 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     );
     assert_eq!(first_result.unwrap().len(), 1);
     assert_eq!(second_result.unwrap().len(), 1);
-    let cache = server.products.gem_dependencies().snapshot();
+    let cache = server.shared_products().gem_dependencies().snapshot();
     assert_eq!(cache.get(SingleFlightStat::Lookups), 2);
     assert_eq!(cache.get(SingleFlightStat::Producers), 1);
     assert_eq!(
@@ -214,14 +214,14 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
             .len(),
         1
     );
-    let after_sequential_consumer = server.products.gem_dependencies().snapshot();
+    let after_sequential_consumer = server.shared_products().gem_dependencies().snapshot();
     assert_eq!(after_sequential_consumer.get(SingleFlightStat::Lookups), 3);
     assert_eq!(
         after_sequential_consumer.get(SingleFlightStat::Producers),
         2
     );
     assert_eq!(after_sequential_consumer.get(SingleFlightStat::Entries), 0);
-    let persistent = server.products.persistent().gem_product_snapshot();
+    let persistent = server.shared_products().persistent().gem_product_snapshot();
     assert_eq!(persistent.get(PersistentProductStat::Producers), 1);
     assert_eq!(persistent.get(PersistentProductStat::Publications), 1);
     assert_eq!(persistent.get(PersistentProductStat::Hits), 1);

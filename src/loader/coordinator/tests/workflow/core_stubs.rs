@@ -69,7 +69,7 @@ async fn identical_core_stubs_use_one_template_but_keep_isolated_engines() {
     }
 
     assert_eq!(
-        server.products.core_templates().len(),
+        server.shared_products().core_templates().len(),
         1,
         "the same compatibility core must have one prepared template"
     );

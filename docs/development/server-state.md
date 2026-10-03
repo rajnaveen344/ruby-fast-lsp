@@ -71,6 +71,7 @@ through the owner:
 | Field | Operations outside `src/server/` |
 | --- | --- |
 | `client` | `client()`: the editor connection, absent for an embedded server |
+| `products` | none; load contexts carry `SharedProducts`, and tests observe reuse through `shared_products()` |
 
 Separate executables use server operations instead of replacing internal
 state bags.

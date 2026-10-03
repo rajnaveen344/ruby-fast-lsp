@@ -142,7 +142,6 @@ async fn init_workspace_inner(
     {
         coordinator.set_load_target(workspace.handle().load_target());
     }
-    coordinator.set_cache_root(server.products.cache_root());
     coordinator.set_extension_registry(server.extensions.registry().clone());
     if let Some(run) = run {
         coordinator.set_indexing_run(run);
