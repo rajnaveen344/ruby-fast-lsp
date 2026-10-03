@@ -2,9 +2,9 @@
 //! the fact producers.
 
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind,
-    MethodAvailability, MethodFact, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod,
-    SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, MethodAvailability,
+    MethodFact, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod, SymbolFact, SymbolKind,
+    TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{
@@ -131,22 +131,24 @@ impl Visit<'_> for AnalysisIndexer {
 
         if let Some((parts, absolute, super_range, target)) = superclass {
             if let Some(target) = target {
-                self.facts.graph_edges.push(GraphEdgeFact::new(
+                self.push_resolved_edge_with_provenance(
                     fqn.clone(),
                     target.clone(),
                     GraphEdgeKind::Superclass,
+                    GraphEdgeProvenance::Explicit,
                     super_range,
-                ));
+                );
                 if let (Some(source_singleton), Some(target_singleton)) = (
                     fqn.to_singleton_namespace(),
                     target.to_singleton_namespace(),
                 ) {
-                    self.facts.graph_edges.push(GraphEdgeFact::new(
+                    self.push_resolved_edge_with_provenance(
                         source_singleton,
                         target_singleton,
                         GraphEdgeKind::Superclass,
+                        GraphEdgeProvenance::Explicit,
                         super_range,
-                    ));
+                    );
                 }
             } else {
                 self.facts

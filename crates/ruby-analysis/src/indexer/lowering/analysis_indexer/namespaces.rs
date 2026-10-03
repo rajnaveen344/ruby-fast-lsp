@@ -11,8 +11,8 @@ use ruby_prism::{CallNode, Node};
 use super::syntax::{constant_parts_and_absolute, included_hook_mixin_call_kind};
 use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::{
-    class_methods_block, implicit_singleton_namespace, resolve_lexical_namespace,
-    resolve_receiver_namespace, BlockExecution,
+    class_methods_block, edge_admission, implicit_singleton_namespace, resolve_lexical_namespace,
+    resolve_receiver_namespace, BlockExecution, EdgeAdmission,
 };
 
 impl AnalysisIndexer {
@@ -120,6 +120,23 @@ impl AnalysisIndexer {
             );
             return;
         };
+        self.push_resolved_edge_with_provenance(source, target, kind, provenance, range);
+    }
+
+    /// Record a resolved edge the file's ancestry admits. Duplicate,
+    /// conflicting-superclass, and cyclic edges are left to the collector,
+    /// which reports them.
+    pub(super) fn push_resolved_edge_with_provenance(
+        &mut self,
+        source: FullyQualifiedName,
+        target: FullyQualifiedName,
+        kind: GraphEdgeKind,
+        provenance: GraphEdgeProvenance,
+        range: TextRange,
+    ) {
+        if edge_admission(&self.facts.graph_edges, &source, &target, kind) != EdgeAdmission::Admit {
+            return;
+        }
         self.facts
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));

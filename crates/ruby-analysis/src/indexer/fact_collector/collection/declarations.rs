@@ -5,11 +5,12 @@ use crate::core::{
     RubyMethod, RubyType, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use crate::indexer::documents::scope_rules::{lexical_candidates, resolve_lexical_namespace};
+use crate::indexer::documents::scope_rules::{
+    edge_admission, lexical_candidates, resolve_lexical_namespace, EdgeAdmission,
+};
 use crate::indexer::fact_collector::context::source::u32_offset;
 use crate::indexer::fact_collector::FactCollector;
 use crate::invariant::ExpectInvariant;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 impl FactCollector {
@@ -220,45 +221,24 @@ impl FactCollector {
         provenance: GraphEdgeProvenance,
         range: TextRange,
     ) -> bool {
-        if self
-            .facts
-            .analysis
-            .graph_edges
-            .iter()
-            .any(|edge| edge.source == source && edge.target == target && edge.kind == kind)
-        {
-            return true;
-        }
-
-        if kind == GraphEdgeKind::Superclass {
-            if let Some(existing) = self
-                .facts
-                .analysis
-                .graph_edges
-                .iter()
-                .find(|edge| edge.source == source && edge.kind == GraphEdgeKind::Superclass)
-            {
+        match edge_admission(&self.facts.analysis.graph_edges, &source, &target, kind) {
+            EdgeAdmission::Admit => {}
+            EdgeAdmission::Duplicate => return true,
+            EdgeAdmission::ConflictingSuperclass(existing) => {
+                let message = format!(
+                    "Class `{source}` already inherits `{existing}` and cannot also inherit `{target}`"
+                );
+                self.push_error_diagnostic(range, "conflicting-superclass", message);
+                return false;
+            }
+            EdgeAdmission::Cycle => {
                 self.push_error_diagnostic(
                     range,
-                    "conflicting-superclass",
-                    format!(
-                        "Class `{source}` already inherits `{}` and cannot also inherit `{target}`",
-                        existing.target
-                    ),
+                    "cyclic-inheritance",
+                    format!("Inheritance edge `{source}` -> `{target}` creates a cycle"),
                 );
                 return false;
             }
-        }
-
-        if ancestry_edge_kind(kind)
-            && (source == target || self.direct_ancestry_path_exists(&target, &source))
-        {
-            self.push_error_diagnostic(
-                range,
-                "cyclic-inheritance",
-                format!("Inheritance edge `{source}` -> `{target}` creates a cycle"),
-            );
-            return false;
         }
 
         self.facts
@@ -266,32 +246,6 @@ impl FactCollector {
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));
         true
-    }
-
-    pub(in crate::indexer::fact_collector) fn direct_ancestry_path_exists(
-        &self,
-        start: &FullyQualifiedName,
-        destination: &FullyQualifiedName,
-    ) -> bool {
-        let mut pending = vec![start.clone()];
-        let mut visited = HashSet::new();
-        while let Some(current) = pending.pop() {
-            if &current == destination {
-                return true;
-            }
-            if !visited.insert(current.clone()) {
-                continue;
-            }
-            pending.extend(
-                self.facts
-                    .analysis
-                    .graph_edges
-                    .iter()
-                    .filter(|edge| edge.source == current && ancestry_edge_kind(edge.kind))
-                    .map(|edge| edge.target.clone()),
-            );
-        }
-        false
     }
 
     pub fn direct_push_method_fact(
@@ -569,14 +523,5 @@ impl FactCollector {
                     .is_none_or(|expected| fact.provenance == expected)
                     .then_some(fact)
             })
-    }
-}
-
-/// Whether an edge joins its source's own ancestor chain. `extend` adds to
-/// the singleton class's ancestors instead, so `extend self` is no cycle.
-pub(in crate::indexer::fact_collector) fn ancestry_edge_kind(kind: GraphEdgeKind) -> bool {
-    match kind {
-        GraphEdgeKind::Superclass | GraphEdgeKind::Include | GraphEdgeKind::Prepend => true,
-        GraphEdgeKind::Extend | GraphEdgeKind::ExecutionContextApplication => false,
     }
 }

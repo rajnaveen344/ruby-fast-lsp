@@ -4,11 +4,12 @@
 //! that knowledge as a predicate or receiver resolver.
 
 use crate::core::{
-    FullyQualifiedName, GraphNodeKind, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod,
-    RubyType,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodVisibility,
+    NamespaceKind, RubyConstant, RubyMethod, RubyType,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, MultiWriteNode, Node};
+use std::collections::HashSet;
 
 use super::scope_tracker::{mixin_ref_from_node, ScopeTracker};
 
@@ -497,4 +498,81 @@ fn push_unvalued_targets<'pr>(
         return;
     }
     targets.push((target, None));
+}
+
+/// What a declaration walk does with a resolved namespace edge, given the
+/// edges the file has declared so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeAdmission<'a> {
+    /// The edge is new and consistent with the file's ancestry.
+    Admit,
+    /// The same edge is already declared.
+    Duplicate,
+    /// The class already inherits this other superclass.
+    ConflictingSuperclass(&'a FullyQualifiedName),
+    /// The target already has the source among its ancestors.
+    Cycle,
+}
+
+/// Admit `source -kind-> target` only when it is new, gives a class at most
+/// one superclass, and keeps the file's ancestry acyclic.
+pub fn edge_admission<'a>(
+    edges: &'a [GraphEdgeFact],
+    source: &FullyQualifiedName,
+    target: &FullyQualifiedName,
+    kind: GraphEdgeKind,
+) -> EdgeAdmission<'a> {
+    if edges
+        .iter()
+        .any(|edge| &edge.source == source && &edge.target == target && edge.kind == kind)
+    {
+        return EdgeAdmission::Duplicate;
+    }
+    if kind == GraphEdgeKind::Superclass {
+        if let Some(existing) = edges
+            .iter()
+            .find(|edge| &edge.source == source && edge.kind == GraphEdgeKind::Superclass)
+        {
+            return EdgeAdmission::ConflictingSuperclass(&existing.target);
+        }
+    }
+    if ancestry_edge_kind(kind) && (source == target || ancestry_path_exists(edges, target, source))
+    {
+        return EdgeAdmission::Cycle;
+    }
+    EdgeAdmission::Admit
+}
+
+/// Whether `edges` lead from `start` to `destination` through ancestry edges.
+fn ancestry_path_exists(
+    edges: &[GraphEdgeFact],
+    start: &FullyQualifiedName,
+    destination: &FullyQualifiedName,
+) -> bool {
+    let mut pending = vec![start];
+    let mut visited = HashSet::new();
+    while let Some(current) = pending.pop() {
+        if current == destination {
+            return true;
+        }
+        if !visited.insert(current) {
+            continue;
+        }
+        pending.extend(
+            edges
+                .iter()
+                .filter(|edge| &edge.source == current && ancestry_edge_kind(edge.kind))
+                .map(|edge| &edge.target),
+        );
+    }
+    false
+}
+
+/// Whether an edge joins its source's own ancestor chain. `extend` adds to
+/// the singleton class's ancestors instead, so `extend self` is no cycle.
+fn ancestry_edge_kind(kind: GraphEdgeKind) -> bool {
+    match kind {
+        GraphEdgeKind::Superclass | GraphEdgeKind::Include | GraphEdgeKind::Prepend => true,
+        GraphEdgeKind::Extend | GraphEdgeKind::ExecutionContextApplication => false,
+    }
 }

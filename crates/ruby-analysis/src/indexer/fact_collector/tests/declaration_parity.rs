@@ -377,3 +377,31 @@ fn compound_constant_writes_are_write_sites() {
         "{seed:#?}"
     );
 }
+
+#[test]
+fn cyclic_ancestry_edges_are_dropped() {
+    // A module cannot include itself or an includer of itself, and a class
+    // has one superclass, so a self include from a block, a mutual include,
+    // and a second superclass declare no edge. `extend self` stays.
+    let source = "module Shapes\n  module Tools\n    self[:x] = Module.new do\n      \
+                  include Tools\n    end\n    extend self\n  end\n  module Sized\n    \
+                  include Tools\n  end\n  module Tools\n    include Sized\n  end\n  \
+                  class Base; end\n  class Other; end\n  class Leaf < Base; end\n  \
+                  class Leaf < Other; end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "edge Shapes::Tools Extend Shapes::Tools",
+            "edge Shapes::Sized Include Shapes::Tools",
+            "edge Shapes::Leaf Superclass Shapes::Base",
+        ],
+    );
+    let (seed, _) = walk_declarations(source);
+    assert!(
+        !seed.iter().any(
+            |declaration| declaration.starts_with("edge Shapes::Tools Include")
+                || declaration.starts_with("edge Shapes::Leaf Superclass Shapes::Other")
+        ),
+        "{seed:#?}"
+    );
+}
