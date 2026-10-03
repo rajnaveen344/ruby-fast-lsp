@@ -35,7 +35,7 @@ async fn document_formatting(
     server: &Server,
     params: DocumentFormattingParams,
 ) -> Option<Vec<TextEdit>> {
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
     if config.formatter == FormatterKind::None {
         return None;
     }

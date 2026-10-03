@@ -24,7 +24,7 @@ pub async fn handle_did_change_configuration(
                     warn!("Rejected invalid runtime configuration update: {error}");
                     return;
                 }
-                let previous_config = server.config.lock().clone();
+                let previous_config = server.configuration_snapshot();
                 preserve_initialization_only_config(
                     &mut config,
                     &previous_config,
@@ -64,7 +64,7 @@ pub async fn handle_did_change_configuration(
                 }
                 refresh_extension_watch_registration(server).await;
 
-                *server.config.lock() = config.clone();
+                server.replace_configuration(config.clone());
 
                 if let Some(version) = parse_ruby_family(&config.ruby_version) {
                     info!("Using configured Ruby compatibility version: {version:?}");

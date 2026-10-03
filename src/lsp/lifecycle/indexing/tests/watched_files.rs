@@ -66,7 +66,9 @@ async fn watched_closed_project_files_replace_and_remove_engine_facts() {
     .await;
     assert!(!has_namespace(&server, &vendor_uri, "VendorOwned"));
 
-    server.config.lock().indexing.included_patterns = vec!["vendor/owned.rb".to_string()];
+    server.update_configuration(|config| {
+        config.indexing.included_patterns = vec!["vendor/owned.rb".to_string()]
+    });
     handle_watched_files_changed(
         &server,
         DidChangeWatchedFilesParams {

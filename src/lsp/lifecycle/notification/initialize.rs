@@ -77,7 +77,7 @@ pub async fn handle_initialize(
         },
         None => RubyFastLspConfig::default(),
     };
-    *lang_server.config.lock() = config.clone();
+    lang_server.replace_configuration(config.clone());
 
     // Register every workspace folder. Each folder is indexed independently
     // in handle_initialized. Multi-root VS Code
@@ -238,7 +238,7 @@ pub async fn handle_initialized(server: &Server, _params: InitializedParams) {
 
     refresh_extension_watch_registration(server).await;
 
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
 
     if let Some(version) = parse_ruby_family(&config.ruby_version) {
         info!("Using configured Ruby compatibility version: {version:?}");

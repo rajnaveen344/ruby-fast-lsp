@@ -56,7 +56,7 @@ pub async fn handle_did_change_workspace_folders(
         }
     }
 
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
     if let Err(error) = server
         .extensions
         .registry()

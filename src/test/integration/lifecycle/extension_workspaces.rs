@@ -190,7 +190,7 @@ async fn runtime_rebuild_restores_extension_semantic_seed() {
         ..RubyFastLspConfig::default()
     };
     let server = Server::default();
-    *server.config.lock() = config.clone();
+    server.replace_configuration(config.clone());
     server.add_workspace(root_uri.clone());
     server.extensions.registry().configure_from_config(&config);
     crate::lsp::lifecycle::notification::handle_did_open(

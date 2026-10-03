@@ -22,10 +22,8 @@ pub async fn handle(
     let uri = &params.text_document.uri;
 
     // 1. Config check (server concern).
-    let modules_enabled = {
-        let config = lang_server.config.lock();
-        config.code_lens_modules_enabled.unwrap_or(true)
-    };
+    let modules_enabled =
+        lang_server.with_configuration(|config| config.code_lens_modules_enabled.unwrap_or(true));
     if !modules_enabled {
         return Ok(Some(Vec::new()));
     }

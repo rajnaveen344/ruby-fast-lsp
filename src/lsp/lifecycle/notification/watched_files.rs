@@ -21,7 +21,7 @@ pub async fn handle_did_change_watched_files(
     };
     params.changes = changes;
 
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
     let workspaces = server.list_workspaces();
     let mut project_rebuilds = workspaces
         .iter()
@@ -70,7 +70,7 @@ pub async fn handle_did_change_watched_files(
             warn!("Project extension watcher reload failed: {error:#}");
         }
     }
-    let workspace_trusted = server.config.lock().workspace_trusted;
+    let workspace_trusted = server.with_configuration(|config| config.workspace_trusted);
     let reindex_uris = server
         .extensions
         .registry()

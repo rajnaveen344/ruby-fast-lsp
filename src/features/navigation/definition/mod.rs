@@ -112,13 +112,13 @@ fn require_path_definitions(
         .workspace_for_uri(uri)
         .map(|workspace| workspace.root_path)
         .or_else(|| current_file.parent().map(PathBuf::from))?;
-    let load_paths = server
-        .config
-        .lock()
-        .indexing
-        .load_paths
-        .paths_for_project(&project_root)
-        .to_vec();
+    let load_paths = server.with_configuration(|config| {
+        config
+            .indexing
+            .load_paths
+            .paths_for_project(&project_root)
+            .to_vec()
+    });
     let feature_index = server.require_feature_index_for_uri(uri);
     let location = server.project_for_uri(uri).view(|view| {
         let resolved = resolve_require_path(

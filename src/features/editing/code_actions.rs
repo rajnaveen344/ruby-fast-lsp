@@ -35,7 +35,7 @@ async fn code_actions(
     {
         return None;
     }
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
     if config.linter == LinterKind::None {
         return None;
     }

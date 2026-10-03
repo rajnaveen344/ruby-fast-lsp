@@ -31,7 +31,7 @@ pub async fn run_linter(server: &Server, uri: &Url, content: &str) {
     if ruby_analysis::indexer::is_erb_path(uri.path()) {
         return;
     }
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
     if config.linter == LinterKind::None {
         return;
     }

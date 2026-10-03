@@ -81,7 +81,7 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
     let filename = main.to_str().unwrap().trim_start_matches('/');
     let mut editor = FakeEditor::new().await;
     editor.add_workspace(root.to_str().unwrap().trim_start_matches('/'));
-    *editor.server().config.lock() = config.clone();
+    editor.server().replace_configuration(config.clone());
     editor.open(filename, source).await;
     let unresolved_lines = |diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>| {
         diagnostics.into_iter().filter(|diagnostic| {
@@ -408,15 +408,17 @@ async fn goto_require_lib_file() {
 async fn goto_require_custom_load_path_wins_before_lib() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
-        default: Vec::new(),
-        projects: vec![ProjectLoadPaths {
-            root: crate::test::harness::fixture_path("/project")
-                .to_string_lossy()
-                .into_owned(),
-            paths: vec!["custom".to_string()],
-        }],
-    };
+    editor.server().update_configuration(|config| {
+        config.indexing.load_paths = LoadPathsConfig {
+            default: Vec::new(),
+            projects: vec![ProjectLoadPaths {
+                root: crate::test::harness::fixture_path("/project")
+                    .to_string_lossy()
+                    .into_owned(),
+                paths: vec!["custom".to_string()],
+            }],
+        }
+    });
     editor.open("project/custom/foo.rb", "# custom foo\n").await;
     editor.open("project/lib/foo.rb", "# lib foo\n").await;
     editor.open("project/main.rb", "require \"foo\"\n").await;
@@ -430,23 +432,25 @@ async fn goto_require_load_paths_are_isolated_per_project() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("server");
     editor.add_workspace("admin");
-    editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
-        default: Vec::new(),
-        projects: vec![
-            ProjectLoadPaths {
-                root: crate::test::harness::fixture_path("/server")
-                    .to_string_lossy()
-                    .into_owned(),
-                paths: vec!["custom".to_string()],
-            },
-            ProjectLoadPaths {
-                root: crate::test::harness::fixture_path("/admin")
-                    .to_string_lossy()
-                    .into_owned(),
-                paths: vec!["other".to_string()],
-            },
-        ],
-    };
+    editor.server().update_configuration(|config| {
+        config.indexing.load_paths = LoadPathsConfig {
+            default: Vec::new(),
+            projects: vec![
+                ProjectLoadPaths {
+                    root: crate::test::harness::fixture_path("/server")
+                        .to_string_lossy()
+                        .into_owned(),
+                    paths: vec!["custom".to_string()],
+                },
+                ProjectLoadPaths {
+                    root: crate::test::harness::fixture_path("/admin")
+                        .to_string_lossy()
+                        .into_owned(),
+                    paths: vec!["other".to_string()],
+                },
+            ],
+        }
+    });
 
     editor
         .open("server/custom/foo.rb", "# server custom\n")
@@ -472,10 +476,12 @@ async fn goto_require_load_paths_are_isolated_per_project() {
 async fn goto_require_falls_back_to_workspace_default_load_paths() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
-        default: vec!["shared".to_string()],
-        projects: Vec::new(),
-    };
+    editor.server().update_configuration(|config| {
+        config.indexing.load_paths = LoadPathsConfig {
+            default: vec!["shared".to_string()],
+            projects: Vec::new(),
+        }
+    });
     editor.open("project/shared/foo.rb", "# shared foo\n").await;
     editor.open("project/lib/foo.rb", "# lib foo\n").await;
     editor.open("project/main.rb", "require \"foo\"\n").await;

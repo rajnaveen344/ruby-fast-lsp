@@ -274,7 +274,7 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
 
     let server = Server::default();
     let workspace = server.add_workspace(project_uri);
-    *server.config.lock() = RubyFastLspConfig {
+    server.replace_configuration(RubyFastLspConfig {
         runtime: RuntimeSelectionConfig {
             mode: RuntimeMode::Auto,
             projects: vec![ProjectRuntimeSelection {
@@ -291,7 +291,7 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
             }],
         },
         ..RubyFastLspConfig::default()
-    };
+    });
     handle_did_open(
         &server,
         DidOpenTextDocumentParams {
@@ -438,7 +438,7 @@ async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts(
 
     let server = Server::with_user_cache_root(fixture.path().join("cache"))
         .expect("construct isolated cache server");
-    *server.config.lock() = config;
+    server.replace_configuration(config);
     let project_uri = Url::from_directory_path(&project).unwrap();
     let workspace = server.add_workspace(project_uri.clone());
     indexing::init_workspace(&server, project_uri)

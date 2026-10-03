@@ -278,7 +278,7 @@ impl CheckSession {
             }
         }
         let server = Server::default();
-        *server.config.lock() = config.clone();
+        server.replace_configuration(config.clone());
 
         let workspaces = if input.is_dir() {
             let root_uri = Url::from_directory_path(&root)

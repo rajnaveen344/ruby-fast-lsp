@@ -87,7 +87,7 @@ fn is_process_alive(pid: u32) -> bool {
 #[derive(Clone)]
 pub struct Server {
     pub(self) client: Option<Client>,
-    pub(crate) config: Arc<Mutex<RubyFastLspConfig>>,
+    pub(self) config: Arc<Mutex<RubyFastLspConfig>>,
     pub(self) documents: OpenDocuments,
     pub(self) projects: ProjectRegistry,
     pub(crate) indexing: IndexingServices,
@@ -102,6 +102,22 @@ impl Server {
     /// Copy the accepted configuration without exposing its shared lock.
     pub fn configuration_snapshot(&self) -> RubyFastLspConfig {
         self.config.lock().clone()
+    }
+
+    /// Read part of the accepted configuration without copying all of it.
+    pub(crate) fn with_configuration<R>(&self, read: impl FnOnce(&RubyFastLspConfig) -> R) -> R {
+        read(&self.config.lock())
+    }
+
+    /// Accept a complete configuration, replacing the previous one.
+    pub(crate) fn replace_configuration(&self, config: RubyFastLspConfig) {
+        *self.config.lock() = config;
+    }
+
+    /// Change part of the accepted configuration in place.
+    #[cfg(test)]
+    pub(crate) fn update_configuration(&self, update: impl FnOnce(&mut RubyFastLspConfig)) {
+        update(&mut self.config.lock());
     }
 
     /// The editor connection; an embedded server has none.

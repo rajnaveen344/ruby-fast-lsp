@@ -134,7 +134,7 @@ async fn init_workspace_inner(
 
     info!("Initializing workspace: {:?}", workspace_path);
 
-    let mut coordinator = IndexingCoordinator::new(workspace_path, server.config.lock().clone());
+    let mut coordinator = IndexingCoordinator::new(workspace_path, server.configuration_snapshot());
     if let Some(workspace) = server
         .list_workspaces()
         .into_iter()
@@ -308,7 +308,7 @@ fn source_kind_for_new_open_file(server: &Server, uri: &Url) -> SourceKind {
     let Ok(path) = uri.to_file_path() else {
         return SourceKind::Excluded;
     };
-    let config = server.config.lock().indexing.clone();
+    let config = server.with_configuration(|config| config.indexing.clone());
     match ProjectFilePolicy::new(&config) {
         Ok(policy) if policy.includes(&workspace.root_path, &path) => SourceKind::Project,
         Ok(_) => SourceKind::Excluded,
@@ -535,7 +535,7 @@ pub async fn handle_watched_files_changed(
     params
         .changes
         .sort_by(|left, right| left.uri.as_str().cmp(right.uri.as_str()));
-    let config = server.config.lock().indexing.clone();
+    let config = server.with_configuration(|config| config.indexing.clone());
     let policy = match ProjectFilePolicy::new(&config) {
         Ok(policy) => policy,
         Err(error) => {
