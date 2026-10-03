@@ -88,7 +88,7 @@ fn is_process_alive(pid: u32) -> bool {
 pub struct Server {
     pub(self) client: Option<Client>,
     pub(crate) config: Arc<Mutex<RubyFastLspConfig>>,
-    pub(crate) documents: OpenDocuments,
+    pub(self) documents: OpenDocuments,
     pub(self) projects: ProjectRegistry,
     pub(crate) indexing: IndexingServices,
     pub(self) products: RuntimeProducts,

@@ -81,10 +81,7 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
     )
     .await;
     let document = server
-        .documents
-        .read()
-        .get(&usage_uri)
-        .cloned()
+        .open_document(&usage_uri)
         .expect("opened usage document must exist");
     let query = crate::features::cursor::EngineQuery::with_doc_and_project(
         document,

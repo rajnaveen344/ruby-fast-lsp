@@ -13,12 +13,7 @@ pub async fn handle(
     server: &Server,
     params: SelectionRangeParams,
 ) -> LspResult<Option<Vec<SelectionRange>>> {
-    let Some(document) = server
-        .documents
-        .read()
-        .get(&params.text_document.uri)
-        .cloned()
-    else {
+    let Some(document) = server.open_document(&params.text_document.uri) else {
         return Ok(None);
     };
     let document = document.read();

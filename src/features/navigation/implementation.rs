@@ -24,7 +24,7 @@ pub async fn handle(
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
 
-    let doc_arc = server.documents.read().get(&uri).cloned();
+    let doc_arc = server.open_document(&uri);
     let implementations = doc_arc.and_then(|doc_arc| {
         EngineQuery::with_doc_and_project(doc_arc, server.project_for_uri(&uri)).with_view(
             |cursor| {

@@ -52,7 +52,7 @@ pub(crate) fn read_open_document(
     uri: &Url,
     read: impl FnOnce(Cursor<'_>) -> Answer,
 ) -> Option<Vec<Location>> {
-    let document = server.documents.read().get(uri)?.clone();
+    let document = server.open_document(uri)?;
     let project = server.project_for_uri(uri);
     EngineQuery::with_doc_and_project(document.clone(), project.clone())
         .with_view(read)

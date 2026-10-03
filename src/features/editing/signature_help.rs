@@ -28,7 +28,7 @@ pub async fn handle(
 fn signature_help(server: &Server, params: SignatureHelpParams) -> Option<SignatureHelp> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
-    let document = server.documents.read().get(&uri)?.clone();
+    let document = server.open_document(&uri)?;
     let help = EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))
         .with_view(|cursor| {
             let content = &cursor.document?.content;

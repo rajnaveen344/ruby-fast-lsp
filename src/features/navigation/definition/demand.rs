@@ -27,11 +27,7 @@ pub(crate) fn navigation_demand_keys_at_position(
     uri: &Url,
     position: Position,
 ) -> Option<DefinitionNavigationDemandKeys> {
-    let content = {
-        let documents = server.documents.read();
-        let content = documents.get(uri)?.read().content.clone();
-        content
-    };
+    let content = server.open_document_content(uri)?;
     definition_navigation_demand_keys(uri, position, &content)
 }
 

@@ -32,9 +32,8 @@ pub async fn handle(
 
     // 2. Get document content and Arc.
     let (content, doc_arc) = {
-        let docs = lang_server.documents.read();
-        let doc_arc = match docs.get(uri) {
-            Some(arc) => arc.clone(),
+        let doc_arc = match lang_server.open_document(uri) {
+            Some(arc) => arc,
             None => {
                 debug!("Document not found for URI: {}", uri);
                 return Ok(Some(Vec::new()));

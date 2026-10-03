@@ -55,7 +55,7 @@ pub async fn handle(server: &Server, params: InlayHintParams) -> LspResult<Optio
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
 
-    let Some(document) = server.documents.read().get(&uri).cloned() else {
+    let Some(document) = server.open_document(&uri) else {
         return Ok(Some(Vec::new()));
     };
     let hints = EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))

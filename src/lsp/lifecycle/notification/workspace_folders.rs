@@ -21,8 +21,7 @@ pub async fn handle_did_change_workspace_folders(
         .filter_map(|folder| folder.uri.to_file_path().ok())
         .collect::<Vec<_>>();
     let open_documents_to_rehome = server
-        .documents
-        .read()
+        .open_documents()
         .values()
         .filter_map(|document| {
             let document = document.read();

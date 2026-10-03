@@ -37,10 +37,7 @@ impl TypeKind {
 /// identifier is.
 pub(super) fn check_types(server: &Server, uri: &Url, content: &str, tags: &[&Tag]) {
     let document = server
-        .documents
-        .read()
-        .get(uri)
-        .map(|document| document.read().clone())
+        .get_doc(uri)
         .unwrap_or_else(|| panic!("<type> fixture {uri} is not open"));
     let engine_handle = server.project_for_uri(uri);
     let engine = engine_handle.test_read();

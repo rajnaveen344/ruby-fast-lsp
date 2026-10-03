@@ -72,6 +72,7 @@ through the owner:
 | --- | --- |
 | `client` | `client()`: the editor connection, absent for an embedded server |
 | `products` | none; load contexts carry `SharedProducts`, and tests observe reuse through `shared_products()` |
+| `documents` | `open_document`, `open_document_content`, `get_doc`, `is_document_open`, `open_documents` (a read-only view), `update_open_document`, `close_open_document` |
 
 Separate executables use server operations instead of replacing internal
 state bags.

@@ -39,11 +39,7 @@ pub async fn handle_prepare(
         uri.path()
     );
     let start_time = Instant::now();
-    let content = server
-        .documents
-        .read()
-        .get(&uri)
-        .map(|document| document.read().content.clone());
+    let content = server.open_document_content(&uri);
     let result = content.and_then(|content| {
         EngineQuery::with_project(server.project_for_uri(&uri))
             .with_view(|cursor| prepare_at(cursor, &uri, position, &content))

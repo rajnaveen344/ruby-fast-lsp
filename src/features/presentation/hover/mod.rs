@@ -34,7 +34,7 @@ fn hover(server: &Server, params: HoverParams) -> Option<Hover> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
 
-    let doc_arc = server.documents.read().get(&uri)?.clone();
+    let doc_arc = server.open_document(&uri)?;
     let require = {
         let document = doc_arc.read();
         let byte_offset = document.position_to_analysis_offset(source_position(position));

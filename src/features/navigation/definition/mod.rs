@@ -68,7 +68,7 @@ pub async fn find_definition_at_position(
     uri: Url,
     position: Position,
 ) -> Option<GotoDefinitionResponse> {
-    let doc_arc = server.documents.read().get(&uri)?.clone();
+    let doc_arc = server.open_document(&uri)?;
     let require = {
         let document = doc_arc.read();
         let byte_offset = document.position_to_analysis_offset(source_position(position));

@@ -192,8 +192,7 @@ fn on_type_formatting(
         return None;
     }
 
-    let docs = lang_server.documents.read();
-    let doc_arc = docs.get(uri)?;
+    let doc_arc = lang_server.open_document(uri)?;
     let doc = doc_arc.read();
     let content = &doc.content;
 

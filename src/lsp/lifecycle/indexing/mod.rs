@@ -180,14 +180,14 @@ pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams)
     }
 
     let doc_start = Instant::now();
-    server.documents.update(
+    server.update_open_document(
         &uri,
         analysis_file_id,
         content.clone(),
         params.text_document.version,
     );
     let doc_elapsed = doc_start.elapsed();
-    debug!("Doc cache size: {}", server.documents.read().len());
+    debug!("Doc cache size: {}", server.open_documents().len());
 
     // Analyze and commit the file with the unified FileProcessor. Route analysis state
     // by URI so the file lands in its workspace's own index.
@@ -197,9 +197,7 @@ pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams)
     let syntax = if skip_processing {
         let diagnostics = if source_kind.is_editable() {
             let document = server
-                .documents
-                .read()
-                .get(&uri)
+                .open_document(&uri)
                 .expect_invariant(
                     "didOpen syntax-only path lost the document inserted into the cache",
                     "skipped dependency files still require an open RubyDocument",
@@ -269,7 +267,7 @@ async fn refresh_open_project_files_after_dependency_open(
 ) {
     let owning_project = server.project_for_uri(opened_uri);
     let mut open_docs = {
-        let docs = server.documents.read();
+        let docs = server.open_documents();
         docs.iter()
             .filter_map(|(uri, doc)| {
                 if uri == opened_uri {
@@ -365,9 +363,7 @@ pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentPar
 
     let doc_start = Instant::now();
     // Update or create the document atomically
-    server
-        .documents
-        .update(&uri, analysis_file_id, final_content.clone(), version);
+    server.update_open_document(&uri, analysis_file_id, final_content.clone(), version);
     let doc_elapsed = doc_start.elapsed();
 
     // Process current file without forcing a project-wide reference/diagnostic
@@ -447,7 +443,7 @@ fn bounded_open_diagnostic_refresh_targets(
     changed_uri: &Url,
 ) -> Vec<(Url, String)> {
     let mut open_documents = {
-        let docs = server.documents.read();
+        let docs = server.open_documents();
         docs.iter()
             .filter_map(|(uri, document)| {
                 if uri == changed_uri {
@@ -476,12 +472,8 @@ pub async fn handle_did_save(server: &Server, params: DidSaveTextDocumentParams)
     }
 
     // Get the current document content
-    let content = {
-        let docs = server.documents.read();
-        match docs.get(&uri) {
-            Some(doc_arc) => doc_arc.read().content.clone(),
-            None => return,
-        }
+    let Some(content) = server.open_document_content(&uri) else {
+        return;
     };
 
     // On save: do full indexing with unresolved tracking (for cross-file
@@ -518,9 +510,9 @@ pub async fn handle_did_close(server: &Server, params: DidCloseTextDocumentParam
     server.clear_external_linter_diagnostics(&uri);
 
     // Remove the document from in-memory cache but keep analysis facts.
-    server.documents.remove(&uri);
+    server.close_open_document(&uri);
     server.release_external_document_project(&uri);
-    debug!("Doc cache size: {}", server.documents.read().len());
+    debug!("Doc cache size: {}", server.open_documents().len());
 
     // An excluded file is analyzed only while it is open.
     if remove_file_if_kind(server, &uri, SourceKind::Excluded) {
@@ -562,7 +554,7 @@ pub async fn handle_watched_files_changed(
         let Ok(path) = change.uri.to_file_path() else {
             continue;
         };
-        if server.documents.read().contains_key(&change.uri) {
+        if server.is_document_open(&change.uri) {
             continue;
         }
         changed_dependency_uris.push(change.uri.clone());
@@ -659,7 +651,7 @@ async fn refresh_open_project_files_for_dependency_engines(
     }
 
     let mut open_project_files = {
-        let docs = server.documents.read();
+        let docs = server.open_documents();
         docs.iter()
             .filter_map(|(uri, document)| {
                 if analysis_file_kind(server, uri) != Some(SourceKind::Project) {

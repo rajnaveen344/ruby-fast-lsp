@@ -203,8 +203,7 @@ pub(super) async fn rebuild_runtime_owned_project_state(
     // superseded coordinator has released its permit may the replacement clear
     // and rebuild that project's semantic state.
     let open_documents = server
-        .documents
-        .read()
+        .open_documents()
         .values()
         .filter_map(|document| {
             let document = document.read();

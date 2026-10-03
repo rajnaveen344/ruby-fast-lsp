@@ -47,8 +47,8 @@ fn full_tokens(server: &Server, uri: Url) -> SemanticTokensResult {
 
     // Get the document from server cache
     let doc_lookup_start = Instant::now();
-    let document = match server.documents.read().get(&uri) {
-        Some(doc) => doc.clone(), // Clone the document to avoid holding the lock
+    let document = match server.open_document(&uri) {
+        Some(doc) => doc,
         None => {
             info!("Document not found in cache for URI: {}", uri);
             return SemanticTokensResult::Tokens(SemanticTokens {

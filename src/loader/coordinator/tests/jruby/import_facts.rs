@@ -289,10 +289,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         );
     }
     let document = server
-        .documents
-        .read()
-        .get(&uri)
-        .cloned()
+        .open_document(&uri)
         .expect("processed JRuby document must exist");
     let query = crate::features::cursor::EngineQuery::with_doc_and_project(
         document,

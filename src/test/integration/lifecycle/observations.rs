@@ -62,14 +62,7 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
         .await;
     let uri = crate::test::harness::fixture_uri("/observation.rb");
     let engine = editor.server().project_for_uri(&uri);
-    let document = editor
-        .server()
-        .documents
-        .read()
-        .get(&uri)
-        .unwrap()
-        .read()
-        .clone();
+    let document = editor.server().get_doc(&uri).unwrap();
     engine.test_write().update(
         document.analysis_file_id(),
         FileAnalysis::default(),
@@ -116,14 +109,7 @@ async fn tagged_diagnostic_observation_cannot_repair_missing_semantic_facts() {
     editor.open("observation.rb", source).await;
     let uri = crate::test::harness::fixture_uri("/observation.rb");
     let engine = editor.server().project_for_uri(&uri);
-    let document = editor
-        .server()
-        .documents
-        .read()
-        .get(&uri)
-        .unwrap()
-        .read()
-        .clone();
+    let document = editor.server().get_doc(&uri).unwrap();
     engine.test_write().update(
         document.analysis_file_id(),
         FileAnalysis::default(),
@@ -190,14 +176,7 @@ async fn opening_another_project_cannot_rebuild_or_publish_this_projects_state()
     editor.open("alpha/caller.rb", "value = VALUE\n").await;
     let uri = crate::test::harness::fixture_uri("/alpha/caller.rb");
     let engine = editor.server().project_for_uri(&uri);
-    let document = editor
-        .server()
-        .documents
-        .read()
-        .get(&uri)
-        .unwrap()
-        .read()
-        .clone();
+    let document = editor.server().get_doc(&uri).unwrap();
     engine.test_write().update(
         document.analysis_file_id(),
         FileAnalysis::default(),

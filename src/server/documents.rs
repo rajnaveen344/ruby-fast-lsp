@@ -134,4 +134,41 @@ impl Server {
     pub fn close_embedded_document(&self, uri: &Url) {
         self.documents.remove(uri);
     }
+
+    /// The open buffer for `uri`, shared so callers can release the map lock.
+    pub(crate) fn open_document(&self, uri: &Url) -> Option<Arc<RwLock<RubyDocument>>> {
+        self.documents.read().get(uri).cloned()
+    }
+
+    /// A copy of the open buffer's current text.
+    pub(crate) fn open_document_content(&self, uri: &Url) -> Option<String> {
+        let document = self.open_document(uri)?;
+        let content = document.read().content.clone();
+        Some(content)
+    }
+
+    pub(crate) fn is_document_open(&self, uri: &Url) -> bool {
+        self.documents.read().contains_key(uri)
+    }
+
+    /// Read-only view of every open buffer, held only while iterating.
+    pub(crate) fn open_documents(&self) -> OpenDocumentView<'_> {
+        self.documents.read()
+    }
+
+    /// Apply the editor's latest text to an open buffer, opening it if new.
+    pub(crate) fn update_open_document(
+        &self,
+        uri: &Url,
+        file_id: SourceFileId,
+        content: String,
+        version: i32,
+    ) {
+        self.documents.update(uri, file_id, content, version);
+    }
+
+    /// Forget the editor's buffer. Analysis facts stay for cross-file navigation.
+    pub(crate) fn close_open_document(&self, uri: &Url) {
+        self.documents.remove(uri);
+    }
 }

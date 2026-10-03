@@ -54,7 +54,7 @@ pub async fn find_completion_at_position(
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
 
-    let Some(document) = server.documents.read().get(&uri).cloned() else {
+    let Some(document) = server.open_document(&uri) else {
         return CompletionResponse::Array(Vec::new());
     };
     EngineQuery::with_doc_and_project(document, server.project_for_uri(&uri))
