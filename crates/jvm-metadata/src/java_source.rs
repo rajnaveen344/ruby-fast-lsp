@@ -141,7 +141,7 @@ pub fn locate_java_source_declarations(
         .filter_map(|field| locate_field(field, &field_nodes, source))
         .collect::<Vec<_>>();
     Ok(Some(JavaSourceClassLocation {
-        internal_name: class.name.clone(),
+        internal_name: class.name.to_string(),
         declaration_range: node_range(class_node),
         name_range: node_range(name_node),
         methods,
@@ -258,14 +258,14 @@ fn locate_method(
     nodes: &[Node<'_>],
     source: &str,
 ) -> Option<JavaSourceMemberLocation> {
-    if method.name == "<clinit>" {
+    if &*method.name == "<clinit>" {
         return None;
     }
     let descriptor = parse_method_descriptor(&method.descriptor).ok()?;
-    let expected_name = if method.name == "<init>" {
+    let expected_name = if &*method.name == "<init>" {
         None
     } else {
-        Some(method.name.as_str())
+        Some(&*method.name)
     };
     let mut candidates = nodes
         .iter()
@@ -274,7 +274,7 @@ fn locate_method(
                 node.kind(),
                 "constructor_declaration" | "compact_constructor_declaration"
             );
-            if is_constructor != (method.name == "<init>") {
+            if is_constructor != (&*method.name == "<init>") {
                 return None;
             }
             let name = node.child_by_field_name("name")?;
@@ -326,8 +326,8 @@ fn locate_method(
     }
     let (declaration, name, _) = candidates[0].clone();
     Some(JavaSourceMemberLocation {
-        name: method.name.clone(),
-        descriptor: method.descriptor.clone(),
+        name: method.name.to_string(),
+        descriptor: method.descriptor.to_string(),
         declaration_range: node_range(declaration),
         name_range: node_range(name),
     })
@@ -344,7 +344,7 @@ fn locate_field(
             let Some(name) = node.child_by_field_name("name") else {
                 continue;
             };
-            if name.utf8_text(source.as_bytes()).ok()? == field.name {
+            if name.utf8_text(source.as_bytes()).ok()? == &*field.name {
                 matches.push((*node, name));
             }
             continue;
@@ -357,7 +357,7 @@ fn locate_field(
             let Some(name) = child.child_by_field_name("name") else {
                 continue;
             };
-            if name.utf8_text(source.as_bytes()).ok()? == field.name {
+            if name.utf8_text(source.as_bytes()).ok()? == &*field.name {
                 matches.push((*node, name));
             }
         }
@@ -366,8 +366,8 @@ fn locate_field(
         return None;
     }
     Some(JavaSourceMemberLocation {
-        name: field.name.clone(),
-        descriptor: field.descriptor.clone(),
+        name: field.name.to_string(),
+        descriptor: field.descriptor.to_string(),
         declaration_range: node_range(matches[0].0),
         name_range: node_range(matches[0].1),
     })

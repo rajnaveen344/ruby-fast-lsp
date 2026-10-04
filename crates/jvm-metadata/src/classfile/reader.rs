@@ -2,20 +2,27 @@
 
 use super::constant_pool::ConstantPool;
 use super::model::ClassLimits;
+use super::strings::JvmStringInterner;
 use super::MetadataError;
 
-pub(super) struct ClassParser<'a> {
+pub(super) struct ClassParser<'a, 's> {
     pub(super) cursor: Cursor<'a>,
     pub(super) limits: ClassLimits,
     pub(super) attributes_seen: usize,
+    pub(super) strings: &'s mut JvmStringInterner,
 }
 
-impl<'a> ClassParser<'a> {
-    pub(super) fn new(bytes: &'a [u8], limits: ClassLimits) -> Self {
+impl<'a, 's> ClassParser<'a, 's> {
+    pub(super) fn new(
+        bytes: &'a [u8],
+        limits: ClassLimits,
+        strings: &'s mut JvmStringInterner,
+    ) -> Self {
         Self {
             cursor: Cursor::new(bytes),
             limits,
             attributes_seen: 0,
+            strings,
         }
     }
 
@@ -82,14 +89,15 @@ pub(super) fn require_finished(cursor: &Cursor<'_>) -> Result<(), MetadataError>
     Ok(())
 }
 
-pub(super) fn parse_signature_attribute(
+/// Generic signatures are not retained; the attribute must still name a
+/// valid Utf8 constant and contain nothing else.
+pub(super) fn validate_signature_attribute(
     bytes: &[u8],
     constant_pool: &ConstantPool,
-) -> Result<String, MetadataError> {
+) -> Result<(), MetadataError> {
     let mut cursor = Cursor::new(bytes);
-    let signature = constant_pool.utf8(cursor.u2()?)?.to_string();
-    require_finished(&cursor)?;
-    Ok(signature)
+    constant_pool.utf8(cursor.u2()?)?;
+    require_finished(&cursor)
 }
 
 pub(super) fn bounded_nested_count(

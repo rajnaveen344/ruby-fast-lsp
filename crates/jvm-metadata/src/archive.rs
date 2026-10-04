@@ -6,30 +6,90 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{parse_class, ClassFile, ClassLimits, MetadataError};
+use crate::classfile::{add_capacity, add_slice_allocation, StringWeigher};
+use crate::{parse_class_with_interner, ClassFile, ClassLimits, JvmStringInterner, MetadataError};
 
 const JMOD_MAGIC: &[u8; 4] = b"JM\x01\x00";
 const VERSIONED_PREFIX: &str = "META-INF/versions/";
 pub const ARCHIVE_PRODUCT_SEMANTIC_VERSION: &str =
-    concat!(env!("CARGO_PKG_VERSION"), ":archive-product-v1");
+    concat!(env!("CARGO_PKG_VERSION"), ":archive-product-v2");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArchiveKind {
     Jar,
     Jmod,
 }
 
+/// One selected class. Its archive entry is derived from the archive kind,
+/// the selected multi-release version, and the class name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveClass {
-    pub entry_name: String,
     pub release: Option<u16>,
     pub class: Arc<ClassFile>,
+}
+
+impl ArchiveClass {
+    pub fn entry_name(&self, kind: ArchiveKind) -> String {
+        match (kind, self.release) {
+            (ArchiveKind::Jmod, _) => format!("classes/{}.class", self.class.name),
+            (ArchiveKind::Jar, None) => format!("{}.class", self.class.name),
+            (ArchiveKind::Jar, Some(release)) => {
+                format!("{VERSIONED_PREFIX}{release}/{}.class", self.class.name)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveMetadata {
     pub fingerprint_sha256: String,
+    pub kind: ArchiveKind,
     pub classes: Vec<ArchiveClass>,
+}
+
+impl ArchiveMetadata {
+    /// Restore string sharing across classes after deserialization, which
+    /// allocates every string occurrence separately. Classes still shared
+    /// with another owner are left untouched.
+    pub fn share_strings(&mut self) {
+        let mut strings = JvmStringInterner::default();
+        for archived in &mut self.classes {
+            if let Some(class) = Arc::get_mut(&mut archived.class) {
+                class.share_strings(&mut strings);
+            }
+        }
+    }
+
+    /// Conservative owned-heap estimate counting each shared string once.
+    pub fn estimated_heap_bytes(&self) -> u64 {
+        let mut bytes = std::mem::size_of::<Self>();
+        add_capacity(
+            &mut bytes,
+            self.fingerprint_sha256.capacity(),
+            "archive fingerprint",
+        );
+        add_slice_allocation(
+            &mut bytes,
+            self.classes.capacity(),
+            std::mem::size_of::<ArchiveClass>(),
+            "archive class vector",
+        );
+        let mut strings = StringWeigher::deduplicating();
+        for archived in &self.classes {
+            add_capacity(
+                &mut bytes,
+                2 * std::mem::size_of::<usize>(),
+                "shared ClassFile control block",
+            );
+            let class = archived.class.weigh(&mut strings);
+            add_capacity(&mut bytes, class, "shared ClassFile metadata");
+        }
+        u64::try_from(bytes).expect_invariant(
+            "a JVM archive heap estimate does not fit u64",
+            "one archive cannot exceed the process address space",
+            "inspect archive metadata weight arithmetic",
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,24 +222,27 @@ pub fn parse_archive(
     }
 
     let mut classes = Vec::with_capacity(selected.len());
+    let mut strings = JvmStringInterner::default();
     for (logical_name, (release, entry_name, contents)) in selected {
-        let class = parse_class(&contents, limits.class).map_err(|error| ArchiveError::Class {
-            entry: entry_name.clone(),
-            error,
-        })?;
+        let class =
+            parse_class_with_interner(&contents, limits.class, &mut strings).map_err(|error| {
+                ArchiveError::Class {
+                    entry: entry_name.clone(),
+                    error,
+                }
+            })?;
         let expected = logical_name.strip_suffix(".class").expect_invariant(
             "selected JVM entry does not end in .class",
             "entry selection keeps only .class names",
             "keep the .class filter in entry selection",
         );
-        if class.name != expected {
+        if &*class.name != expected {
             return Err(ArchiveError::ClassPathMismatch {
                 entry: entry_name,
-                declared: class.name,
+                declared: class.name.to_string(),
             });
         }
         classes.push(ArchiveClass {
-            entry_name,
             release,
             class: Arc::new(class),
         });
@@ -187,6 +250,7 @@ pub fn parse_archive(
 
     Ok(ArchiveMetadata {
         fingerprint_sha256: format!("{:x}", Sha256::digest(bytes)),
+        kind,
         classes,
     })
 }
@@ -433,6 +497,10 @@ mod tests {
             parse_archive(&archive, ArchiveKind::Jar, 10, ArchiveLimits::default())
                 .expect("base class must be selected below the first eligible release");
         assert_eq!(java_10_metadata.classes[0].release, None);
+        assert_eq!(
+            java_10_metadata.classes[0].entry_name(java_10_metadata.kind),
+            "com/example/Demo.class"
+        );
         assert_eq!(java_10_metadata.classes[0].class.major_version, 61);
 
         let java_11_metadata =
@@ -445,6 +513,10 @@ mod tests {
             parse_archive(&archive, ArchiveKind::Jar, 21, ArchiveLimits::default())
                 .expect("highest eligible class must be selected");
         assert_eq!(java_21_metadata.classes[0].release, Some(17));
+        assert_eq!(
+            java_21_metadata.classes[0].entry_name(java_21_metadata.kind),
+            "META-INF/versions/17/com/example/Demo.class"
+        );
         assert_eq!(java_21_metadata.classes[0].class.major_version, 61);
         assert_eq!(java_21_metadata.fingerprint_sha256.len(), 64);
     }
@@ -462,7 +534,87 @@ mod tests {
         let metadata = parse_archive(&jmod, ArchiveKind::Jmod, 17, ArchiveLimits::default())
             .expect("checked JMOD fixture must parse");
         assert_eq!(metadata.classes.len(), 1);
-        assert_eq!(metadata.classes[0].class.name, "com/example/Demo");
+        assert_eq!(&*metadata.classes[0].class.name, "com/example/Demo");
+        assert_eq!(
+            metadata.classes[0].entry_name(metadata.kind),
+            "classes/com/example/Demo.class"
+        );
+    }
+
+    #[test]
+    fn archive_classes_share_equal_strings_after_parse_and_after_decode() {
+        let rich = decode_hex(include_str!("../fixtures/rich_fixture.class.hex"));
+        let inner = decode_hex(include_str!("../fixtures/inner.class.hex"));
+        let archive = zip_bytes(&[
+            ("fixtures/RichFixture.class", &rich),
+            ("fixtures/RichFixture$Inner.class", &inner),
+        ]);
+        let parsed = parse_archive(&archive, ArchiveKind::Jar, 17, ArchiveLimits::default())
+            .expect("checked JAR fixture must parse");
+        let super_names = |metadata: &ArchiveMetadata| {
+            metadata
+                .classes
+                .iter()
+                .map(|archived| {
+                    archived
+                        .class
+                        .super_name
+                        .clone()
+                        .expect("fixture classes extend Object")
+                })
+                .collect::<Vec<_>>()
+        };
+        let parsed_supers = super_names(&parsed);
+        assert_eq!(parsed_supers.len(), 2);
+        assert!(
+            Arc::ptr_eq(&parsed_supers[0], &parsed_supers[1]),
+            "classes parsed from one archive must share equal strings"
+        );
+
+        // Decoding allocates every string occurrence separately; model that
+        // with classes parsed independently, then restore sharing.
+        let mut decoded = ArchiveMetadata {
+            fingerprint_sha256: parsed.fingerprint_sha256.clone(),
+            kind: parsed.kind,
+            classes: parsed
+                .classes
+                .iter()
+                .map(|archived| {
+                    let bytes = if archived.class.name.ends_with("$Inner") {
+                        &inner
+                    } else {
+                        &rich
+                    };
+                    ArchiveClass {
+                        release: archived.release,
+                        class: Arc::new(
+                            crate::parse_class(bytes, ClassLimits::default())
+                                .expect("checked class fixture must parse"),
+                        ),
+                    }
+                })
+                .collect(),
+        };
+        let unshared_weight = decoded.estimated_heap_bytes();
+        let decoded_supers = super_names(&decoded);
+        assert!(!Arc::ptr_eq(&decoded_supers[0], &decoded_supers[1]));
+        drop(decoded_supers);
+
+        decoded.share_strings();
+        let shared_supers = super_names(&decoded);
+        assert!(
+            Arc::ptr_eq(&shared_supers[0], &shared_supers[1]),
+            "share_strings must restore sharing across decoded classes"
+        );
+        assert_eq!(decoded, parsed, "sharing must not change metadata values");
+        assert!(
+            decoded.estimated_heap_bytes() < unshared_weight,
+            "the archive estimate must count each shared string once"
+        );
+        assert_eq!(
+            decoded.estimated_heap_bytes(),
+            parsed.estimated_heap_bytes()
+        );
     }
 
     #[test]

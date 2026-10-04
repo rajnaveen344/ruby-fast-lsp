@@ -374,7 +374,8 @@ fn safe_source_path(declaration: &JavaClassDeclaration) -> Result<PathBuf, JavaD
     let source_file = declaration
         .class
         .source_file
-        .clone()
+        .as_deref()
+        .map(str::to_string)
         .unwrap_or_else(|| format!("{outer}.java"));
     if source_file.is_empty()
         || source_file == "."
@@ -813,7 +814,7 @@ fn find_verified_output(
     }
     if matches.len() > 1 {
         return Err(JavaDecompilerError::AmbiguousOutput(
-            declaration.class.name.clone(),
+            declaration.class.name.to_string(),
         ));
     }
     Ok(matches.pop())

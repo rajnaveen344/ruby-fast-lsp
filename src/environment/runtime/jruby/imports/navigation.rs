@@ -61,8 +61,8 @@ impl JrubyImportProvider {
             .read()
             .get(&(
                 internal_name.to_string(),
-                method.name.clone(),
-                method.descriptor.clone(),
+                method.name.to_string(),
+                method.descriptor.to_string(),
             ))
             .copied()
     }
@@ -118,8 +118,8 @@ impl JrubyImportProvider {
             };
             supplemental.methods.retain(|location| {
                 declaration.class.methods.iter().any(|method| {
-                    method.name == location.name
-                        && method.descriptor == location.descriptor
+                    *method.name == *location.name
+                        && *method.descriptor == *location.descriptor
                         && concrete_navigation_method(method)
                 })
             });
@@ -215,7 +215,7 @@ fn has_missing_concrete_navigation_methods(
     class.methods.iter().any(|method| {
         concrete_navigation_method(method)
             && !exact.methods.iter().any(|location| {
-                location.name == method.name && location.descriptor == method.descriptor
+                *location.name == *method.name && *location.descriptor == *method.descriptor
             })
     })
 }
@@ -223,8 +223,8 @@ fn has_missing_concrete_navigation_methods(
 fn concrete_navigation_method(method: &MemberInfo) -> bool {
     !method.is_abstract()
         && !method.is_native()
-        && method.name != "<clinit>"
-        && (method.name == "<init>" || RubyMethod::new(&method.name).is_ok())
+        && &*method.name != "<clinit>"
+        && (&*method.name == "<init>" || RubyMethod::new(&method.name).is_ok())
         && matches!(
             method.visibility(),
             Visibility::Public | Visibility::Protected

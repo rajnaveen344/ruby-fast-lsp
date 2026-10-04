@@ -1,6 +1,7 @@
 //! Public classfile declaration metadata, limits, and flag accessors.
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassLimits {
@@ -31,16 +32,16 @@ impl Default for ClassLimits {
     }
 }
 
+/// One field or method declaration. Strings are shared within an archive:
+/// descriptors, owner names, and parameter names repeat across members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberInfo {
     pub access_flags: u16,
-    pub name: String,
-    pub descriptor: String,
-    pub signature: Option<String>,
-    pub exceptions: Vec<String>,
-    pub parameters: Vec<MethodParameter>,
-    pub annotations: Vec<AnnotationInfo>,
     pub first_line: Option<u16>,
+    pub name: Arc<str>,
+    pub descriptor: Arc<str>,
+    pub exceptions: Box<[Arc<str>]>,
+    pub parameters: Box<[MethodParameter]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,29 +92,7 @@ impl MemberInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MethodParameter {
-    pub name: String,
-    pub access_flags: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnnotationInfo {
-    pub descriptor: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InnerClassInfo {
-    pub inner_class: String,
-    pub outer_class: Option<String>,
-    pub inner_name: Option<String>,
-    pub access_flags: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecordComponentInfo {
-    pub name: String,
-    pub descriptor: String,
-    pub signature: Option<String>,
-    pub annotations: Vec<AnnotationInfo>,
+    pub name: Arc<str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,22 +105,23 @@ pub enum ClassKind {
     Module,
 }
 
+/// Declaration metadata retained for one class. Only what navigation,
+/// signatures, and Java call resolution read is kept; generic signatures,
+/// annotations, inner-class tables, and module bodies are validated during
+/// parsing and then dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassFile {
     pub minor_version: u16,
     pub major_version: u16,
     pub access_flags: u16,
-    pub name: String,
-    pub super_name: Option<String>,
-    pub interfaces: Vec<String>,
-    pub fields: Vec<MemberInfo>,
-    pub methods: Vec<MemberInfo>,
-    pub source_file: Option<String>,
-    pub signature: Option<String>,
-    pub annotations: Vec<AnnotationInfo>,
-    pub inner_classes: Vec<InnerClassInfo>,
-    pub record_components: Vec<RecordComponentInfo>,
-    pub module_name: Option<String>,
+    /// The class carries a non-empty `Record` attribute.
+    pub is_record: bool,
+    pub name: Arc<str>,
+    pub super_name: Option<Arc<str>>,
+    pub interfaces: Box<[Arc<str>]>,
+    pub fields: Box<[MemberInfo]>,
+    pub methods: Box<[MemberInfo]>,
+    pub source_file: Option<Arc<str>>,
 }
 
 impl ClassFile {
@@ -152,7 +132,7 @@ impl ClassFile {
             ClassKind::Annotation
         } else if self.access_flags & 0x4000 != 0 {
             ClassKind::Enum
-        } else if !self.record_components.is_empty() {
+        } else if self.is_record {
             ClassKind::Record
         } else if self.access_flags & 0x0200 != 0 {
             ClassKind::Interface

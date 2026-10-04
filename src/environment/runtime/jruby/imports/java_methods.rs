@@ -109,7 +109,7 @@ impl JrubyImportProvider {
             .methods
             .iter()
             .filter(|method| {
-                method.name == old_name
+                *method.name == *old_name
                     && !method.is_static()
                     && signature.as_ref().is_none_or(|expected| {
                         parse_method_descriptor(&method.descriptor)
@@ -454,7 +454,7 @@ impl JrubyImportProvider {
                 continue;
             };
             for method in &declaration.class.methods {
-                if method.name != method_name || method.visibility() != Visibility::Public {
+                if &*method.name != method_name || method.visibility() != Visibility::Public {
                     continue;
                 }
                 let Ok(descriptor) = parse_method_descriptor(&method.descriptor) else {
@@ -478,10 +478,10 @@ impl JrubyImportProvider {
                 }
             }
             if let Some(super_name) = &declaration.class.super_name {
-                queue.push_back((super_name.clone(), depth + 1));
+                queue.push_back((super_name.to_string(), depth + 1));
             }
             for interface in &declaration.class.interfaces {
-                queue.push_back((interface.clone(), depth + 1));
+                queue.push_back((interface.to_string(), depth + 1));
             }
         }
         selected.sort_by(|left, right| {

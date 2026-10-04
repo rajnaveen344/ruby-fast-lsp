@@ -1,147 +1,118 @@
 //! Conservative owned-heap estimates for retained classfile metadata.
 
-use super::model::{
-    AnnotationInfo, ClassFile, InnerClassInfo, MemberInfo, MethodParameter, RecordComponentInfo,
-};
+use super::model::{ClassFile, MemberInfo, MethodParameter};
 use crate::invariant::ExpectInvariant;
+use std::collections::HashSet;
 use std::mem::size_of;
+use std::sync::Arc;
+
+/// Weighs shared strings. A standalone class counts every string occurrence;
+/// an archive counts each shared allocation once.
+pub(crate) struct StringWeigher {
+    seen: Option<HashSet<*const u8>>,
+}
+
+impl StringWeigher {
+    pub(crate) fn per_occurrence() -> Self {
+        Self { seen: None }
+    }
+
+    pub(crate) fn deduplicating() -> Self {
+        Self {
+            seen: Some(HashSet::new()),
+        }
+    }
+
+    fn add(&mut self, bytes: &mut usize, value: &Arc<str>, label: &'static str) {
+        if let Some(seen) = self.seen.as_mut() {
+            if !seen.insert(value.as_ptr()) {
+                return;
+            }
+        }
+        // `Arc<str>` stores strong and weak counts beside the bytes.
+        add_capacity(bytes, 2 * size_of::<usize>(), label);
+        add_capacity(bytes, value.len(), label);
+    }
+
+    fn add_optional(&mut self, bytes: &mut usize, value: Option<&Arc<str>>, label: &'static str) {
+        if let Some(value) = value {
+            self.add(bytes, value, label);
+        }
+    }
+
+    fn add_slice(&mut self, bytes: &mut usize, values: &[Arc<str>], label: &'static str) {
+        add_slice_allocation(bytes, values.len(), size_of::<Arc<str>>(), label);
+        for value in values {
+            self.add(bytes, value, label);
+        }
+    }
+}
 
 impl ClassFile {
     /// Conservative owned-heap estimate used to bound process-local immutable
-    /// metadata retention. It counts allocation capacities, not merely logical
-    /// lengths, and includes the fixed `ClassFile` allocation itself.
+    /// metadata retention. It counts every string occurrence as its own
+    /// allocation and includes the fixed `ClassFile` allocation itself.
     pub fn estimated_heap_bytes(&self) -> u64 {
-        let mut bytes = size_of::<Self>();
-        add_capacity(&mut bytes, self.name.capacity(), "class name");
-        add_optional_string(&mut bytes, self.super_name.as_ref(), "superclass name");
-        add_string_vector(&mut bytes, &self.interfaces, "interface names");
-        add_member_vector(&mut bytes, &self.fields, "field metadata");
-        add_member_vector(&mut bytes, &self.methods, "method metadata");
-        add_optional_string(&mut bytes, self.source_file.as_ref(), "source file");
-        add_optional_string(&mut bytes, self.signature.as_ref(), "class signature");
-        add_annotation_vector(&mut bytes, &self.annotations, "class annotations");
-
-        add_vector_allocation(
-            &mut bytes,
-            self.inner_classes.capacity(),
-            size_of::<InnerClassInfo>(),
-            "inner-class metadata",
-        );
-        for inner in &self.inner_classes {
-            add_capacity(&mut bytes, inner.inner_class.capacity(), "inner class name");
-            add_optional_string(&mut bytes, inner.outer_class.as_ref(), "outer class name");
-            add_optional_string(&mut bytes, inner.inner_name.as_ref(), "inner simple name");
-        }
-
-        add_vector_allocation(
-            &mut bytes,
-            self.record_components.capacity(),
-            size_of::<RecordComponentInfo>(),
-            "record-component metadata",
-        );
-        for component in &self.record_components {
-            add_capacity(
-                &mut bytes,
-                component.name.capacity(),
-                "record component name",
-            );
-            add_capacity(
-                &mut bytes,
-                component.descriptor.capacity(),
-                "record component descriptor",
-            );
-            add_optional_string(
-                &mut bytes,
-                component.signature.as_ref(),
-                "record component signature",
-            );
-            add_annotation_vector(
-                &mut bytes,
-                &component.annotations,
-                "record component annotations",
-            );
-        }
-
-        add_optional_string(&mut bytes, self.module_name.as_ref(), "module name");
-        u64::try_from(bytes).expect_invariant(
+        u64::try_from(self.weigh(&mut StringWeigher::per_occurrence())).expect_invariant(
             "a JVM ClassFile heap estimate does not fit u64",
             "one parsed class cannot exceed the process address space",
             "inspect class metadata bounds and weight arithmetic",
         )
     }
+
+    pub(crate) fn weigh(&self, strings: &mut StringWeigher) -> usize {
+        let mut bytes = size_of::<Self>();
+        strings.add(&mut bytes, &self.name, "class name");
+        strings.add_optional(&mut bytes, self.super_name.as_ref(), "superclass name");
+        strings.add_slice(&mut bytes, &self.interfaces, "interface names");
+        add_members(&mut bytes, &self.fields, strings, "field metadata");
+        add_members(&mut bytes, &self.methods, strings, "method metadata");
+        strings.add_optional(&mut bytes, self.source_file.as_ref(), "source file");
+        bytes
+    }
 }
 
-fn add_member_vector(bytes: &mut usize, members: &Vec<MemberInfo>, label: &'static str) {
-    add_vector_allocation(bytes, members.capacity(), size_of::<MemberInfo>(), label);
+fn add_members(
+    bytes: &mut usize,
+    members: &[MemberInfo],
+    strings: &mut StringWeigher,
+    label: &'static str,
+) {
+    add_slice_allocation(bytes, members.len(), size_of::<MemberInfo>(), label);
     for member in members {
-        add_capacity(bytes, member.name.capacity(), "member name");
-        add_capacity(bytes, member.descriptor.capacity(), "member descriptor");
-        add_optional_string(bytes, member.signature.as_ref(), "member signature");
-        add_string_vector(bytes, &member.exceptions, "member exceptions");
-        add_vector_allocation(
+        strings.add(bytes, &member.name, "member name");
+        strings.add(bytes, &member.descriptor, "member descriptor");
+        strings.add_slice(bytes, &member.exceptions, "member exceptions");
+        add_slice_allocation(
             bytes,
-            member.parameters.capacity(),
+            member.parameters.len(),
             size_of::<MethodParameter>(),
             "method parameters",
         );
         for parameter in &member.parameters {
-            add_capacity(bytes, parameter.name.capacity(), "method parameter name");
+            strings.add(bytes, &parameter.name, "method parameter name");
         }
-        add_annotation_vector(bytes, &member.annotations, "member annotations");
     }
 }
 
-fn add_annotation_vector(
+pub(crate) fn add_slice_allocation(
     bytes: &mut usize,
-    annotations: &Vec<AnnotationInfo>,
-    label: &'static str,
-) {
-    add_vector_allocation(
-        bytes,
-        annotations.capacity(),
-        size_of::<AnnotationInfo>(),
-        label,
-    );
-    for annotation in annotations {
-        add_capacity(
-            bytes,
-            annotation.descriptor.capacity(),
-            "annotation descriptor",
-        );
-    }
-}
-
-fn add_string_vector(bytes: &mut usize, values: &Vec<String>, label: &'static str) {
-    add_vector_allocation(bytes, values.capacity(), size_of::<String>(), label);
-    for value in values {
-        add_capacity(bytes, value.capacity(), label);
-    }
-}
-
-fn add_optional_string(bytes: &mut usize, value: Option<&String>, label: &'static str) {
-    if let Some(value) = value {
-        add_capacity(bytes, value.capacity(), label);
-    }
-}
-
-fn add_vector_allocation(
-    bytes: &mut usize,
-    capacity: usize,
+    len: usize,
     element_size: usize,
     label: &'static str,
 ) {
-    let allocation = capacity.checked_mul(element_size).unwrap_or_else(|| {
+    let allocation = len.checked_mul(element_size).unwrap_or_else(|| {
         unreachable_invariant!(
             what = "JVM {label} allocation weight overflowed usize",
             why = "parsed metadata is bounded by the process address space",
-            fix = "inspect vector capacity and element-size accounting",
+            fix = "inspect slice length and element-size accounting",
             label = label,
         )
     });
     add_capacity(bytes, allocation, label);
 }
 
-fn add_capacity(bytes: &mut usize, capacity: usize, label: &'static str) {
+pub(crate) fn add_capacity(bytes: &mut usize, capacity: usize, label: &'static str) {
     *bytes = bytes.checked_add(capacity).unwrap_or_else(|| {
         unreachable_invariant!(
             what = "JVM {label} heap weight overflowed usize",

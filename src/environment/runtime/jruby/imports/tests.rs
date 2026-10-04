@@ -29,17 +29,13 @@ fn catalog(class_names: &[&str]) -> Arc<ProjectJavaCatalog> {
                         minor_version: 0,
                         major_version: 61,
                         access_flags: 0x0021,
-                        name: (*name).to_string(),
-                        super_name: Some("java/lang/Object".to_string()),
-                        interfaces: Vec::new(),
-                        fields: Vec::new(),
-                        methods: Vec::new(),
+                        name: (*name).into(),
+                        super_name: Some("java/lang/Object".into()),
+                        interfaces: Box::default(),
+                        fields: Box::default(),
+                        methods: Box::default(),
                         source_file: None,
-                        signature: None,
-                        annotations: Vec::new(),
-                        inner_classes: Vec::new(),
-                        record_components: Vec::new(),
-                        module_name: None,
+                        is_record: false,
                     }),
                     artifact_path: crate::test::harness::fixture_path("/fixture/runtime.jar"),
                     artifact_fingerprint_sha256: "fixture".to_string(),
@@ -54,6 +50,12 @@ fn catalog(class_names: &[&str]) -> Arc<ProjectJavaCatalog> {
         classes,
         duplicates: Vec::new(),
     })
+}
+
+fn add_methods(class: &mut ClassFile, methods: impl IntoIterator<Item = MemberInfo>) {
+    let mut all = class.methods.to_vec();
+    all.extend(methods);
+    class.methods = all.into_boxed_slice();
 }
 
 fn collect(source: &str, class_names: &[&str]) -> FactCollector {
@@ -179,27 +181,24 @@ fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
         .classes
         .get_mut("java/util/ArrayList")
         .expect("fixture class must exist");
-    Arc::make_mut(&mut declaration.class)
-        .methods
-        .push(MemberInfo {
+    add_methods(
+        Arc::make_mut(&mut declaration.class),
+        [MemberInfo {
             access_flags: 0x0001,
-            name: "add".to_string(),
-            descriptor: "(ILjava/lang/Object;)Z".to_string(),
-            signature: None,
-            exceptions: Vec::new(),
-            parameters: vec![
+            name: "add".into(),
+            descriptor: "(ILjava/lang/Object;)Z".into(),
+            exceptions: Box::default(),
+            parameters: Box::new([
                 MethodParameter {
-                    name: "index".to_string(),
-                    access_flags: 0,
+                    name: "index".into(),
                 },
                 MethodParameter {
-                    name: "value".to_string(),
-                    access_flags: 0,
+                    name: "value".into(),
                 },
-            ],
-            annotations: Vec::new(),
+            ]),
             first_line: None,
-        });
+        }],
+    );
     let collector = collect_with_catalog(
         "java_import java.util.ArrayList\n\
              class ArrayList\n\
@@ -242,34 +241,29 @@ fn java_send_selects_an_exact_overload_projects_its_return_and_references_its_na
         .get_mut("java/util/ArrayList")
         .expect("fixture class must exist");
     let list = Arc::make_mut(&mut declaration.class);
-    list.methods.extend([
-        MemberInfo {
-            access_flags: 0x0001,
-            name: "get".to_string(),
-            descriptor: "(I)Ljava/lang/Object;".to_string(),
-            signature: None,
-            exceptions: Vec::new(),
-            parameters: vec![MethodParameter {
-                name: "index".to_string(),
-                access_flags: 0,
-            }],
-            annotations: Vec::new(),
-            first_line: None,
-        },
-        MemberInfo {
-            access_flags: 0x0001,
-            name: "get".to_string(),
-            descriptor: "(Ljava/lang/String;)Ljava/lang/String;".to_string(),
-            signature: None,
-            exceptions: Vec::new(),
-            parameters: vec![MethodParameter {
-                name: "key".to_string(),
-                access_flags: 0,
-            }],
-            annotations: Vec::new(),
-            first_line: None,
-        },
-    ]);
+    add_methods(
+        list,
+        [
+            MemberInfo {
+                access_flags: 0x0001,
+                name: "get".into(),
+                descriptor: "(I)Ljava/lang/Object;".into(),
+                exceptions: Box::default(),
+                parameters: Box::new([MethodParameter {
+                    name: "index".into(),
+                }]),
+                first_line: None,
+            },
+            MemberInfo {
+                access_flags: 0x0001,
+                name: "get".into(),
+                descriptor: "(Ljava/lang/String;)Ljava/lang/String;".into(),
+                exceptions: Box::default(),
+                parameters: Box::new([MethodParameter { name: "key".into() }]),
+                first_line: None,
+            },
+        ],
+    );
     let provider = Arc::new(JrubyImportProvider::new(Arc::new(catalog)));
     let preferred_range = TextRange::new(SourceFileId(99), 10, 40);
     provider.register_method_navigation_ranges(
@@ -406,34 +400,31 @@ fn java_method_distinguishes_bound_static_and_unbound_instance_handles() {
         .get_mut("java/lang/String")
         .expect("fixture class must exist");
     let string = Arc::make_mut(&mut declaration.class);
-    string.methods.extend([
-        MemberInfo {
-            access_flags: 0x0009,
-            name: "valueOf".to_string(),
-            descriptor: "(I)Ljava/lang/String;".to_string(),
-            signature: None,
-            exceptions: Vec::new(),
-            parameters: vec![MethodParameter {
-                name: "value".to_string(),
-                access_flags: 0,
-            }],
-            annotations: Vec::new(),
-            first_line: None,
-        },
-        MemberInfo {
-            access_flags: 0x0001,
-            name: "substring".to_string(),
-            descriptor: "(I)Ljava/lang/String;".to_string(),
-            signature: None,
-            exceptions: Vec::new(),
-            parameters: vec![MethodParameter {
-                name: "start".to_string(),
-                access_flags: 0,
-            }],
-            annotations: Vec::new(),
-            first_line: None,
-        },
-    ]);
+    add_methods(
+        string,
+        [
+            MemberInfo {
+                access_flags: 0x0009,
+                name: "valueOf".into(),
+                descriptor: "(I)Ljava/lang/String;".into(),
+                exceptions: Box::default(),
+                parameters: Box::new([MethodParameter {
+                    name: "value".into(),
+                }]),
+                first_line: None,
+            },
+            MemberInfo {
+                access_flags: 0x0001,
+                name: "substring".into(),
+                descriptor: "(I)Ljava/lang/String;".into(),
+                exceptions: Box::default(),
+                parameters: Box::new([MethodParameter {
+                    name: "start".into(),
+                }]),
+                first_line: None,
+            },
+        ],
+    );
     let collector = collect_with_catalog(
         "java_import java.lang.String\n\
              STATIC_HANDLE = String.java_method(:valueOf, [Java::int])\n\

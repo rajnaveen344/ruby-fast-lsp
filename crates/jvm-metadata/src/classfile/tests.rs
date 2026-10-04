@@ -20,6 +20,10 @@ fn decode_hex(source: &str) -> Vec<u8> {
         .collect()
 }
 
+fn strs(values: &[std::sync::Arc<str>]) -> Vec<&str> {
+    values.iter().map(|value| &**value).collect()
+}
+
 fn replace_ascii(bytes: &mut [u8], old: &[u8], new: &[u8]) {
     assert_eq!(old.len(), new.len(), "fixture mutation must preserve size");
     let mut replacements = 0;
@@ -68,13 +72,13 @@ fn parses_checked_minimal_class_fixture() {
         .expect("checked minimal class fixture must parse");
 
     assert_eq!(class.major_version, 61);
-    assert_eq!(class.name, "com/example/Demo");
+    assert_eq!(&*class.name, "com/example/Demo");
     assert_eq!(class.super_name.as_deref(), Some("java/lang/Object"));
     assert_eq!(class.source_file.as_deref(), Some("Demo.java"));
     assert_eq!(class.methods.len(), 1);
     assert_eq!(class.methods[0].access_flags, 0x0001);
-    assert_eq!(class.methods[0].name, "<init>");
-    assert_eq!(class.methods[0].descriptor, "()V");
+    assert_eq!(&*class.methods[0].name, "<init>");
+    assert_eq!(&*class.methods[0].descriptor, "()V");
 }
 
 #[test]
@@ -98,7 +102,7 @@ fn default_limits_accept_large_bounded_aggregate_attribute_counts() {
 
     let class = parse_class(&bytes, ClassLimits::default())
         .expect("a bounded classfile with a production-sized aggregate attribute count must parse");
-    assert_eq!(class.name, "com/example/Demo");
+    assert_eq!(&*class.name, "com/example/Demo");
 }
 
 #[test]
@@ -148,57 +152,30 @@ fn enforces_constant_pool_and_attribute_bounds() {
 }
 
 #[test]
-fn parses_generics_parameters_exceptions_annotations_and_lines() {
+fn parses_parameters_exceptions_and_lines_from_annotated_generic_class() {
     let bytes = decode_hex(include_str!("../../fixtures/rich_fixture.class.hex"));
     let class = parse_class(&bytes, ClassLimits::default()).expect("rich class fixture must parse");
 
-    assert_eq!(class.name, "fixtures/RichFixture");
-    assert_eq!(class.interfaces, vec!["java/lang/Runnable"]);
-    assert_eq!(
-        class.signature.as_deref(),
-        Some("<T:Ljava/lang/Number;>Ljava/lang/Object;Ljava/lang/Runnable;")
-    );
-    assert_eq!(
-        class.annotations,
-        vec![AnnotationInfo {
-            descriptor: "Lfixtures/Marker;".to_string(),
-        }]
-    );
-    assert!(class
-        .inner_classes
-        .iter()
-        .any(|inner| inner.inner_class == "fixtures/RichFixture$Inner"
-            && inner.inner_name.as_deref() == Some("Inner")));
+    assert_eq!(&*class.name, "fixtures/RichFixture");
+    assert_eq!(strs(&class.interfaces), vec!["java/lang/Runnable"]);
 
     let combine = class
         .methods
         .iter()
-        .find(|method| method.name == "combine")
+        .find(|method| &*method.name == "combine")
         .expect("rich fixture must contain combine");
     assert_eq!(combine.access_flags & 0x0080, 0x0080);
+    assert_eq!(strs(&combine.exceptions), vec!["java/io/IOException"]);
     assert_eq!(
-        combine.signature.as_deref(),
-        Some("(Ljava/lang/String;[I)Ljava/util/List<Ljava/lang/String;>;")
-    );
-    assert_eq!(combine.exceptions, vec!["java/io/IOException"]);
-    assert_eq!(
-        combine.parameters,
+        combine.parameters.to_vec(),
         vec![
             MethodParameter {
-                name: "prefix".to_string(),
-                access_flags: 0,
+                name: "prefix".into(),
             },
             MethodParameter {
-                name: "values".to_string(),
-                access_flags: 0,
+                name: "values".into(),
             },
         ]
-    );
-    assert_eq!(
-        combine.annotations,
-        vec![AnnotationInfo {
-            descriptor: "Lfixtures/Marker;".to_string(),
-        }]
     );
     assert_eq!(combine.first_line, Some(24));
 }
@@ -211,8 +188,11 @@ fn classifies_annotation_enum_record_and_inner_class_fixtures() {
     )
     .expect("annotation fixture must parse");
     assert_eq!(marker.kind(), ClassKind::Annotation);
-    assert_eq!(marker.interfaces, vec!["java/lang/annotation/Annotation"]);
-    assert!(marker.methods.iter().any(|method| method.name == "value"));
+    assert_eq!(
+        strs(&marker.interfaces),
+        vec!["java/lang/annotation/Annotation"]
+    );
+    assert!(marker.methods.iter().any(|method| &*method.name == "value"));
 
     let shade = parse_class(
         &decode_hex(include_str!("../../fixtures/shade.class.hex")),
@@ -224,7 +204,7 @@ fn classifies_annotation_enum_record_and_inner_class_fixtures() {
     assert!(shade
         .fields
         .iter()
-        .any(|field| field.name == "RED" && field.access_flags & 0x4000 != 0));
+        .any(|field| &*field.name == "RED" && field.access_flags & 0x4000 != 0));
 
     let point = parse_class(
         &decode_hex(include_str!("../../fixtures/point.class.hex")),
@@ -232,23 +212,7 @@ fn classifies_annotation_enum_record_and_inner_class_fixtures() {
     )
     .expect("record fixture must parse");
     assert_eq!(point.kind(), ClassKind::Record);
-    assert_eq!(
-        point.record_components,
-        vec![
-            RecordComponentInfo {
-                name: "x".to_string(),
-                descriptor: "I".to_string(),
-                signature: None,
-                annotations: Vec::new(),
-            },
-            RecordComponentInfo {
-                name: "y".to_string(),
-                descriptor: "I".to_string(),
-                signature: None,
-                annotations: Vec::new(),
-            },
-        ]
-    );
+    assert!(point.is_record);
 
     let inner = parse_class(
         &decode_hex(include_str!("../../fixtures/inner.class.hex")),
@@ -256,11 +220,11 @@ fn classifies_annotation_enum_record_and_inner_class_fixtures() {
     )
     .expect("inner class fixture must parse");
     assert_eq!(inner.kind(), ClassKind::Class);
-    assert_eq!(inner.name, "fixtures/RichFixture$Inner");
+    assert_eq!(&*inner.name, "fixtures/RichFixture$Inner");
     assert!(inner
         .fields
         .iter()
-        .any(|field| field.name == "this$0" && field.access_flags & 0x1000 != 0));
+        .any(|field| &*field.name == "this$0" && field.access_flags & 0x1000 != 0));
 }
 
 #[test]
@@ -272,13 +236,13 @@ fn uses_debug_parameter_names_then_deterministic_fallbacks() {
     let combine = class
         .methods
         .iter()
-        .find(|method| method.name == "combine")
+        .find(|method| &*method.name == "combine")
         .expect("fixture must contain combine");
     assert_eq!(
         combine
             .parameters
             .iter()
-            .map(|parameter| parameter.name.as_str())
+            .map(|parameter| &*parameter.name)
             .collect::<Vec<_>>(),
         vec!["prefix", "values"]
     );
@@ -293,16 +257,64 @@ fn uses_debug_parameter_names_then_deterministic_fallbacks() {
     let combine = class
         .methods
         .iter()
-        .find(|method| method.name == "combine")
+        .find(|method| &*method.name == "combine")
         .expect("fixture must contain combine");
     assert_eq!(
         combine
             .parameters
             .iter()
-            .map(|parameter| parameter.name.as_str())
+            .map(|parameter| &*parameter.name)
             .collect::<Vec<_>>(),
         vec!["arg0", "arg1"]
     );
+}
+#[test]
+fn validates_dropped_annotation_metadata() {
+    let mut bytes = decode_hex(include_str!("../../fixtures/rich_fixture.class.hex"));
+    replace_ascii(&mut bytes, b"Lfixtures/Marker;", b"Xfixtures/Marker;");
+    assert_eq!(
+        parse_class(&bytes, ClassLimits::default()),
+        Err(MetadataError::InvalidDescriptor),
+        "annotations are not retained but malformed ones must still be rejected"
+    );
+}
+
+#[test]
+fn one_interner_shares_strings_across_classes() {
+    let mut strings = JvmStringInterner::default();
+    let rich = parse_class_with_interner(
+        &decode_hex(include_str!("../../fixtures/rich_fixture.class.hex")),
+        ClassLimits::default(),
+        &mut strings,
+    )
+    .expect("rich class fixture must parse");
+    let inner = parse_class_with_interner(
+        &decode_hex(include_str!("../../fixtures/inner.class.hex")),
+        ClassLimits::default(),
+        &mut strings,
+    )
+    .expect("inner class fixture must parse");
+    let constructor_descriptor = |class: &ClassFile| {
+        class
+            .methods
+            .iter()
+            .find(|method| &*method.name == "<init>")
+            .map(|method| std::sync::Arc::clone(&method.name))
+            .expect("fixture classes declare a constructor")
+    };
+    assert!(std::sync::Arc::ptr_eq(
+        &constructor_descriptor(&rich),
+        &constructor_descriptor(&inner)
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        rich.super_name
+            .as_ref()
+            .expect("rich fixture extends Object"),
+        inner
+            .super_name
+            .as_ref()
+            .expect("inner fixture extends Object"),
+    ));
 }
 
 #[test]
@@ -313,8 +325,7 @@ fn parses_module_identity_without_loading_the_module() {
     )
     .expect("checked module-info fixture must parse");
     assert_eq!(module.kind(), ClassKind::Module);
-    assert_eq!(module.name, "module-info");
-    assert_eq!(module.module_name.as_deref(), Some("fixtures.sample"));
+    assert_eq!(&*module.name, "module-info");
     assert_eq!(module.source_file.as_deref(), Some("module-info.java"));
 }
 
@@ -330,19 +341,19 @@ fn retains_overloads_and_member_flags_as_separate_declarations() {
     let overloads = class
         .methods
         .iter()
-        .filter(|method| method.name == "value")
+        .filter(|method| &*method.name == "value")
         .collect::<Vec<_>>();
     assert_eq!(overloads.len(), 2);
-    assert_eq!(overloads[0].descriptor, "(I)Ljava/lang/String;");
+    assert_eq!(&*overloads[0].descriptor, "(I)Ljava/lang/String;");
     assert_eq!(
-        overloads[1].descriptor,
+        &*overloads[1].descriptor,
         "(Ljava/lang/String;)Ljava/lang/String;"
     );
 
     let native = class
         .methods
         .iter()
-        .find(|method| method.name == "nativeValue")
+        .find(|method| &*method.name == "nativeValue")
         .expect("fixture must contain nativeValue");
     assert_eq!(native.visibility(), Visibility::Protected);
     assert!(native.is_static());

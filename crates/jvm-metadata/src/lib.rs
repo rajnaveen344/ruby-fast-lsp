@@ -18,8 +18,8 @@ pub use archive::{
     ARCHIVE_PRODUCT_SEMANTIC_VERSION,
 };
 pub use classfile::{
-    parse_class, AnnotationInfo, ClassFile, ClassKind, ClassLimits, InnerClassInfo, MemberInfo,
-    MetadataError, MethodParameter, RecordComponentInfo, Visibility,
+    parse_class, parse_class_with_interner, ClassFile, ClassKind, ClassLimits, JvmStringInterner,
+    MemberInfo, MetadataError, MethodParameter, Visibility,
 };
 pub use descriptor::{parse_field_descriptor, parse_method_descriptor, JvmType, MethodDescriptor};
 pub use java_source::{

@@ -17,7 +17,7 @@ use std::mem::size_of;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const JAVA_ARTIFACT_PRODUCT_SCHEMA: u32 = 1;
+const JAVA_ARTIFACT_PRODUCT_SCHEMA: u32 = 2;
 const DEFAULT_JAVA_ARTIFACT_CACHE_ENTRIES: usize = 256;
 const DEFAULT_JAVA_ARTIFACT_CACHE_WEIGHT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -239,7 +239,7 @@ impl PersistentProduct for JavaArtifactProduct {
     }
 
     fn decode(key: &JavaArtifactProductKey, payload: &[u8]) -> AnyResult<Self> {
-        let persisted: PersistentJavaArtifactProduct = postcard::from_bytes(payload)
+        let mut persisted: PersistentJavaArtifactProduct = postcard::from_bytes(payload)
             .context("deserializing persistent Java artifact metadata")?;
         if persisted.schema != JAVA_ARTIFACT_PRODUCT_SCHEMA {
             return Err(anyhow!(
@@ -254,11 +254,13 @@ impl PersistentProduct for JavaArtifactProduct {
             || persisted.jdk_feature != key.jdk_feature
             || persisted.limits_fingerprint_sha256 != key.limits_fingerprint_sha256
             || persisted.archive.fingerprint_sha256 != key.artifact_fingerprint_sha256
+            || persisted.archive.kind != artifact_kind(key.artifact_kind)
         {
             return Err(anyhow!(
                 "persistent Java artifact metadata identity does not match the requested product"
             ));
         }
+        persisted.archive.share_strings();
         let estimated_weight_bytes = estimate_product_weight(key, &persisted.archive);
         Ok(Self {
             key: key.clone(),
@@ -274,44 +276,18 @@ fn estimate_product_weight(key: &JavaArtifactProductKey, archive: &ArchiveMetada
         key.cache_id.capacity(),
         key.artifact_fingerprint_sha256.capacity(),
         key.limits_fingerprint_sha256.capacity(),
-        archive.fingerprint_sha256.capacity(),
     ] {
         add_product_weight(&mut bytes, capacity, "identity string");
     }
     add_product_weight(
         &mut bytes,
-        archive
-            .classes
-            .capacity()
-            .checked_mul(size_of::<ruby_fast_lsp_jvm_metadata::ArchiveClass>())
-            .expect_invariant(
-                "Java archive class-vector weight overflowed usize",
-                "archive class counts are bounded",
-                "inspect archive metadata capacity accounting",
-            ),
-        "archive class vector",
+        usize::try_from(archive.estimated_heap_bytes()).expect_invariant(
+            "a Java archive heap estimate does not fit usize",
+            "the parsed archive exists in this process",
+            "inspect cross-architecture metadata weight conversion",
+        ),
+        "shared archive metadata",
     );
-    for archived in &archive.classes {
-        add_product_weight(
-            &mut bytes,
-            archived.entry_name.capacity(),
-            "archive entry name",
-        );
-        add_product_weight(
-            &mut bytes,
-            size_of::<usize>() * 2,
-            "shared ClassFile control block",
-        );
-        add_product_weight(
-            &mut bytes,
-            usize::try_from(archived.class.estimated_heap_bytes()).expect_invariant(
-                "a ClassFile heap estimate does not fit usize",
-                "the parsed class exists in this process",
-                "inspect cross-architecture metadata weight conversion",
-            ),
-            "shared ClassFile metadata",
-        );
-    }
     u64::try_from(bytes).expect_invariant(
         "Java artifact product weight does not fit u64",
         "one product cannot exceed the process address space",
@@ -451,13 +427,14 @@ fn add_artifact_product(
         why = "JAR and JMOD entry policies are not interchangeable",
         fix = "include and validate artifact kind in the persistent product identity",
     );
+    let archive_kind = product.archive.kind;
     for archived in product.archive.classes {
-        let name = archived.class.name.clone();
+        let name = archived.class.name.to_string();
         let declaration = JavaClassDeclaration {
+            entry_name: archived.entry_name(archive_kind),
             class: archived.class,
             artifact_path: artifact.path.clone(),
             artifact_fingerprint_sha256: artifact.fingerprint_sha256.clone(),
-            entry_name: archived.entry_name,
             release: archived.release,
         };
         if let Some(existing) = classes.get(&name) {

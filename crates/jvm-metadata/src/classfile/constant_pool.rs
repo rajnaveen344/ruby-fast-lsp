@@ -3,7 +3,7 @@
 use super::reader::ClassParser;
 use super::MetadataError;
 
-impl<'a> ClassParser<'a> {
+impl ClassParser<'_, '_> {
     pub(super) fn parse_constant_pool(&mut self) -> Result<ConstantPool, MetadataError> {
         let count = usize::from(self.cursor.u2()?);
         if count == 0 {
@@ -103,9 +103,9 @@ impl ConstantPool {
         }
     }
 
-    pub(super) fn class_name(&self, index: u16) -> Result<String, MetadataError> {
+    pub(super) fn class_name(&self, index: u16) -> Result<&str, MetadataError> {
         match self.entry(index)? {
-            ConstantPoolEntry::Class(name_index) => Ok(self.utf8(*name_index)?.to_string()),
+            ConstantPoolEntry::Class(name_index) => self.utf8(*name_index),
             ConstantPoolEntry::Unusable
             | ConstantPoolEntry::Utf8(_)
             | ConstantPoolEntry::Module(_)

@@ -81,7 +81,7 @@ pub fn generate_ruby_signature(class: &ClassFile) -> Result<String, SignatureErr
     }
     let mut current_visibility = Visibility::Public;
     for method in &class.methods {
-        if method.name == "<clinit>" {
+        if &*method.name == "<clinit>" {
             continue;
         }
         if !valid_ruby_method_name(java_method_name(method)) {
@@ -133,7 +133,7 @@ fn write_field(
     indent: usize,
 ) -> Result<(), SignatureError> {
     let ty = ruby_fast_lsp_jvm_metadata::parse_field_descriptor(&field.descriptor)
-        .map_err(|_| SignatureError::InvalidDescriptor(field.descriptor.clone()))?;
+        .map_err(|_| SignatureError::InvalidDescriptor(field.descriptor.to_string()))?;
     let ruby_type = ruby_type_for_jvm_type(&ty);
     if field.is_static() && (field.is_final() || field.is_enum_constant()) {
         if valid_ruby_constant_name(&field.name) {
@@ -209,7 +209,7 @@ fn write_method(
     indent: usize,
 ) -> Result<(), SignatureError> {
     let descriptor = ruby_fast_lsp_jvm_metadata::parse_method_descriptor(&method.descriptor)
-        .map_err(|_| SignatureError::InvalidDescriptor(method.descriptor.clone()))?;
+        .map_err(|_| SignatureError::InvalidDescriptor(method.descriptor.to_string()))?;
     write_method_docs(output, method, &descriptor, indent);
     writeln!(
         output,
@@ -223,7 +223,7 @@ fn write_method(
         "check the Display impls used by the writer",
     );
     let name = java_method_name(method);
-    let receiver = if method.name == "<init>" || method.is_static() {
+    let receiver = if &*method.name == "<init>" || method.is_static() {
         "self."
     } else {
         ""
@@ -339,7 +339,7 @@ pub fn ruby_type_for_jvm_type(ty: &JvmType) -> String {
 }
 
 fn java_method_name(method: &MemberInfo) -> &str {
-    if method.name == "<init>" {
+    if &*method.name == "<init>" {
         "new"
     } else {
         &method.name
@@ -500,8 +500,8 @@ mod tests {
             parameterized_methods.len() >= 2,
             "checked overload fixture must contain two parameterized methods"
         );
-        class.methods[parameterized_methods[0]].parameters[0].name = "module".to_string();
-        class.methods[parameterized_methods[1]].parameters[0].name = "ID".to_string();
+        class.methods[parameterized_methods[0]].parameters[0].name = "module".into();
+        class.methods[parameterized_methods[1]].parameters[0].name = "ID".into();
 
         let source = generate_ruby_signature(&class)
             .expect("Java parameter metadata must generate valid Ruby");

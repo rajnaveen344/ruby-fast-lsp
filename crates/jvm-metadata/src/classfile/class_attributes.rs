@@ -1,23 +1,24 @@
 //! Class-level InnerClasses, Record, and Module attributes.
+//!
+//! None of their contents is retained beyond the record flag, but each is
+//! still bounded and validated so malformed classfiles are rejected.
 
 use super::constant_pool::ConstantPool;
-use super::model::{InnerClassInfo, RecordComponentInfo};
 use super::reader::{
-    bounded_nested_count, parse_signature_attribute, require_finished, require_unique_attribute,
+    bounded_nested_count, require_finished, require_unique_attribute, validate_signature_attribute,
     ClassParser, Cursor,
 };
 use super::MetadataError;
 
-impl<'a> ClassParser<'a> {
-    pub(super) fn parse_inner_classes(
+impl ClassParser<'_, '_> {
+    pub(super) fn validate_inner_classes(
         &self,
         bytes: &[u8],
         constant_pool: &ConstantPool,
-    ) -> Result<Vec<InnerClassInfo>, MetadataError> {
+    ) -> Result<(), MetadataError> {
         let mut cursor = Cursor::new(bytes);
         let count =
             bounded_nested_count(&mut cursor, self.limits.max_members, "inner class entries")?;
-        let mut classes = Vec::with_capacity(count);
         for _ in 0..count {
             let inner_index = cursor.u2()?;
             if inner_index == 0 {
@@ -27,42 +28,33 @@ impl<'a> ClassParser<'a> {
             }
             let outer_index = cursor.u2()?;
             let name_index = cursor.u2()?;
-            classes.push(InnerClassInfo {
-                inner_class: constant_pool.class_name(inner_index)?,
-                outer_class: if outer_index == 0 {
-                    None
-                } else {
-                    Some(constant_pool.class_name(outer_index)?)
-                },
-                inner_name: if name_index == 0 {
-                    None
-                } else {
-                    Some(constant_pool.utf8(name_index)?.to_string())
-                },
-                access_flags: cursor.u2()?,
-            });
+            constant_pool.class_name(inner_index)?;
+            if outer_index != 0 {
+                constant_pool.class_name(outer_index)?;
+            }
+            if name_index != 0 {
+                constant_pool.utf8(name_index)?;
+            }
+            cursor.u2()?;
         }
-        require_finished(&cursor)?;
-        Ok(classes)
+        require_finished(&cursor)
     }
 
-    pub(super) fn parse_record_components(
+    /// Returns the number of record components.
+    pub(super) fn validate_record_components(
         &mut self,
         bytes: &[u8],
         constant_pool: &ConstantPool,
-    ) -> Result<Vec<RecordComponentInfo>, MetadataError> {
+    ) -> Result<usize, MetadataError> {
         let mut cursor = Cursor::new(bytes);
         let count =
             bounded_nested_count(&mut cursor, self.limits.max_members, "record components")?;
-        let mut components = Vec::with_capacity(count);
         for _ in 0..count {
-            let name = constant_pool.utf8(cursor.u2()?)?.to_string();
-            let descriptor = constant_pool.utf8(cursor.u2()?)?.to_string();
-            crate::descriptor::parse_field_descriptor(&descriptor)
+            constant_pool.utf8(cursor.u2()?)?;
+            let descriptor = constant_pool.utf8(cursor.u2()?)?;
+            crate::descriptor::parse_field_descriptor(descriptor)
                 .map_err(|_| MetadataError::InvalidDescriptor)?;
             let attribute_count = self.bounded_attribute_count_from(&mut cursor)?;
-            let mut signature = None;
-            let mut annotations = Vec::new();
             let mut unique_attributes = std::collections::HashSet::new();
             for _ in 0..attribute_count {
                 let attribute_name = constant_pool.utf8(cursor.u2()?)?;
@@ -75,34 +67,28 @@ impl<'a> ClassParser<'a> {
                 match attribute_name {
                     "Signature" => {
                         require_unique_attribute(&mut unique_attributes, attribute_name)?;
-                        signature = Some(parse_signature_attribute(attribute, constant_pool)?);
+                        validate_signature_attribute(attribute, constant_pool)?;
                     }
                     "RuntimeVisibleAnnotations" | "RuntimeInvisibleAnnotations" => {
-                        annotations.extend(self.parse_annotations(attribute, constant_pool)?);
+                        self.validate_annotations(attribute, constant_pool)?;
                     }
                     "RuntimeVisibleTypeAnnotations" | "RuntimeInvisibleTypeAnnotations" => {}
                     _ => {}
                 }
             }
-            components.push(RecordComponentInfo {
-                name,
-                descriptor,
-                signature,
-                annotations,
-            });
         }
         require_finished(&cursor)?;
-        Ok(components)
+        Ok(count)
     }
 
-    pub(super) fn parse_module_name(
+    pub(super) fn validate_module(
         &self,
         bytes: &[u8],
         constant_pool: &ConstantPool,
-    ) -> Result<String, MetadataError> {
+    ) -> Result<(), MetadataError> {
         let mut cursor = Cursor::new(bytes);
         let module_index = cursor.u2()?;
-        let name = constant_pool.module_name(module_index)?.to_string();
+        constant_pool.module_name(module_index)?;
         cursor.u2()?;
         let version_index = cursor.u2()?;
         if version_index != 0 {
@@ -137,8 +123,7 @@ impl<'a> ClassParser<'a> {
                 cursor.u2()?;
             }
         }
-        require_finished(&cursor)?;
-        Ok(name)
+        require_finished(&cursor)
     }
 }
 

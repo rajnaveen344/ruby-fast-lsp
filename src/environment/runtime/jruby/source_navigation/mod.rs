@@ -287,7 +287,7 @@ fn source_relative_path(class: &ClassFile) -> Result<PathBuf, JavaSourceResoluti
     let (package, simple_name) = class
         .name
         .rsplit_once('/')
-        .map_or(("", class.name.as_str()), |(package, name)| (package, name));
+        .map_or(("", &*class.name), |(package, name)| (package, name));
     let outer_name = simple_name.split('$').next().expect_invariant(
         "accepted JVM internal class name has no outer component",
         "classfile parsing rejects empty class names",
@@ -436,7 +436,7 @@ fn source_from_archive<R: Read + Seek>(
     }
     if matches.len() > 1 {
         return Err(JavaSourceResolutionError::Ambiguous {
-            class_name: declaration.class.name.clone(),
+            class_name: declaration.class.name.to_string(),
             source: root.path.clone(),
         });
     }
@@ -503,8 +503,8 @@ pub fn java_source_navigation_facts_with_declaration(
     include_class_declaration: bool,
 ) -> FileAnalysis {
     invariant_eq!(
-        class.name,
-        location.internal_name,
+        &*class.name,
+        location.internal_name.as_str(),
         what = "Java source location identity differs from classfile metadata",
         why = "source locations must be verified against the exact winning class",
         fix = "call java_source_navigation_facts only with the ClassFile used for source matching",
@@ -545,7 +545,8 @@ pub fn java_source_navigation_facts_with_declaration(
             .methods
             .iter()
             .find(|method| {
-                method.name == source_method.name && method.descriptor == source_method.descriptor
+                *method.name == *source_method.name
+                    && *method.descriptor == *source_method.descriptor
             })
             .expect_invariant(
                 "verified Java source method has no exact classfile member",
@@ -557,7 +558,7 @@ pub fn java_source_navigation_facts_with_declaration(
             "classfile parsing validates descriptors before catalog insertion",
             "retain the validated descriptor from JVM metadata",
         );
-        let method_name = if method.name == "<init>" {
+        let method_name = if &*method.name == "<init>" {
             "new"
         } else {
             &method.name
@@ -565,7 +566,7 @@ pub fn java_source_navigation_facts_with_declaration(
         let Ok(method_name) = RubyMethod::new(method_name) else {
             continue;
         };
-        let owner_kind = if method.name == "<init>" || method.is_static() {
+        let owner_kind = if &*method.name == "<init>" || method.is_static() {
             NamespaceKind::Singleton
         } else {
             NamespaceKind::Instance
@@ -635,7 +636,7 @@ pub fn java_source_navigation_facts_with_declaration(
             .fields
             .iter()
             .find(|field| {
-                field.name == source_field.name && field.descriptor == source_field.descriptor
+                *field.name == *source_field.name && *field.descriptor == *source_field.descriptor
             })
             .expect_invariant(
                 "verified Java source field has no exact classfile member",

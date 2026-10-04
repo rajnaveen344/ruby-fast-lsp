@@ -320,7 +320,7 @@ impl JrubyImportProvider {
             return;
         };
         invariant_eq!(
-            declaration.class.name,
+            &*declaration.class.name,
             java_name.internal_name(),
             what = "Java catalog key and declaration name disagree",
             why = "archive ingestion validates class identity before catalog insertion",

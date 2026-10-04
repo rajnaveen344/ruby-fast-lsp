@@ -1,43 +1,38 @@
 //! Runtime annotation attributes and bounded element-value skipping.
 
 use super::constant_pool::ConstantPool;
-use super::model::{AnnotationInfo, ClassLimits};
+use super::model::ClassLimits;
 use super::reader::{bounded_nested_count, require_finished, ClassParser, Cursor};
 use super::MetadataError;
 
-impl<'a> ClassParser<'a> {
-    pub(super) fn parse_annotations(
+impl ClassParser<'_, '_> {
+    /// Annotations are not retained; they are still bounded and validated so
+    /// malformed classfiles fail exactly as before.
+    pub(super) fn validate_annotations(
         &self,
         bytes: &[u8],
         constant_pool: &ConstantPool,
-    ) -> Result<Vec<AnnotationInfo>, MetadataError> {
+    ) -> Result<(), MetadataError> {
         let mut cursor = Cursor::new(bytes);
         let count = bounded_nested_count(&mut cursor, self.limits.max_annotations, "annotations")?;
-        let mut annotations = Vec::with_capacity(count);
         for _ in 0..count {
-            annotations.push(parse_annotation(
-                &mut cursor,
-                constant_pool,
-                self.limits,
-                0,
-            )?);
+            validate_annotation(&mut cursor, constant_pool, self.limits, 0)?;
         }
-        require_finished(&cursor)?;
-        Ok(annotations)
+        require_finished(&cursor)
     }
 }
 
-fn parse_annotation(
+fn validate_annotation(
     cursor: &mut Cursor<'_>,
     constant_pool: &ConstantPool,
     limits: ClassLimits,
     depth: usize,
-) -> Result<AnnotationInfo, MetadataError> {
+) -> Result<(), MetadataError> {
     if depth > limits.max_annotation_depth {
         return Err(MetadataError::LimitExceeded("annotation depth"));
     }
-    let descriptor = constant_pool.utf8(cursor.u2()?)?.to_string();
-    crate::descriptor::parse_field_descriptor(&descriptor)
+    let descriptor = constant_pool.utf8(cursor.u2()?)?;
+    crate::descriptor::parse_field_descriptor(descriptor)
         .map_err(|_| MetadataError::InvalidDescriptor)?;
     let pair_count =
         bounded_nested_count(cursor, limits.max_annotations, "annotation element pairs")?;
@@ -45,7 +40,7 @@ fn parse_annotation(
         constant_pool.utf8(cursor.u2()?)?;
         skip_annotation_value(cursor, constant_pool, limits, depth)?;
     }
-    Ok(AnnotationInfo { descriptor })
+    Ok(())
 }
 
 fn skip_annotation_value(
@@ -63,7 +58,7 @@ fn skip_annotation_value(
             cursor.u2()?;
         }
         b'@' => {
-            parse_annotation(cursor, constant_pool, limits, depth + 1)?;
+            validate_annotation(cursor, constant_pool, limits, depth + 1)?;
         }
         b'[' => {
             let count =
