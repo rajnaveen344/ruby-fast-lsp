@@ -257,7 +257,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
     let uri = crate::test::harness::fixture_uri("/tmp/rubystubs33/kernel.rb");
     let file_id = server.open_or_update_analysis_file_with_kind(
         &uri,
-        "module Kernel\n  def puts\n  end\nend".to_string(),
+        "module Kernel\n  def puts\n  end\nend",
         SourceKind::Stub,
     );
     let kernel = RubyConstant::new("Kernel").expect("test constant must be valid");

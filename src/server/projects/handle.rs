@@ -105,19 +105,8 @@ impl ProjectHandle {
 
     /// Register `content` at `path`, replacing the source of a file already
     /// registered there, and return the file's identity.
-    pub fn register_source(
-        &self,
-        path: PathBuf,
-        content: String,
-        kind: SourceKind,
-    ) -> SourceFileId {
-        self.update(|engine| {
-            engine.register_file(SourceFileInput {
-                path,
-                content,
-                kind,
-            })
-        })
+    pub fn register_source(&self, path: PathBuf, content: &str, kind: SourceKind) -> SourceFileId {
+        self.update(|engine| engine.register_file_borrowed(path, content, kind))
     }
 
     /// Resolve the whole project after deferred registrations.

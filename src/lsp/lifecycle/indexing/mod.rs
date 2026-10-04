@@ -156,7 +156,7 @@ pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams)
     let uri = params.text_document.uri.clone();
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
-    let content = params.text_document.text.clone();
+    let content = params.text_document.text;
     let existing_kind = analysis_file_kind(server, &uri);
     let source_kind = existing_kind.unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
     // Facts from cold indexing do not carry the open document's local
@@ -164,7 +164,7 @@ pub async fn handle_did_open(server: &Server, params: DidOpenTextDocumentParams)
     let skip_processing = existing_kind.is_some_and(|kind| kind.is_dependency_source());
     let register_start = Instant::now();
     let analysis_file_id =
-        server.open_or_update_analysis_file_with_kind(&uri, content.clone(), source_kind);
+        server.open_or_update_analysis_file_with_kind(&uri, &content, source_kind);
     let register_elapsed = register_start.elapsed();
     #[cfg(test)]
     if let Ok(path) = uri.to_file_path() {
@@ -328,7 +328,7 @@ fn analysis_file_kind(server: &Server, uri: &Url) -> Option<SourceKind> {
     })
 }
 
-pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentParams) {
+pub async fn handle_did_change(server: &Server, mut params: DidChangeTextDocumentParams) {
     let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
     let semantic_lock = server.document_semantic_lock(&uri);
@@ -336,8 +336,8 @@ pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentPar
     let version = params.text_document.version;
 
     // Get the final content from the last change
-    let final_content = match params.content_changes.last() {
-        Some(change) => change.text.clone(),
+    let final_content = match params.content_changes.pop() {
+        Some(change) => change.text,
         None => return,
     };
     server.clear_external_linter_diagnostics(&uri);
@@ -345,7 +345,7 @@ pub async fn handle_did_change(server: &Server, params: DidChangeTextDocumentPar
     let source_kind = analysis_file_kind(server, &uri)
         .unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
     let analysis_file_id =
-        server.open_or_update_analysis_file_with_kind(&uri, final_content.clone(), source_kind);
+        server.open_or_update_analysis_file_with_kind(&uri, &final_content, source_kind);
     let register_elapsed = register_start.elapsed();
     #[cfg(test)]
     if let Ok(path) = uri.to_file_path() {

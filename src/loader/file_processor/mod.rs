@@ -250,9 +250,7 @@ impl FileProcessor {
             let analysis_source = analysis_source(uri, content);
             let parse_result = ruby_prism::parse(analysis_source.as_bytes());
             let source_kind = self.analysis_source_kind_for_uri(ctx.sink.as_ref(), uri);
-            let analysis_file_id = ctx
-                .sink
-                .register_source(uri, content.to_string(), source_kind);
+            let analysis_file_id = ctx.sink.register_source(uri, content, source_kind);
             let doc = RubyDocument::with_analysis_file_id(
                 uri.clone(),
                 content.to_string(),
@@ -275,9 +273,7 @@ impl FileProcessor {
         let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
         let source_kind = self.analysis_source_kind_for_uri(ctx.sink.as_ref(), uri);
-        let analysis_file_id = ctx
-            .sink
-            .register_source(uri, content.to_string(), source_kind);
+        let analysis_file_id = ctx.sink.register_source(uri, content, source_kind);
         let document_version = ctx
             .sources
             .open_document_version(uri)
@@ -343,7 +339,7 @@ impl FileProcessor {
 
         let visitor_start = Instant::now();
         let mut visitor = FactCollector::analysis_only(
-            document.clone(),
+            document,
             self.fact_collector_host(extensions_enabled, !source_kind.is_dependency_source()),
             analysis_engine.clone().semantics(),
         );

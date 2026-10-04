@@ -495,9 +495,9 @@ impl Project {
             .register_borrowed(path, content, SourceKind::Gem, Some(package))
     }
 
-    /// Register source whose caller retains the owned buffer. ASCII files need
-    /// only their line index and content hash after collection; non-ASCII files
-    /// retain one engine-owned copy for exact UTF-16 conversion.
+    /// Register source whose caller retains the buffer. The engine keeps the
+    /// line index and content hash, plus the text of non-ASCII lines for exact
+    /// UTF-16 conversion, never the whole source.
     pub fn register_file_borrowed(
         &mut self,
         path: PathBuf,

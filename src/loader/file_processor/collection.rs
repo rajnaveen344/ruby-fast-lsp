@@ -174,8 +174,7 @@ impl FileProcessor {
         resolution: FileResolution,
     ) -> Result<()> {
         let analysis_engine = sink.target_for_uri(uri);
-        let analysis_file_id =
-            sink.register_source(uri, content.to_string(), SourceKind::Signature);
+        let analysis_file_id = sink.register_source(uri, content, SourceKind::Signature);
         let facts = match ruby_analysis::indexer::index_rbs(analysis_file_id, content) {
             Ok(facts) => facts,
             Err(error) => {

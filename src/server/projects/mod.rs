@@ -343,18 +343,10 @@ impl Server {
         self.projects.remove_file_from_other_projects(uri, owner)
     }
 
-    pub fn open_or_update_analysis_file(
-        &self,
-        uri: &Url,
-        source: impl Into<String>,
-    ) -> SourceFileId {
-        self.projects.open_or_update_analysis_file(uri, source)
-    }
-
     pub fn open_or_update_analysis_file_with_kind(
         &self,
         uri: &Url,
-        source: impl Into<String>,
+        source: &str,
         kind: SourceKind,
     ) -> SourceFileId {
         self.projects
@@ -525,26 +517,17 @@ impl ProjectRegistry {
         }
     }
 
-    pub fn open_or_update_analysis_file(
-        &self,
-        uri: &Url,
-        source: impl Into<String>,
-    ) -> SourceFileId {
-        self.open_or_update_analysis_file_with_kind(uri, source, SourceKind::Project)
-    }
-
     pub fn open_or_update_analysis_file_with_kind(
         &self,
         uri: &Url,
-        source: impl Into<String>,
+        source: &str,
         kind: SourceKind,
     ) -> SourceFileId {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let content = source.into();
         self.project_for_uri(uri)
-            .register_source(path, content, kind)
+            .register_source(path, source, kind)
     }
 
     pub fn remove_workspace(&self, root_uri: &Url) {

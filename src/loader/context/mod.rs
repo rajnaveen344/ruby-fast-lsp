@@ -358,7 +358,7 @@ pub(crate) trait LoadSink: Send + Sync {
     /// The root of the deepest project that owns `uri`.
     fn project_root_for_uri(&self, uri: &Url) -> Option<PathBuf>;
     /// Register or replace the source text of `uri` in its owning engine.
-    fn register_source(&self, uri: &Url, content: String, kind: SourceKind) -> SourceFileId;
+    fn register_source(&self, uri: &Url, content: &str, kind: SourceKind) -> SourceFileId;
     /// The extension project context for `uri` read as `kind`.
     fn extension_context_snapshot(
         &self,

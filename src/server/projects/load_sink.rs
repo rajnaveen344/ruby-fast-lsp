@@ -116,7 +116,7 @@ impl LoadSink for Server {
             .map(|workspace| workspace.root_path)
     }
 
-    fn register_source(&self, uri: &Url, content: String, kind: SourceKind) -> SourceFileId {
+    fn register_source(&self, uri: &Url, content: &str, kind: SourceKind) -> SourceFileId {
         self.open_or_update_analysis_file_with_kind(uri, content, kind)
     }
 
