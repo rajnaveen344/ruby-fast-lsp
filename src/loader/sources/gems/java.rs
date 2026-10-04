@@ -5,7 +5,7 @@ use super::ActiveRubyEngine;
 use super::LockedGemIdentity;
 use super::LockedGemSource;
 use anyhow::{anyhow, Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -124,10 +124,14 @@ pub fn discover_locked_java_gem_roots(
         jruby_home.join(format!("lib/ruby/gems/{compatibility_version}.0/gems")),
     ];
 
+    let exact_directories = selected
+        .iter()
+        .map(|identity| format!("{}-{}", identity.name, identity.locked_version))
+        .collect::<Vec<_>>();
+    let mut project_matches = find_project_java_gem_matches(&project_root, &exact_directories)?;
     let mut roots = Vec::new();
-    for identity in selected {
-        let exact_directory = format!("{}-{}", identity.name, identity.locked_version);
-        let project_matches = find_project_java_gem_matches(&project_root, &exact_directory)?;
+    for (identity, exact_directory) in selected.into_iter().zip(exact_directories.iter()) {
+        let project_matches = project_matches.remove(exact_directory).unwrap_or_default();
         if let Some(root) =
             select_unique_java_gem_match(&identity, "project vendor/bundle", project_matches)?
         {
@@ -167,15 +171,21 @@ pub fn discover_locked_java_gem_roots(
     Ok(roots)
 }
 
+/// Walk the project's `vendor/bundle` once and collect every `gems/<dir>`
+/// whose name is one of `exact_directories`, keyed by that name.
 fn find_project_java_gem_matches(
     project_root: &Path,
-    exact_directory: &str,
-) -> Result<Vec<PathBuf>> {
+    exact_directories: &[String],
+) -> Result<HashMap<String, Vec<PathBuf>>> {
     let vendor_bundle = project_root.join("vendor/bundle");
-    if !vendor_bundle.is_dir() {
-        return Ok(Vec::new());
+    let mut matches = HashMap::<String, Vec<PathBuf>>::new();
+    if exact_directories.is_empty() || !vendor_bundle.is_dir() {
+        return Ok(matches);
     }
-    let mut matches = Vec::new();
+    let wanted = exact_directories
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
     let mut entries = 0usize;
     for entry in WalkDir::new(&vendor_bundle)
         .follow_links(false)
@@ -195,13 +205,16 @@ fn find_project_java_gem_matches(
                 MAX_JAVA_GEM_SEARCH_ENTRIES
             ));
         }
+        let Some(name) = entry.file_name().to_str() else {
+            continue;
+        };
         if !entry.file_type().is_dir()
-            || entry.file_name() != exact_directory
+            || !wanted.contains(name)
             || entry
                 .path()
                 .parent()
                 .and_then(Path::file_name)
-                .is_none_or(|name| name != "gems")
+                .is_none_or(|parent| parent != "gems")
         {
             continue;
         }
@@ -218,10 +231,12 @@ fn find_project_java_gem_matches(
                 project_root.display()
             ));
         }
-        matches.push(canonical);
+        matches.entry(name.to_owned()).or_default().push(canonical);
     }
-    matches.sort();
-    matches.dedup();
+    for paths in matches.values_mut() {
+        paths.sort();
+        paths.dedup();
+    }
     Ok(matches)
 }
 
