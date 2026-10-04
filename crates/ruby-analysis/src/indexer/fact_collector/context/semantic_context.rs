@@ -19,12 +19,21 @@ pub(in crate::indexer::fact_collector) struct SemanticContext {
         Arc<HashSet<FullyQualifiedName>>,
     /// Namespaces this walk has declared so far.
     pub(in crate::indexer::fact_collector) known_namespaces: HashSet<FullyQualifiedName>,
-    pub(in crate::indexer::fact_collector) shared_known_namespaces:
-        Option<Arc<HashSet<FullyQualifiedName>>>,
+    pub(in crate::indexer::fact_collector) outside_namespaces: OutsideNamespaces,
     /// Namespaces the whole file declares, including those after the current
     /// node. Method bodies run after the file loads and may name them; a
     /// class body runs in order and must not.
     pub(in crate::indexer::fact_collector) file_namespaces: HashSet<FullyQualifiedName>,
+}
+
+/// Where a walk learns the namespaces declared outside it.
+pub(in crate::indexer::fact_collector) enum OutsideNamespaces {
+    /// The walk reads no other file's declarations.
+    None,
+    /// A batch's frozen set, shared by every file of that batch.
+    Shared(Arc<HashSet<FullyQualifiedName>>),
+    /// The live project, read through [`Semantics::declares_namespace`].
+    Project,
 }
 
 impl SemanticContext {
@@ -44,7 +53,7 @@ impl SemanticContext {
             method_candidates,
             public_method_candidates: Arc::new(HashSet::new()),
             known_namespaces: HashSet::new(),
-            shared_known_namespaces: None,
+            outside_namespaces: OutsideNamespaces::None,
             file_namespaces: HashSet::new(),
         }
     }
@@ -55,7 +64,14 @@ impl FactCollector {
         mut self,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Self {
-        self.semantics.shared_known_namespaces = Some(known_namespaces);
+        self.semantics.outside_namespaces = OutsideNamespaces::Shared(known_namespaces);
+        self
+    }
+
+    /// Read namespaces declared outside this walk from the live project
+    /// instead of a copied set.
+    pub fn with_project_known_namespaces(mut self) -> Self {
+        self.semantics.outside_namespaces = OutsideNamespaces::Project;
         self
     }
 
@@ -82,10 +98,10 @@ impl FactCollector {
         fqn: &FullyQualifiedName,
     ) -> bool {
         self.semantics.known_namespaces.contains(fqn)
-            || self
-                .semantics
-                .shared_known_namespaces
-                .as_ref()
-                .is_some_and(|known| known.contains(fqn))
+            || match &self.semantics.outside_namespaces {
+                OutsideNamespaces::None => false,
+                OutsideNamespaces::Shared(known) => known.contains(fqn),
+                OutsideNamespaces::Project => self.semantics.project.declares_namespace(fqn),
+            }
     }
 }

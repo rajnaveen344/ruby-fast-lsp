@@ -82,6 +82,10 @@ pub trait Semantics: Send + Sync {
     /// constant receiver into a singleton receiver before its call is emitted.
     fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool;
 
+    /// Whether a class or module declaration names `namespace`; a walk that
+    /// reads the live project decides a constant write's owner with it.
+    fn declares_namespace(&self, namespace: &FullyQualifiedName) -> bool;
+
     /// The latest class/module kind of `namespace`; it decides whether a `def
     /// initialize` is a constructor and which reference type a namespace gets.
     fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind>;

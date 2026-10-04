@@ -160,6 +160,16 @@ impl DeclIndex {
         self.symbols.has_facts(fqn_id)
     }
 
+    pub(in crate::engine) fn declares_namespace(
+        &self,
+        names: &Names,
+        fqn: &FullyQualifiedName,
+    ) -> bool {
+        names
+            .fqn_id(fqn)
+            .is_some_and(|fqn_id| self.symbols.declares_namespace(fqn_id))
+    }
+
     pub(in crate::engine) fn known_namespace_fqns(
         &self,
         names: &Names,

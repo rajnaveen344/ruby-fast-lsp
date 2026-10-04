@@ -34,6 +34,10 @@ impl Semantics for View<'_> {
         View::has_graph_node(self, namespace)
     }
 
+    fn declares_namespace(&self, namespace: &FullyQualifiedName) -> bool {
+        View::declares_namespace(self, namespace)
+    }
+
     fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind> {
         View::namespace_node_kind(self, namespace)
     }
@@ -363,6 +367,10 @@ impl<T: ProjectReads> Semantics for T {
 
     fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool {
         self.with_view(|view| Semantics::has_graph_node(view, namespace))
+    }
+
+    fn declares_namespace(&self, namespace: &FullyQualifiedName) -> bool {
+        self.with_view(|view| Semantics::declares_namespace(view, namespace))
     }
 
     fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind> {

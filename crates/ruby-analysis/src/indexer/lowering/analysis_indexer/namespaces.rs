@@ -23,7 +23,7 @@ impl AnalysisIndexer<'_> {
         range: TextRange,
         name_range: TextRange,
     ) {
-        self.known_namespaces.insert(fqn.clone());
+        self.declared_namespaces.insert(fqn.clone());
         self.facts.symbols.push(
             SymbolFact::new(
                 fqn.clone(),
@@ -54,10 +54,15 @@ impl AnalysisIndexer<'_> {
             "class/module graph nodes must be namespace FQNs",
             "only call push_namespace_facts with Namespace facts",
         );
-        self.known_namespaces.insert(singleton_fqn.clone());
+        self.declared_namespaces.insert(singleton_fqn.clone());
         self.facts
             .graph_nodes
             .push(GraphNodeFact::new(singleton_fqn, kind, range));
+    }
+
+    /// Whether this walk or another file declares `fqn` as a namespace.
+    pub(super) fn is_namespace(&self, fqn: &FullyQualifiedName) -> bool {
+        self.declared_namespaces.contains(fqn) || self.known.is_known_namespace(fqn)
     }
 
     fn resolve_namespace(
@@ -75,7 +80,7 @@ impl AnalysisIndexer<'_> {
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
         resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
-            self.known_namespaces.contains(fqn)
+            self.is_namespace(fqn)
         })
     }
 
@@ -176,7 +181,7 @@ impl AnalysisIndexer<'_> {
             receiver,
             implicit_singleton_namespace(&self.scope).as_deref(),
             &self.scope.get_ns_stack(),
-            &|fqn| self.known_namespaces.contains(fqn),
+            &|fqn| self.is_namespace(fqn),
         )
     }
 

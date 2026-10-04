@@ -50,7 +50,7 @@ impl AnalysisIndexer<'_> {
             name,
             implicit_singleton_namespace(&self.scope).as_deref(),
             &self.scope.get_ns_stack(),
-            &|fqn| self.known_namespaces.contains(fqn),
+            &|fqn| self.is_namespace(fqn),
         ) else {
             return;
         };

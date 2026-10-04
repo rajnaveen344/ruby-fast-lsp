@@ -126,6 +126,14 @@ impl<'a> View<'a> {
             })
     }
 
+    /// Whether a class or module declaration names `namespace`, the indexed
+    /// form of `known_namespace_fqns().contains(namespace)`.
+    pub fn declares_namespace(&self, namespace: &FullyQualifiedName) -> bool {
+        self.engine
+            .decls
+            .declares_namespace(&self.engine.names, namespace)
+    }
+
     pub fn known_namespace_fqns(&self) -> HashSet<FullyQualifiedName> {
         self.engine.decls.known_namespace_fqns(&self.engine.names)
     }

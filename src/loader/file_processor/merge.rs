@@ -16,15 +16,12 @@ pub(super) fn collect_direct_facts(
     file_id: ruby_analysis::core::SourceFileId,
     known_namespaces: Option<&HashSet<FullyQualifiedName>>,
 ) -> ruby_analysis::core::FileAnalysis {
-    let known_namespaces = known_namespaces
-        .cloned()
-        .unwrap_or_else(|| collect_known_namespaces(analysis_engine));
     let known = EngineKnownSemantics {
         engine: analysis_engine,
         current_file: file_id,
+        namespaces: known_namespaces,
     };
-    AnalysisIndexer::with_known_semantics(file_id, known_namespaces, &known)
-        .index_node_with_source(node, content)
+    AnalysisIndexer::with_known_semantics(file_id, &known).index_node_with_source(node, content)
 }
 
 pub(super) fn merge_execution_context_direct_facts(
@@ -463,19 +460,22 @@ fn same_type_subject_slot(left: &TypeSubject, right: &TypeSubject) -> bool {
     }
 }
 
-pub(super) fn collect_known_namespaces(
-    analysis_engine: &dyn LoadTarget,
-) -> HashSet<FullyQualifiedName> {
-    analysis_engine.view(|view| view.known_namespace_fqns())
-}
-
 /// Other files' facts, read from the engine's indexes as the walk needs them.
 struct EngineKnownSemantics<'a> {
     engine: &'a dyn LoadTarget,
     current_file: ruby_analysis::core::SourceFileId,
+    /// A batch's frozen namespace set; without one the engine answers live.
+    namespaces: Option<&'a HashSet<FullyQualifiedName>>,
 }
 
 impl KnownSemantics for EngineKnownSemantics<'_> {
+    fn is_known_namespace(&self, namespace: &FullyQualifiedName) -> bool {
+        match self.namespaces {
+            Some(namespaces) => namespaces.contains(namespace),
+            None => self.engine.view(|view| view.declares_namespace(namespace)),
+        }
+    }
+
     fn constant_type(&self, constant: &FullyQualifiedName) -> Option<RubyType> {
         self.engine
             .view(|view| view.agreed_constant_type_outside_file(constant, self.current_file))

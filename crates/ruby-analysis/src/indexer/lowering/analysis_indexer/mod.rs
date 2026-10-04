@@ -1,7 +1,7 @@
 //! Direct declaration pass that lowers one Ruby file into namespace, method,
 //! variable, and seed type facts.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::core::{
     FileAnalysis, FullyQualifiedName, NamespaceKind, RubyConstant, RubyType, SourceFileId,
@@ -29,6 +29,9 @@ mod visitor;
 
 /// Project facts outside the file being indexed, read on demand.
 pub trait KnownSemantics {
+    /// Whether a class or module declaration outside this walk names
+    /// `namespace`.
+    fn is_known_namespace(&self, namespace: &FullyQualifiedName) -> bool;
     /// The one value type every other file agrees on for `constant`.
     fn constant_type(&self, constant: &FullyQualifiedName) -> Option<RubyType>;
 }
@@ -37,14 +40,39 @@ pub trait KnownSemantics {
 struct NoKnownSemantics;
 
 impl KnownSemantics for NoKnownSemantics {
+    fn is_known_namespace(&self, _namespace: &FullyQualifiedName) -> bool {
+        false
+    }
+
     fn constant_type(&self, _constant: &FullyQualifiedName) -> Option<RubyType> {
         None
     }
 }
 
-impl KnownSemantics for HashMap<FullyQualifiedName, RubyType> {
+#[cfg(test)]
+impl KnownSemantics for HashSet<FullyQualifiedName> {
+    fn is_known_namespace(&self, namespace: &FullyQualifiedName) -> bool {
+        self.contains(namespace)
+    }
+
+    fn constant_type(&self, _constant: &FullyQualifiedName) -> Option<RubyType> {
+        None
+    }
+}
+
+#[cfg(test)]
+impl KnownSemantics
+    for (
+        HashSet<FullyQualifiedName>,
+        std::collections::HashMap<FullyQualifiedName, RubyType>,
+    )
+{
+    fn is_known_namespace(&self, namespace: &FullyQualifiedName) -> bool {
+        self.0.contains(namespace)
+    }
+
     fn constant_type(&self, constant: &FullyQualifiedName) -> Option<RubyType> {
-        self.get(constant).cloned()
+        self.1.get(constant).cloned()
     }
 }
 
@@ -54,7 +82,8 @@ pub struct AnalysisIndexer<'k> {
     /// execution contexts for where definitions land: a static eval block's
     /// receiver, or the enclosing owner inside a method body.
     scope: ScopeTracker,
-    known_namespaces: HashSet<FullyQualifiedName>,
+    /// Namespaces this walk declares; `known` answers for other files.
+    declared_namespaces: HashSet<FullyQualifiedName>,
     known: &'k dyn KnownSemantics,
     source: Option<String>,
     /// Byte offsets of the source's newlines, for the zero-based line of a
@@ -96,25 +125,14 @@ impl<'k> AnalysisIndexer<'k> {
     }
 
     pub fn new(file_id: SourceFileId) -> Self {
-        Self::with_known_namespaces(file_id, HashSet::new())
+        Self::with_known_semantics(file_id, &NoKnownSemantics)
     }
 
-    pub fn with_known_namespaces(
-        file_id: SourceFileId,
-        known_namespaces: HashSet<FullyQualifiedName>,
-    ) -> Self {
-        Self::with_known_semantics(file_id, known_namespaces, &NoKnownSemantics)
-    }
-
-    pub fn with_known_semantics(
-        file_id: SourceFileId,
-        known_namespaces: HashSet<FullyQualifiedName>,
-        known: &'k dyn KnownSemantics,
-    ) -> Self {
+    pub fn with_known_semantics(file_id: SourceFileId, known: &'k dyn KnownSemantics) -> Self {
         Self {
             file_id,
             scope: ScopeTracker::new(),
-            known_namespaces,
+            declared_namespaces: HashSet::new(),
             known,
             source: None,
             newline_offsets: Vec::new(),

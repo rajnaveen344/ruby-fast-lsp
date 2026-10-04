@@ -104,6 +104,67 @@ fn shared_known_namespaces_are_immutable_while_file_declarations_stay_local() {
 }
 
 #[test]
+fn project_known_namespaces_read_other_files_live_without_a_copied_set() {
+    use crate::indexer::AnalysisIndexer;
+
+    let other_source = "module Shared\nend\n";
+    let mut engine = Project::new();
+    let other_file_id = engine.register_file(SourceFileInput {
+        path: PathBuf::from("/workspace/lib/shared.rb"),
+        content: other_source.to_string(),
+        kind: SourceKind::Project,
+    });
+    let other_facts = AnalysisIndexer::new(other_file_id).index_source(other_source);
+    engine.update(other_file_id, other_facts, ResolveMode::Immediate);
+    let source = "def helper
+end
+";
+    let file_id = engine.register_file(SourceFileInput {
+        path: PathBuf::from("/workspace/lib/local.rb"),
+        content: source.to_string(),
+        kind: SourceKind::Project,
+    });
+    let engine = Arc::new(RwLock::new(engine));
+    let collector_for = |engine: Arc<RwLock<Project>>| {
+        FactCollector::analysis_only(
+            RubyDocument::with_analysis_file_id(
+                Url::parse("file:///workspace/lib/local.rb").unwrap(),
+                source.to_string(),
+                0,
+                file_id,
+            ),
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        )
+        .with_project_known_namespaces()
+    };
+    let shared = [RubyConstant::new("Shared").unwrap()];
+
+    assert_eq!(
+        collector_for(engine.clone()).direct_resolve_namespace(&shared, true),
+        Some(FullyQualifiedName::namespace(shared.to_vec())),
+        "another file's module declaration must be known from the live project"
+    );
+    assert_eq!(
+        collector_for(engine.clone())
+            .direct_resolve_namespace(&[RubyConstant::new("Missing").unwrap()], true),
+        None,
+        "an undeclared namespace must stay unknown"
+    );
+
+    engine.write().update(
+        other_file_id,
+        FileAnalysis::default(),
+        ResolveMode::Immediate,
+    );
+    assert_eq!(
+        collector_for(engine).direct_resolve_namespace(&shared, true),
+        None,
+        "replacing the declaring file must drop its namespace from live lookups"
+    );
+}
+
+#[test]
 fn qualified_class_superclass_uses_predeclaration_lexical_context() {
     let source = "class BigDecimal\n  def to_s\n    \"base\"\n  end\nend\n\nmodule SitemapGenerator\nend\n\nclass SitemapGenerator::BigDecimal < BigDecimal\n  alias_method :original_to_s, :to_s\nend\n";
     let uri = Url::parse("file:///workspace/core_ext/big_decimal.rb").unwrap();

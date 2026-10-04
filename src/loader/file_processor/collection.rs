@@ -1,7 +1,7 @@
 //! Content-based fact collection and file-owned fact replacement.
 
 use super::compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
-use super::merge::{collect_direct_facts, collect_known_namespaces};
+use super::merge::collect_direct_facts;
 use super::FileProcessor;
 use super::{
     analysis_source, CollectedFileAnalysisOutput, CollectedProjectAnalysis, FileResolution,
@@ -635,10 +635,12 @@ impl FileProcessor {
             fact_collector = fact_collector.without_call_references();
         }
         fact_collector.set_extension_project_context(extension_project_context.clone());
-        let shared_direct_known_namespaces = known_namespaces
-            .unwrap_or_else(|| Arc::new(collect_known_namespaces(&*analysis_engine)));
-        fact_collector =
-            fact_collector.with_shared_direct_known_namespaces(shared_direct_known_namespaces);
+        fact_collector = match known_namespaces {
+            Some(known_namespaces) => {
+                fact_collector.with_shared_direct_known_namespaces(known_namespaces)
+            }
+            None => fact_collector.with_project_known_namespaces(),
+        };
         fact_collector.extend_direct_known_namespaces(
             direct_facts_seed
                 .iter()

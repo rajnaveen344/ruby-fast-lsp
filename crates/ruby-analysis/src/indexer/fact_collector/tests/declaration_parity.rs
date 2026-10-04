@@ -27,7 +27,7 @@ fn walk_declarations(source: &str) -> (BTreeSet<String>, BTreeSet<String>) {
         kind: SourceKind::Gem,
     });
     let known = core_namespaces();
-    let seed = AnalysisIndexer::with_known_namespaces(file_id, known.clone()).index_source(source);
+    let seed = AnalysisIndexer::with_known_semantics(file_id, &known).index_source(source);
 
     let engine = Arc::new(RwLock::new(engine));
     let uri = Url::from_file_path(&path).expect("parity path is absolute");

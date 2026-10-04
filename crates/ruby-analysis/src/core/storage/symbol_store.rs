@@ -123,6 +123,16 @@ impl SymbolStore {
         self.facts.len()
     }
 
+    /// Whether a class or module declaration names `fqn`.
+    pub fn declares_namespace(&self, fqn: FqnId) -> bool {
+        self.facts_by_fqn.get(&fqn).iter().any(|id| {
+            matches!(
+                self.facts.get(*id).kind,
+                SymbolKind::Class | SymbolKind::Module
+            )
+        })
+    }
+
     pub fn known_namespace_fqns(&self) -> HashSet<FqnId> {
         self.facts
             .iter()
