@@ -439,15 +439,12 @@ fn public_receiver_target_exists(
 }
 
 fn has_private_method(view: &View<'_>, method: &RubyMethod) -> bool {
-    view.all_method_facts().iter().any(|fact| {
-        let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
-            return false;
-        };
-        *fact_method == *method && fact.visibility == MethodVisibility::Private
-    }) || view
-        .all_method_visibility_overrides()
-        .iter()
-        .any(|fact| fact.method == *method && fact.visibility == MethodVisibility::Private)
+    view.method_facts_named(*method)
+        .any(|fact| fact.visibility == MethodVisibility::Private)
+        || view
+            .method_visibility_overrides()
+            .iter()
+            .any(|fact| fact.method == *method && fact.visibility == MethodVisibility::Private)
 }
 
 fn location_content<'a>(

@@ -190,7 +190,7 @@ pub(super) fn global_visibility_override_for_method_owner(
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut public_overrides = Vec::new();
     let mut non_public_overrides = Vec::new();
-    for override_fact in engine.view().all_method_visibility_overrides() {
+    for override_fact in engine.view().method_visibility_overrides() {
         if override_fact.method != *method {
             continue;
         }
@@ -209,7 +209,7 @@ pub(super) fn global_visibility_override_for_method_owner(
             non_public_overrides.push(override_fact);
         }
     }
-    let sort_key = |fact: &crate::core::MethodVisibilityOverrideFact| {
+    let sort_key = |fact: &&crate::core::MethodVisibilityOverrideFact| {
         (
             fact.range.file_id,
             fact.range.start_byte,
@@ -221,6 +221,7 @@ pub(super) fn global_visibility_override_for_method_owner(
     non_public_overrides
         .pop()
         .or_else(|| public_overrides.pop())
+        .cloned()
 }
 
 pub(super) fn global_visibility_override_for_method_owner_matching(
@@ -231,8 +232,8 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut overrides = engine
         .view()
-        .all_method_visibility_overrides()
-        .into_iter()
+        .method_visibility_overrides()
+        .iter()
         .filter(|override_fact| {
             override_fact.method == *method
                 && override_fact.visibility == visibility
@@ -251,7 +252,7 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
             fact.range.end_byte,
         )
     });
-    overrides.pop()
+    overrides.pop().cloned()
 }
 
 fn method_visibility_allowed(

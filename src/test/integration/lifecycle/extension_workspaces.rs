@@ -156,7 +156,7 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
 
 fn project_holds_rspec_describe(server: &Server, root_uri: &Url) -> bool {
     server.project_for_uri(root_uri).view(|view| {
-        view.all_method_facts().iter().any(|fact| {
+        view.method_facts().any(|fact| {
             matches!(
                 &fact.fqn,
                 ruby_analysis::core::FullyQualifiedName::Method(namespace, method)

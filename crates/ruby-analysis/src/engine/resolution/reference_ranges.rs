@@ -190,16 +190,15 @@ impl<'a> View<'a> {
         let FullyQualifiedName::Method(parts, method) = method_fqn else {
             return None;
         };
-        self.all_method_facts().iter().find_map(|fact| {
-            let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
-                return None;
-            };
-            if fact_method != method || fact.owner.namespace_parts().as_slice() != parts.as_slice()
-            {
-                return None;
-            }
+        let mut same_owner_parts = self.method_facts_where(|fact, names| {
+            fact.method == Some(*method)
+                && names
+                    .fqn(fact.owner)
+                    .is_none_or(|owner| owner.namespace_parts_slice() == parts.as_slice())
+        });
+        same_owner_parts.find_map(|fact| {
             let effective =
-                effective_method_visibility_for_chain(self.engine, ancestor_chain, fact, method);
+                effective_method_visibility_for_chain(self.engine, ancestor_chain, &fact, method);
             if effective.0 != MethodVisibility::Public {
                 if let Some(override_fact) = global_visibility_override_for_method_owner_matching(
                     self.engine,
@@ -220,7 +219,7 @@ impl<'a> View<'a> {
             Some(effective_method_visibility_for_chain(
                 self.engine,
                 ancestor_chain,
-                fact,
+                &fact,
                 method,
             ))
         })
@@ -272,12 +271,11 @@ impl<'a> View<'a> {
         method: &RubyMethod,
         visibility: MethodVisibility,
     ) -> bool {
-        self.all_method_facts().iter().any(|fact| {
-            let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
-                return false;
-            };
-            fact_method == method && fact.visibility == visibility
+        self.method_facts_where(|fact, _| {
+            fact.method == Some(*method) && fact.visibility == visibility
         })
+        .next()
+        .is_some()
     }
 
     pub fn super_method_reference_ranges(

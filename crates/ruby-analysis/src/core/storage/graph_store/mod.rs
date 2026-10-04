@@ -478,13 +478,17 @@ impl SemanticGraph {
     }
 
     pub fn all_edges(&self) -> Vec<StoredGraphEdgeFact> {
-        let mut facts: Vec<_> = self
-            .edges
-            .iter()
-            .filter_map(|edge| edge.map(StoredGraphEdgeFact::from))
-            .collect();
+        let mut facts: Vec<_> = self.edges().collect();
         sort_graph_edges(&mut facts);
         facts
+    }
+
+    /// Every live resolved edge in arena order, without sorting or copying
+    /// the edge list.
+    pub fn edges(&self) -> impl Iterator<Item = StoredGraphEdgeFact> + '_ {
+        self.edges
+            .iter()
+            .filter_map(|edge| edge.map(StoredGraphEdgeFact::from))
     }
 
     pub fn node_count(&self) -> usize {

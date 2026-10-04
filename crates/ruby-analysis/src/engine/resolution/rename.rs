@@ -153,14 +153,9 @@ impl<'a> View<'a> {
                         self.file(fact.range.file_id)
                             .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     })
-            }) || self.all_method_facts().into_iter().any(|fact| {
-                let FullyQualifiedName::Method(_, fact_method) = fact.fqn else {
-                    return false;
-                };
-                fact_method == new_name
-                    && self
-                        .file(fact.range.file_id)
-                        .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
+            }) || self.method_facts_named(new_name).any(|fact| {
+                self.file(fact.range.file_id)
+                    .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
                     && (target_chain.contains(&fact.owner)
                         || method_lookup_chain(self.engine, &fact.owner).contains(&identity.owner))
             });
@@ -199,13 +194,13 @@ impl<'a> View<'a> {
         // One Ruby declaration can materialize multiple semantic owners (for
         // example `module_function`). Renaming only one of those identities
         // would lie about the resulting program, so reject the coupled token.
-        let every_method_fact = self.all_method_facts();
         if declaration_facts.iter().any(|declaration| {
-            every_method_fact.iter().any(|other| {
-                other.owner != identity.owner
-                    && (other.name_range == declaration.name_range
-                        || other.range == declaration.range)
+            self.method_facts_where(|other, names| {
+                (other.name_range == declaration.name_range || other.range == declaration.range)
+                    && names.fqn(other.owner) != Some(&identity.owner)
             })
+            .next()
+            .is_some()
         }) {
             return None;
         }

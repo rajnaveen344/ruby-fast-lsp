@@ -156,7 +156,7 @@ fn print_summary(
     timing: &ProjectFileCollectionTiming,
     project: &ProjectHandle,
 ) {
-    let method_count = project.view(|view| view.all_method_facts().len());
+    let method_count = project.view(|view| view.method_facts().count());
     info!(
         "[PERF][sync project collection] files={} wall={:?} read={:?} \
          cpu_total={:?} registration={:?} parse={:?} jruby_plan={:?} \

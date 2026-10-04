@@ -676,6 +676,29 @@ impl<'a> View<'a> {
             .collect()
     }
 
+    /// Resolved edges whose target names `parts`, in arena order. Only the
+    /// matching edges are expanded.
+    pub fn graph_edges_targeting<'p>(
+        &self,
+        parts: &'p [RubyConstant],
+    ) -> impl Iterator<Item = GraphEdgeFact> + 'p
+    where
+        'a: 'p,
+    {
+        let names = &self.engine.names;
+        self.engine
+            .hierarchy
+            .graph
+            .edges()
+            .filter(move |edge| {
+                names
+                    .expand_interned_ref(edge.target)
+                    .namespace_parts_slice()
+                    == parts
+            })
+            .map(move |edge| expand_edge_fact(names, edge))
+    }
+
     pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
         self.engine
             .hierarchy

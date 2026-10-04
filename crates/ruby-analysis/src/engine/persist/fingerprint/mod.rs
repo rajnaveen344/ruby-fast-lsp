@@ -289,7 +289,7 @@ impl View<'_> {
             .map(|file_id| (file_id, Vec::new()))
             .collect::<HashMap<_, _>>();
 
-        for fact in self.all_symbol_facts() {
+        for fact in self.symbol_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -302,7 +302,7 @@ impl View<'_> {
                 }),
             );
         }
-        for fact in self.all_method_facts() {
+        for fact in self.method_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,

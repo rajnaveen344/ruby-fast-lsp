@@ -419,8 +419,9 @@ impl MethodStore {
         self.clone_facts(self.facts_by_fqn.get(&fqn))
     }
 
-    pub fn all_facts(&self) -> Vec<StoredMethodFact> {
-        self.facts.iter().cloned().collect()
+    /// Every fact in arena order.
+    pub fn facts(&self) -> impl Iterator<Item = &StoredMethodFact> {
+        self.facts.iter()
     }
 
     pub fn fact_count(&self) -> usize {

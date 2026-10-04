@@ -370,12 +370,18 @@ impl<'a> View<'a> {
         self.engine.decls.symbol_facts_for(&self.engine.names, fqn)
     }
 
-    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
-        expand_symbol_facts(&self.engine.names, self.engine.decls.symbols.all_facts())
+    /// Every symbol fact in store order, expanded one at a time.
+    pub fn symbol_facts(&self) -> impl Iterator<Item = SymbolFact> + 'a {
+        let names = &self.engine.names;
+        self.engine
+            .decls
+            .symbols
+            .facts()
+            .map(move |fact| expand_symbol_fact(names, *fact))
     }
 
     pub fn has_symbols(&self) -> bool {
-        !self.all_symbol_facts().is_empty()
+        self.engine.decls.symbols.fact_count() > 0
     }
 
     pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
@@ -391,8 +397,32 @@ impl<'a> View<'a> {
         self.engine.decls.method_facts_for(&self.engine.names, fqn)
     }
 
-    pub fn all_method_facts(&self) -> Vec<MethodFact> {
-        expand_method_facts(&self.engine.names, self.engine.decls.methods.all_facts())
+    /// Every method fact in store order, expanded one at a time.
+    pub fn method_facts(&self) -> impl Iterator<Item = MethodFact> + 'a {
+        self.method_facts_where(|_, _| true)
+    }
+
+    /// Method facts named `method` on any owner, in store order.
+    pub fn method_facts_named(&self, method: RubyMethod) -> impl Iterator<Item = MethodFact> + 'a {
+        self.method_facts_where(move |fact, _| fact.method == Some(method))
+    }
+
+    /// Method facts in store order whose stored row passes `keep`. Rows that
+    /// fail are never expanded.
+    pub(in crate::engine) fn method_facts_where<'p>(
+        &self,
+        keep: impl Fn(&StoredMethodFact, &Names) -> bool + 'p,
+    ) -> impl Iterator<Item = MethodFact> + 'p
+    where
+        'a: 'p,
+    {
+        let names = &self.engine.names;
+        self.engine
+            .decls
+            .methods
+            .facts()
+            .filter(move |fact| keep(fact, names))
+            .map(move |fact| expand_method_fact(names, fact.clone()))
     }
 
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
@@ -451,8 +481,8 @@ impl<'a> View<'a> {
             .collect()
     }
 
-    pub fn all_method_visibility_overrides(&self) -> Vec<MethodVisibilityOverrideFact> {
-        self.engine.decls.method_visibility_overrides.clone()
+    pub fn method_visibility_overrides(&self) -> &'a [MethodVisibilityOverrideFact] {
+        &self.engine.decls.method_visibility_overrides
     }
 
     pub fn method_names_for_owner(&self, owner: &FullyQualifiedName) -> Vec<&'static str> {

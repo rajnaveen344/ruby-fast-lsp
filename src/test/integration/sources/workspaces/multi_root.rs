@@ -444,7 +444,7 @@ fn method_fact_in_path(
 ) -> bool {
     server.projects().into_iter().any(|project| {
         let engine = project.test_read();
-        engine.view().all_method_facts().into_iter().any(|fact| {
+        let found = engine.view().method_facts().any(|fact| {
             let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
                 return false;
             };
@@ -456,6 +456,7 @@ fn method_fact_in_path(
                 .file(fact.range.file_id)
                 .map(|file| file.path.ends_with(path_suffix))
                 .unwrap_or(false)
-        })
+        });
+        found
     })
 }

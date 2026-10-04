@@ -51,8 +51,7 @@ impl<'a> View<'a> {
     pub fn constant_matches(&self, request: &ConstantLookupRequest) -> Vec<ConstantMatch> {
         let mut seen = HashSet::new();
         let mut candidates = self
-            .all_symbol_facts()
-            .into_iter()
+            .symbol_facts()
             .filter(|fact| {
                 matches!(
                     fact.kind,
@@ -139,10 +138,7 @@ impl<'a> View<'a> {
 
     pub fn module_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
         let mut usages = Vec::new();
-        for edge in self.all_graph_edges() {
-            if edge.target.namespace_parts() != module_fqn.namespace_parts() {
-                continue;
-            }
+        for edge in self.graph_edges_targeting(module_fqn.namespace_parts_slice()) {
             if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
                 && edge.source.namespace_kind() != Some(NamespaceKind::Instance)
             {
@@ -156,7 +152,14 @@ impl<'a> View<'a> {
                 range: edge.range,
             });
         }
-        usages.sort_by_key(|usage| (usage.kind, usage.range.file_id, usage.range.start_byte));
+        usages.sort_by_key(|usage| {
+            (
+                usage.kind,
+                usage.range.file_id,
+                usage.range.start_byte,
+                usage.range.end_byte,
+            )
+        });
         usages
     }
 
@@ -174,7 +177,7 @@ impl<'a> View<'a> {
             }
             visited.push(target.clone());
 
-            for edge in self.all_graph_edges() {
+            for edge in self.graph_edges_targeting(target.namespace_parts_slice()) {
                 if !matches!(
                     edge.kind,
                     GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
@@ -184,9 +187,6 @@ impl<'a> View<'a> {
                 if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
                     && edge.source.namespace_kind() != Some(NamespaceKind::Instance)
                 {
-                    continue;
-                }
-                if edge.target.namespace_parts() != target.namespace_parts() {
                     continue;
                 }
 
@@ -213,20 +213,18 @@ impl<'a> View<'a> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        for fact in self.all_method_facts() {
-            if !fact.owner.namespace_parts().is_empty() {
-                continue;
-            }
-
+        let top_level = self.method_facts_where(|fact, names| {
+            fact.method
+                .is_some_and(|method| method.get_name().starts_with(partial))
+                && names
+                    .fqn(fact.owner)
+                    .is_none_or(|owner| owner.namespace_parts_slice().is_empty())
+        });
+        for fact in top_level {
             let FullyQualifiedName::Method(_, method) = &fact.fqn else {
                 continue;
             };
-            let method_name = method.get_name();
-            if !method_name.starts_with(partial) {
-                continue;
-            }
-
-            if seen.insert(method_name) {
+            if seen.insert(method.get_name()) {
                 facts.push(fact);
             }
         }

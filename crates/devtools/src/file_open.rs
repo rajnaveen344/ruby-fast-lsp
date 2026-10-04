@@ -219,8 +219,8 @@ fn analysis_fact_count(server: &Server) -> u64 {
         .into_iter()
         .map(|project| {
             project.view(|view| {
-                stats::count(view.all_symbol_facts().len())
-                    + stats::count(view.all_method_facts().len())
+                stats::count(view.symbol_facts().count())
+                    + stats::count(view.method_facts().count())
                     + view.stats().get(AnalysisStat::References)
                     + stats::count(view.all_type_facts().len())
             })

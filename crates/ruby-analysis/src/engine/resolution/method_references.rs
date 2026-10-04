@@ -432,7 +432,7 @@ impl<'a> View<'a> {
                 }
             }
         }
-        for override_fact in self.all_method_visibility_overrides() {
+        for override_fact in self.method_visibility_overrides() {
             if override_fact.method != *method {
                 continue;
             }

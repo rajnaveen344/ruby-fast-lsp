@@ -59,13 +59,15 @@ impl Names {
 
     /// Expand a graph edge's interned FQN id, which must exist.
     pub(in crate::engine) fn expand_interned_fqn(&self, id: FqnId) -> FullyQualifiedName {
-        self.fqn(id)
-            .expect_invariant(
-                "graph edge points to missing FQN id",
-                "graph edges must only store interned FQN ids",
-                "intern graph edge FQNs before inserting facts",
-            )
-            .clone()
+        self.expand_interned_ref(id).clone()
+    }
+
+    pub(in crate::engine) fn expand_interned_ref(&self, id: FqnId) -> &FullyQualifiedName {
+        self.fqn(id).expect_invariant(
+            "graph edge points to missing FQN id",
+            "graph edges must only store interned FQN ids",
+            "intern graph edge FQNs before inserting facts",
+        )
     }
 
     pub(in crate::engine) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {

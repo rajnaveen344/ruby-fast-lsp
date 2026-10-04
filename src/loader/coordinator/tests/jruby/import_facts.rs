@@ -126,7 +126,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             &Url::from_file_path(signature_cache_root.join("com/example/Demo.rb")).unwrap(),
         );
         let engine = engine.test_read();
-        let symbols = engine.view().all_symbol_facts();
+        let symbols = engine.view().symbol_facts().collect::<Vec<_>>();
         assert_eq!(
             symbols.iter().filter(|fact| fact.fqn == proxy).count(),
             1,

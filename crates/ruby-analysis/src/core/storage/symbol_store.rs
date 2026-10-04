@@ -115,8 +115,9 @@ impl SymbolStore {
         !self.facts_by_fqn.get(&fqn).is_empty()
     }
 
-    pub fn all_facts(&self) -> Vec<StoredSymbolFact> {
-        self.facts.iter().copied().collect()
+    /// Every fact in arena order.
+    pub fn facts(&self) -> impl Iterator<Item = &StoredSymbolFact> {
+        self.facts.iter()
     }
 
     pub fn fact_count(&self) -> usize {

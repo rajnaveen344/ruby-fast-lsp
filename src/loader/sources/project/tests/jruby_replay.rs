@@ -105,8 +105,7 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
             .handle()
             .test_read()
             .view()
-            .all_symbol_facts()
-            .iter()
+            .symbol_facts()
             .any(|fact| fact.fqn == imported),
         "the providerless first pass must not invent a Java import alias"
     );
@@ -128,8 +127,7 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
             .handle()
             .test_read()
             .view()
-            .all_symbol_facts()
-            .iter()
+            .symbol_facts()
             .any(|fact| fact.fqn == imported),
         "the exact provider pass must replace the Java-sensitive file with its imported alias"
     );
@@ -175,8 +173,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
             .handle()
             .test_read()
             .view()
-            .all_symbol_facts()
-            .iter()
+            .symbol_facts()
             .any(|fact| fact.fqn == active),
         "the latency frontier must remain providerless"
     );
@@ -192,7 +189,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
 
     {
         let engine = workspace_state.handle().test_read();
-        let symbols = engine.view().all_symbol_facts();
+        let symbols = engine.view().symbol_facts().collect::<Vec<_>>();
         assert!(
             symbols.iter().any(|fact| fact.fqn == tail),
             "the exhaustive tail must be collected once with the exact provider"
@@ -220,8 +217,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
             .handle()
             .test_read()
             .view()
-            .all_symbol_facts()
-            .iter()
+            .symbol_facts()
             .any(|fact| fact.fqn == active),
         "the bounded replay must replace the active file with exact Java facts"
     );
@@ -300,8 +296,7 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
             .handle()
             .test_read()
             .view()
-            .all_symbol_facts()
-            .iter()
+            .symbol_facts()
             .any(|fact| fact.fqn == second),
         "the provider-aware batch must expose its Java import before replay"
     );
@@ -319,8 +314,7 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
             .handle()
             .test_read()
             .view()
-            .all_symbol_facts()
-            .iter()
+            .symbol_facts()
             .any(|fact| fact.fqn == first),
         "the bounded replay must replace the providerless batch with exact Java facts"
     );
@@ -605,7 +599,7 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
         assert_eq!(replayed, 2);
         workspace_state.handle().test_write().resolve();
         let engine = workspace_state.handle().test_read();
-        let symbols = engine.view().all_symbol_facts();
+        let symbols = engine.view().symbol_facts().collect::<Vec<_>>();
         assert!(symbols.iter().any(|fact| fact.fqn == first));
         assert!(symbols.iter().any(|fact| fact.fqn == second));
         let actual = engine.view().semantic_result_fingerprint();

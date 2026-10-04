@@ -61,7 +61,7 @@ fn main() -> anyhow::Result<()> {
                     "Total method facts: {}",
                     server
                         .project_for_uri(&workspace_uri)
-                        .view(|view| view.all_method_facts().len())
+                        .view(|view| view.method_facts().count())
                 );
             }
             Err(e) => info!("Indexing failed: {}", e),

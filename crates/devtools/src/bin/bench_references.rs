@@ -182,8 +182,8 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
     server.project_for_uri(&workspace_uri).view(|view| {
         info!(
             "analysis after pass: {} symbols, {} methods, {} refs",
-            view.all_symbol_facts().len(),
-            view.all_method_facts().len(),
+            view.symbol_facts().count(),
+            view.method_facts().count(),
             view.stats()
                 .get(ruby_analysis::engine::AnalysisStat::References)
         );
