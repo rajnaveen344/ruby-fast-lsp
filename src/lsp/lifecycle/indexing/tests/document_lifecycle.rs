@@ -30,7 +30,7 @@ async fn did_open_registers_source_in_project() {
         .expect("did_open must register file in analysis engine");
     let file = engine.view().file(file_id).unwrap();
     assert_eq!(file.line_index.len(), "A = 1".len());
-    assert!(file.source_text().is_none());
+    assert_eq!(file.line_index.retained_text_bytes(), 0);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -341,7 +341,7 @@ async fn did_change_updates_project_source() {
         .expect("did_change must register file in analysis engine");
     let file = engine.view().file(file_id).unwrap();
     assert_eq!(file.line_index.len(), "A = 2".len());
-    assert!(file.source_text().is_none());
+    assert_eq!(file.line_index.retained_text_bytes(), 0);
 }
 
 #[tokio::test]

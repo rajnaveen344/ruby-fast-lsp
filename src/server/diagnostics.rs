@@ -211,7 +211,7 @@ impl Server {
                         .into_iter()
                         .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
                         .collect::<Vec<_>>();
-                    if open_paths.contains(&file.path) {
+                    if open_paths.contains(&*file.path) {
                         open_files = open_files.checked_add(1).expect_invariant(
                             "unresolved-require open-file refresh counter overflowed usize",
                             "the document cache must fit addressable memory",

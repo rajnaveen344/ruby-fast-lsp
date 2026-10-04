@@ -157,7 +157,12 @@ fn fresh_cache_load_rebinds_exact_path_and_corruption_recovers() {
     let parts = [RubyConstant::new("Widget").unwrap()];
     let definition = second_engine.view().constant_definition_ranges(&parts, &[])[0];
     assert_eq!(
-        second_engine.view().file(definition.file_id).unwrap().path,
+        second_engine
+            .view()
+            .file(definition.file_id)
+            .unwrap()
+            .path
+            .to_path_buf(),
         second_path
     );
     assert_eq!(

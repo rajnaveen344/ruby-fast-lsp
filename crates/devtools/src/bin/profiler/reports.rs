@@ -37,7 +37,7 @@ pub(crate) fn print_semantic_export_manifest(server: &Server) -> anyhow::Result<
                         })
                         .to_path_buf()
                 } else {
-                    file.path.clone()
+                    file.path.to_path_buf()
                 };
                 let fingerprint = view.semantic_export_fingerprint(file.id)
                     .map(|fingerprint| stable_fingerprint_hex(fingerprint.stable_bytes()));
@@ -123,7 +123,7 @@ pub(crate) fn print_diagnostic_manifest(server: &Server) -> anyhow::Result<()> {
                         })
                         .to_path_buf()
                 } else {
-                    file.path.clone()
+                    file.path.to_path_buf()
                 };
                 let (start_line, start_character) = file
                     .byte_offset_to_line_character(diagnostic.range.start_byte)

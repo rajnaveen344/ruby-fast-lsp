@@ -18,6 +18,7 @@ use ruby_analysis::indexer::yard::converter::YardTypeConverter;
 use ruby_analysis::indexer::{Identifier, RubyDocument};
 use ruby_analysis::inference::semantics::ReceiverAccess;
 use ruby_prism::Visit;
+use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -400,14 +401,13 @@ fn without_invalid_private_receivers(
     locations
         .into_iter()
         .filter(|location| {
-            let Some(content) =
-                location_content(cursor.view, location, &document.uri, &document.content)
+            let Some(line) = location_line(cursor.view, location, &document.uri, &document.content)
             else {
                 return true;
             };
-            !range_uses_invalid_private_receiver(content, location.range)
-                || explicit_receiver_constant_parts(content, location.range).is_none()
-                || public_receiver_target_exists(cursor.view, method, content, location.range)
+            !range_uses_invalid_private_receiver(&line, location.range)
+                || explicit_receiver_constant_parts(&line, location.range).is_none()
+                || public_receiver_target_exists(cursor.view, method, &line, location.range)
         })
         .collect()
 }
@@ -415,10 +415,10 @@ fn without_invalid_private_receivers(
 fn public_receiver_target_exists(
     view: &View<'_>,
     method: &RubyMethod,
-    content: &str,
+    line: &str,
     range: Range,
 ) -> bool {
-    let Some((receiver_parts, receiver_kind)) = explicit_receiver_constant_parts(content, range)
+    let Some((receiver_parts, receiver_kind)) = explicit_receiver_constant_parts(line, range)
     else {
         return false;
     };
@@ -447,26 +447,45 @@ fn has_private_method(view: &View<'_>, method: &RubyMethod) -> bool {
             .any(|fact| fact.method == *method && fact.visibility == MethodVisibility::Private)
 }
 
-fn location_content<'a>(
+/// The text of the location's line: from the current document, from a
+/// non-ASCII line the engine keeps, or for the other lines of a non-ASCII file
+/// from disk while it still matches the indexed snapshot.
+fn location_line<'a>(
     view: &View<'a>,
     location: &Location,
     current_uri: &Url,
     current_content: &'a str,
-) -> Option<&'a str> {
+) -> Option<Cow<'a, str>> {
+    let line = location.range.start.line;
     if &location.uri == current_uri {
-        return Some(current_content);
+        return current_content
+            .lines()
+            .nth(line as usize)
+            .map(Cow::Borrowed);
     }
     let path = location.uri.to_file_path().ok()?;
-    if let Some(file_id) = view.file_id(&path) {
-        return view.file(file_id)?.source.as_deref();
+    let file = match view.file_id(&path) {
+        Some(file_id) => view.file(file_id)?,
+        None => {
+            let relative = path.strip_prefix(Path::new("/")).ok()?;
+            match view.file_id(relative) {
+                Some(file_id) => view.file(file_id)?,
+                None => view.files().find(|file| file.path.ends_with(relative))?,
+            }
+        }
+    };
+    if file.line_index.is_ascii() {
+        return None;
     }
-    let relative = path.strip_prefix(Path::new("/")).ok()?;
-    if let Some(file_id) = view.file_id(relative) {
-        return view.file(file_id)?.source.as_deref();
+    if let Some(text) = file.line_text(line) {
+        return Some(Cow::Borrowed(text));
     }
-    view.files()
-        .find(|file| file.path.ends_with(relative))
-        .and_then(|file| file.source.as_deref())
+    let content = std::fs::read_to_string(&file.path).ok()?;
+    if !view.file_content_matches(file.id, &content) {
+        return None;
+    }
+    let text = content.lines().nth(line as usize)?;
+    Some(Cow::Owned(text.to_owned()))
 }
 
 fn document_declares_private_method(content: &str, method: &str) -> bool {
@@ -515,10 +534,7 @@ fn visibility_line_mentions_method(line: &str, keyword: &str, method: &str) -> b
         .any(|name| name == method)
 }
 
-fn range_uses_invalid_private_receiver(content: &str, range: Range) -> bool {
-    let Some(line) = content.lines().nth(range.start.line as usize) else {
-        return false;
-    };
+fn range_uses_invalid_private_receiver(line: &str, range: Range) -> bool {
     let before = line
         .chars()
         .take(range.start.character as usize)
@@ -532,10 +548,9 @@ fn range_uses_invalid_private_receiver(content: &str, range: Range) -> bool {
 /// The constant an explicit receiver names, and which side of it receives the
 /// call: `Shapes.call` reaches the module object, `Shapes.new.call` an instance.
 fn explicit_receiver_constant_parts(
-    content: &str,
+    line: &str,
     range: Range,
 ) -> Option<(Vec<RubyConstant>, NamespaceKind)> {
-    let line = content.lines().nth(range.start.line as usize)?;
     let before = line
         .chars()
         .take(range.start.character as usize)

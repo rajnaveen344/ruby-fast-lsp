@@ -422,30 +422,21 @@ fn constant_reference_name_range(
     name: RubyConstant,
 ) -> Option<TextRange> {
     let file = engine.view().file(range.file_id)?;
-    let start = usize::try_from(range.start_byte).ok()?;
-    let end = usize::try_from(range.end_byte).ok()?;
-    if let Some(source) = file.source_text() {
-        let text = source.get(start..end)?;
-        if !text.as_bytes().ends_with(name.as_str().as_bytes()) {
-            return None;
-        }
-    } else {
-        invariant!(
-            file.line_index.is_ascii(),
-            what = "source text was discarded for a non-ASCII file",
-            why = "exact rename validation requires retained non-ASCII source",
-            fix = "retain SourceFile::source whenever SourceLineIndex::is_ascii is false",
-        );
-    }
-    let name_start = end.checked_sub(name.as_str().len())?;
-    if name_start < start {
+    let name_start = range
+        .end_byte
+        .checked_sub(u32::try_from(name.as_str().len()).ok()?)?;
+    if name_start < range.start_byte {
         return None;
     }
-    Some(TextRange::new(
-        range.file_id,
-        u32::try_from(name_start).ok()?,
-        range.end_byte,
-    ))
+    // Only non-ASCII lines keep their text; there the byte range must hold
+    // the name itself, on character boundaries.
+    let (line, _) = file.byte_offset_to_line_character(name_start)?;
+    if file.line_text(line).is_some()
+        && file.non_ascii_text(name_start, range.end_byte) != Some(name.as_str())
+    {
+        return None;
+    }
+    Some(TextRange::new(range.file_id, name_start, range.end_byte))
 }
 
 fn constant_name_collides(

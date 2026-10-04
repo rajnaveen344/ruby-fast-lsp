@@ -574,7 +574,12 @@ fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
     assert_eq!(definitions.len(), 1);
     assert_eq!(definitions[0].file_id, dependency_file);
     assert_eq!(
-        consumer.view().file(definitions[0].file_id).unwrap().path,
+        consumer
+            .view()
+            .file(definitions[0].file_id)
+            .unwrap()
+            .path
+            .to_path_buf(),
         crate::test::harness::fixture_path("/consumer/cache/widget/lib/widget.rb")
     );
 }

@@ -166,7 +166,7 @@ impl ProjectHandle {
             let path = engine
                 .view()
                 .file(file_id)
-                .map(|file| file.path.clone())
+                .map(|file| file.path.to_path_buf())
                 .expect_invariant(
                     "a registered file vanished under the engine write lock",
                     "the lookup and the clear hold one engine write borrow",

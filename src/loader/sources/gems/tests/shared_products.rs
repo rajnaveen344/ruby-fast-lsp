@@ -41,7 +41,12 @@ fn assert_shared_dependency_semantics(engine: &Project, expected_path: &Path) {
         query.constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[]);
     assert_eq!(definitions.len(), 1);
     assert_eq!(
-        engine.view().file(definitions[0].file_id).unwrap().path,
+        engine
+            .view()
+            .file(definitions[0].file_id)
+            .unwrap()
+            .path
+            .to_path_buf(),
         expected_path
     );
     assert_eq!(
@@ -173,7 +178,13 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     assert!(first_engine.read().view().file_id(&second_path).is_none());
     assert!(second_engine.read().view().file_id(&first_path).is_none());
     assert_eq!(
-        first_engine.read().view().file(first_file_id).unwrap().path,
+        first_engine
+            .read()
+            .view()
+            .file(first_file_id)
+            .unwrap()
+            .path
+            .to_path_buf(),
         first_path
     );
     assert_eq!(
@@ -182,7 +193,8 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
             .view()
             .file(second_file_id)
             .unwrap()
-            .path,
+            .path
+            .to_path_buf(),
         second_path
     );
 

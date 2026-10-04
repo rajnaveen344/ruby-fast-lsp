@@ -267,7 +267,7 @@ impl View<'_> {
             );
             (
                 file.kind.definition_precedence(),
-                file.path.as_path(),
+                &*file.path,
                 range.start_byte,
                 range.end_byte,
             )

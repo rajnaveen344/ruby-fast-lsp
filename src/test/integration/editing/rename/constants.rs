@@ -59,6 +59,29 @@ async fn prepare_class_rename_returns_exact_name_and_placeholder() {
 }
 
 #[tokio::test]
+async fn rename_class_updates_references_in_a_non_ascii_file() {
+    let mut editor = FakeEditor::new().await;
+    editor.open("user.rb", "class User\nend\n").await;
+    editor
+        .open(
+            "greeting.rb",
+            "LABEL = \"héllo 😀\"; MODEL = User\nOTHER = ::User\n",
+        )
+        .await;
+
+    let edit = editor
+        .rename_at("user.rb", 0, 7, "Account")
+        .await
+        .expect("class rename should update references on non-ASCII and ASCII lines");
+    editor.apply_edit(&edit).await;
+
+    assert_eq!(
+        editor.content("greeting.rb"),
+        "LABEL = \"héllo 😀\"; MODEL = Account\nOTHER = ::Account\n"
+    );
+}
+
+#[tokio::test]
 async fn rename_module_and_value_constant_across_files() {
     let mut editor = FakeEditor::new().await;
     editor

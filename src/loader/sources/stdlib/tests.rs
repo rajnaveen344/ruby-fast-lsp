@@ -263,7 +263,7 @@ async fn bundled_stub_navigation_retains_source_positions() {
     assert_eq!(ranges.len(), 1);
     let range = ranges[0];
     let file = engine.view().file(range.file_id).unwrap();
-    assert_eq!(file.path, path);
+    assert_eq!(*file.path, *path);
     assert_eq!(
         file.byte_offset_to_line_character(range.start_byte),
         Some((1, 0)),

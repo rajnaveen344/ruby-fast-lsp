@@ -68,7 +68,7 @@ impl RequireFeatureIndex {
                         .extension()
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("rb"))
                 })
-                .map(|file| file.path.clone())
+                .map(|file| file.path.to_path_buf())
                 .collect();
             return Self::from_indexed_paths(roots, &paths);
         }
@@ -469,43 +469,16 @@ pub fn location_for_require_target(path: &Path, view: Option<&View<'_>>) -> Opti
 }
 
 fn require_target_full_range(path: &Path, view: Option<&View<'_>>) -> Option<Range> {
-    if let Some(content) = require_target_content(path, view) {
-        return Some(full_document_range(&content));
+    if let Some(file) = view.and_then(|view| view.file(view.file_id(path)?)) {
+        let (line, character) = file.end_position();
+        return Some(Range::new(
+            Position::new(0, 0),
+            Position::new(line, character),
+        ));
     }
-    if let Some(view) = view {
-        if let Some(file_id) = view.file_id(path) {
-            if let Some(file) = view.file(file_id) {
-                return Some(range_from_engine_file(file));
-            }
-        }
-    }
-    None
-}
-
-fn require_target_content(path: &Path, view: Option<&View<'_>>) -> Option<String> {
-    if let Some(view) = view {
-        if let Some(file_id) = view.file_id(path) {
-            if let Some(file) = view.file(file_id) {
-                if let Some(source) = file.source_text() {
-                    return Some(source.to_string());
-                }
-            }
-        }
-    }
-    std::fs::read_to_string(path).ok()
-}
-
-fn range_from_engine_file(file: &ruby_analysis::engine::SourceFile) -> Range {
-    if let Some(source) = file.source_text() {
-        return full_document_range(source);
-    }
-    let end_line = u32::try_from(file.line_index.line_offsets().len().saturating_sub(1))
-        .expect_invariant(
-            "require target line count exceeded u32",
-            "LSP positions require u32 lines",
-            "reject or segment files with more than u32::MAX lines",
-        );
-    Range::new(Position::new(0, 0), Position::new(end_line, 0))
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|content| full_document_range(&content))
 }
 
 fn full_document_range(content: &str) -> Range {

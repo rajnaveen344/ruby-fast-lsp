@@ -60,7 +60,7 @@ fn registered_paths(editor: &FakeEditor, filename: &str) -> Vec<PathBuf> {
         .view()
         .files()
         .filter(|file| file.path.starts_with(Path::new(filename).parent().unwrap()))
-        .map(|file| file.path.clone())
+        .map(|file| file.path.to_path_buf())
         .collect::<Vec<_>>();
     paths.sort();
     paths

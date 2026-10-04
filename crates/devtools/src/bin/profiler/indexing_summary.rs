@@ -96,27 +96,20 @@ pub(crate) fn indexing_summary_json(
         let mut source_fingerprint = Sha256::new();
         let mut project_source_bytes = 0usize;
         for file in &project_sources {
-            let disk_source;
-            let source = if let Some(source) = file.source.as_deref() {
-                source.as_bytes()
-            } else {
-                disk_source = std::fs::read(&file.path).unwrap_or_else(|error| {
-                    unreachable_invariant!(
-                        what =
-                            "profiler cannot read project-owned evidence file {} (error: {error})",
-                        why = "exact dataset evidence must hash every indexed project byte",
-                        fix = "keep the indexed file readable for the measurement",
-                        file.path.display(),
-                        error = error,
-                    )
-                });
-                disk_source.as_slice()
-            };
+            let source = std::fs::read(&file.path).unwrap_or_else(|error| {
+                unreachable_invariant!(
+                    what = "profiler cannot read project-owned evidence file {} (error: {error})",
+                    why = "exact dataset evidence must hash every indexed project byte",
+                    fix = "keep the indexed file readable for the measurement",
+                    file.path.display(),
+                    error = error,
+                )
+            });
             hash_length_prefixed(
                 &mut source_fingerprint,
                 file.path.to_string_lossy().as_bytes(),
             );
-            hash_length_prefixed(&mut source_fingerprint, source);
+            hash_length_prefixed(&mut source_fingerprint, &source);
             project_source_bytes = project_source_bytes
                 .checked_add(source.len())
                 .expect_invariant(

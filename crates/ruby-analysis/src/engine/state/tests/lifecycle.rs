@@ -29,7 +29,7 @@ fn file_ids_are_stable_across_updates() {
     assert_eq!(engine.view().file_count(), 1);
     let file = engine.view().file(first).unwrap();
     assert_eq!(file.line_index.len(), "A = 2".len());
-    assert!(file.source_text().is_none());
+    assert_eq!(file.line_index.retained_text_bytes(), 0);
 }
 
 #[test]

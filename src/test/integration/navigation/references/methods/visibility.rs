@@ -65,6 +65,33 @@ end
 }
 
 #[tokio::test]
+async fn references_private_method_exclude_invalid_receivers_in_non_ascii_files() {
+    let mut editor = FakeEditor::new().await;
+    let target = "class Vault\n  private\n\n  def secret\n    \"token\"\n  end\nend\n";
+    let caller = "class Caller\n  def run\n    Vault.new.secret\n    \"ü\"; Vault.new.secret\n    \"ü\"; Vault.new.send(:secret)\n    Vault.new.send(:secret)\n  end\nend\n";
+
+    editor.open("vault.rb", target).await;
+    editor.open("caller.rb", caller).await;
+
+    let lines = |refs: &[tower_lsp::lsp_types::Location]| {
+        let mut lines = refs
+            .iter()
+            .filter(|location| location.uri.path().ends_with("caller.rb"))
+            .map(|location| location.range.start.line)
+            .collect::<Vec<_>>();
+        lines.sort_unstable();
+        lines
+    };
+    let refs = editor.references_at("vault.rb", 3, 6).await;
+    assert_eq!(
+        lines(&refs),
+        [4, 5],
+        "private method references must drop explicit receivers on ASCII and non-ASCII lines \
+         of a non-ASCII file, got {refs:?}"
+    );
+}
+
+#[tokio::test]
 async fn references_visibility_argument_form_exclude_invalid_explicit_receivers() {
     check(
         r#"

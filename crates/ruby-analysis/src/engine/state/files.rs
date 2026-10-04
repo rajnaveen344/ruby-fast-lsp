@@ -11,7 +11,6 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::core::storage::memory_estimate::vec_payload_bytes;
 use crate::core::{LibraryPackageId, SourceFileId, SourceKind, TextRange};
 use crate::engine::persist::fingerprint::SemanticExportFingerprint;
 
@@ -21,8 +20,8 @@ use crate::engine::View;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
     pub id: SourceFileId,
-    pub path: PathBuf,
-    pub source: Option<String>,
+    /// Shared with the engine's path-to-id map.
+    pub path: Arc<Path>,
     pub line_index: SourceLineIndex,
     pub content_hash: u64,
     pub kind: SourceKind,
@@ -44,9 +43,70 @@ pub struct SourceFileSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SourceLineIndex {
-    line_offsets: Vec<u32>,
+    /// Each line's start, then the source length when the last line has no
+    /// newline.
+    line_offsets: Box<[u32]>,
     len: u32,
-    ascii: bool,
+    ends_with_newline: bool,
+    non_ascii: NonAsciiLines,
+}
+
+/// The text of the lines that hold non-ASCII bytes. Those lines need their
+/// text for UTF-16 positions and rename checks; an ASCII line maps each byte
+/// to one UTF-16 unit, so it keeps no text.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct NonAsciiLines {
+    /// Sorted line numbers, each with the start of its text in `text`.
+    lines: Box<[(u32, u32)]>,
+    text: Box<str>,
+}
+
+impl NonAsciiLines {
+    fn new(source: &str, line_offsets: &[u32]) -> Self {
+        if source.is_ascii() {
+            return Self::default();
+        }
+        let mut lines = Vec::new();
+        let mut text = String::new();
+        for (line, start) in line_offsets.iter().enumerate() {
+            let end = line_offsets
+                .get(line + 1)
+                .map_or(source.len(), |end| *end as usize);
+            let line_text = &source[*start as usize..end];
+            if line_text.is_ascii() {
+                continue;
+            }
+            lines.push((as_u32(line), as_u32(text.len())));
+            text.push_str(line_text);
+        }
+        Self {
+            lines: lines.into_boxed_slice(),
+            text: text.into_boxed_str(),
+        }
+    }
+
+    /// The text of `line` including its newline, when the line is non-ASCII.
+    fn line(&self, line: u32) -> Option<&str> {
+        let index = self
+            .lines
+            .binary_search_by_key(&line, |(line, _)| *line)
+            .ok()?;
+        let start = self.lines[index].1 as usize;
+        let end = self
+            .lines
+            .get(index + 1)
+            .map_or(self.text.len(), |(_, end)| *end as usize);
+        Some(&self.text[start..end])
+    }
+}
+
+/// A line number or text offset of a source whose length fits u32.
+fn as_u32(value: usize) -> u32 {
+    u32::try_from(value).expect_invariant(
+        "source line number or offset exceeded u32",
+        "registration rejects sources longer than u32::MAX bytes",
+        "keep source length validation before line-index construction",
+    )
 }
 
 impl SourceLineIndex {
@@ -59,20 +119,18 @@ impl SourceLineIndex {
         let mut line_offsets = vec![0];
         for (idx, byte) in source.bytes().enumerate() {
             if byte == b'\n' {
-                line_offsets.push(u32::try_from(idx + 1).expect_invariant(
-                    "source line offset exceeded u32 after the complete source length fit u32",
-                    "a position within a bounded source cannot exceed its length",
-                    "keep source length validation before line-index construction",
-                ));
+                line_offsets.push(as_u32(idx + 1));
             }
         }
         if line_offsets.last() != Some(&len) {
             line_offsets.push(len);
         }
+        let non_ascii = NonAsciiLines::new(source, &line_offsets);
         Self {
-            line_offsets,
+            line_offsets: line_offsets.into_boxed_slice(),
             len,
-            ascii: source.is_ascii(),
+            ends_with_newline: source.ends_with('\n'),
+            non_ascii,
         }
     }
 
@@ -85,15 +143,22 @@ impl SourceLineIndex {
     }
 
     pub fn is_ascii(&self) -> bool {
-        self.ascii
+        self.non_ascii.lines.is_empty()
+    }
+
+    /// Bytes of retained non-ASCII line text.
+    pub fn retained_text_bytes(&self) -> usize {
+        self.non_ascii.text.len()
+    }
+
+    fn estimated_heap_bytes(&self) -> usize {
+        self.line_offsets.len() * size_of::<u32>()
+            + self.non_ascii.lines.len() * size_of::<(u32, u32)>()
+            + self.non_ascii.text.len()
     }
 }
 
 impl SourceFile {
-    pub fn source_text(&self) -> Option<&str> {
-        self.source.as_deref()
-    }
-
     pub fn byte_offset_to_line_character(&self, byte_offset: u32) -> Option<(u32, u32)> {
         let target = byte_offset;
         if target > self.line_index.len {
@@ -104,30 +169,50 @@ impl SourceFile {
             Err(after) => after.saturating_sub(1),
         };
         let line_start = *self.line_index.line_offsets.get(line_index)?;
-        let character = if self.line_index.ascii {
-            target.checked_sub(line_start)?
-        } else {
-            let source = self.source.as_deref()?;
-            let target = target as usize;
-            let line_start = line_start as usize;
-            if !source.is_char_boundary(target) {
-                return None;
-            }
-            source[line_start..target]
+        let line = as_u32(line_index);
+        let character = match self.line_index.non_ascii.line(line) {
+            None => target.checked_sub(line_start)?,
+            Some(text) => text
+                .get(..(target - line_start) as usize)?
                 .chars()
                 .map(char::len_utf16)
                 .sum::<usize>()
                 .try_into()
-                .ok()?
+                .ok()?,
         };
-        Some((
-            u32::try_from(line_index).expect_invariant(
-                "source line index exceeded u32",
-                "LSP positions require u32 lines",
-                "reject or segment files with more than u32::MAX lines",
-            ),
-            character,
-        ))
+        Some((line, character))
+    }
+
+    /// The text of a non-ASCII line without its line terminator, as
+    /// `str::lines` yields it. ASCII lines keep no text.
+    pub fn line_text(&self, line: u32) -> Option<&str> {
+        let text = self.line_index.non_ascii.line(line)?;
+        Some(match text.strip_suffix('\n') {
+            Some(text) => text.strip_suffix('\r').unwrap_or(text),
+            None => text,
+        })
+    }
+
+    /// The text from `start` to `end` when both lie on one non-ASCII line,
+    /// on character boundaries. ASCII lines keep no text.
+    pub fn non_ascii_text(&self, start: u32, end: u32) -> Option<&str> {
+        let (line, _) = self.byte_offset_to_line_character(start)?;
+        let line_start = self.line_index.line_offsets[line as usize];
+        let text = self.line_index.non_ascii.line(line)?;
+        text.get((start - line_start) as usize..end.checked_sub(line_start)? as usize)
+    }
+
+    /// The LSP position at the end of the file: its newline count and the
+    /// UTF-16 length of its last line.
+    pub fn end_position(&self) -> (u32, u32) {
+        let index = &self.line_index;
+        let has_length_entry = index.len > 0 && !index.ends_with_newline;
+        let last = as_u32(index.line_offsets.len() - 1 - usize::from(has_length_entry));
+        let width = match index.non_ascii.line(last) {
+            Some(text) => as_u32(text.encode_utf16().count()),
+            None => index.len - index.line_offsets[last as usize],
+        };
+        (last, width)
     }
 }
 
@@ -144,7 +229,7 @@ pub struct SourceFileInput {
 /// for ids. File ids stay stable for the engine's lifetime.
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct Files {
-    ids_by_path: HashMap<PathBuf, SourceFileId>,
+    ids_by_path: HashMap<Arc<Path>, SourceFileId>,
     next_id: u32,
     files: HashMap<SourceFileId, Arc<SourceFile>>,
     next_revision: u64,
@@ -154,7 +239,7 @@ pub(in crate::engine) struct Files {
 impl Files {
     pub(in crate::engine) fn id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
         self.ids_by_path
-            .get(&normalize_path(path.as_ref()))
+            .get(normalize_path(path.as_ref()).as_path())
             .copied()
     }
 
@@ -193,10 +278,12 @@ impl Files {
         );
     }
 
-    fn id_or_insert(&mut self, path: impl AsRef<Path>) -> SourceFileId {
-        let path = normalize_path(path.as_ref());
-        if let Some(id) = self.ids_by_path.get(&path) {
-            return *id;
+    /// The id and shared normalized path of `path`, allocating an id when
+    /// the path is new.
+    fn path_entry(&mut self, path: &Path) -> (SourceFileId, Arc<Path>) {
+        let path = normalize_path(path);
+        if let Some((shared, id)) = self.ids_by_path.get_key_value(path.as_path()) {
+            return (*id, Arc::clone(shared));
         }
 
         let id = SourceFileId(self.next_id);
@@ -205,8 +292,9 @@ impl Files {
             "SourceFileId currently stores u32 ids",
             "widen SourceFileId before indexing more than u32::MAX files",
         );
-        self.ids_by_path.insert(path, id);
-        id
+        let shared = Arc::<Path>::from(path);
+        self.ids_by_path.insert(Arc::clone(&shared), id);
+        (id, shared)
     }
 
     fn register_owned(
@@ -214,26 +302,12 @@ impl Files {
         file: SourceFileInput,
         library_package: Option<LibraryPackageId>,
     ) -> SourceFileId {
-        let line_index = SourceLineIndex::new(&file.content);
-        let content_hash = source_hash(&file.content);
-        let source = if line_index.is_ascii() {
-            None
-        } else {
-            Some(file.content)
-        };
-        self.register_indexed(
-            file.path,
-            file.kind,
-            line_index,
-            content_hash,
-            source,
-            library_package,
-        )
+        self.register_borrowed(file.path, &file.content, file.kind, library_package)
     }
 
     /// Register source whose caller retains the owned buffer. ASCII files need
     /// only their line index and content hash after collection; non-ASCII files
-    /// retain one engine-owned copy for exact UTF-16 conversion.
+    /// retain the text of their non-ASCII lines for exact UTF-16 conversion.
     fn register_borrowed(
         &mut self,
         path: PathBuf,
@@ -243,37 +317,12 @@ impl Files {
     ) -> SourceFileId {
         let line_index = SourceLineIndex::new(content);
         let content_hash = source_hash(content);
-        let source = if line_index.is_ascii() {
-            None
-        } else {
-            Some(content.to_string())
-        };
-        self.register_indexed(
-            path,
-            kind,
-            line_index,
-            content_hash,
-            source,
-            library_package,
-        )
-    }
-
-    fn register_indexed(
-        &mut self,
-        path: PathBuf,
-        kind: SourceKind,
-        line_index: SourceLineIndex,
-        content_hash: u64,
-        source: Option<String>,
-        library_package: Option<LibraryPackageId>,
-    ) -> SourceFileId {
-        let id = self.id_or_insert(&path);
+        let (id, shared_path) = self.path_entry(&path);
         if self.files.get(&id).is_some_and(|existing| {
-            existing.path == path
+            *existing.path == *path
                 && existing.kind == kind
                 && existing.line_index == line_index
                 && existing.content_hash == content_hash
-                && existing.source == source
                 && existing.library_package == library_package
         }) {
             return id;
@@ -283,19 +332,11 @@ impl Files {
             "stale background commits need monotonic source identity",
             "widen the source snapshot revision",
         );
-        let mut path = normalize_path(&path);
-        path.shrink_to_fit();
-        let mut line_index = line_index;
-        line_index.line_offsets.shrink_to_fit();
         self.files.insert(
             id,
             Arc::new(SourceFile {
                 id,
-                path,
-                source: source.map(|mut source| {
-                    source.shrink_to_fit();
-                    source
-                }),
+                path: shared_path,
                 line_index,
                 content_hash,
                 kind,
@@ -369,7 +410,7 @@ impl Files {
         let Some(file) = self.files.remove(&file_id) else {
             return false;
         };
-        let removed_path = self.ids_by_path.remove(&normalize_path(&file.path));
+        let removed_path = self.ids_by_path.remove(&*file.path);
         invariant_eq!(
             removed_path,
             Some(file_id),
@@ -403,21 +444,16 @@ impl Files {
     }
 
     pub(super) fn estimated_heap_bytes(&self) -> usize {
-        self.ids_by_path.capacity() * (size_of::<PathBuf>() + size_of::<SourceFileId>() + 1)
-            + self
-                .ids_by_path
-                .keys()
-                .map(|path| path.as_os_str().len())
-                .sum::<usize>()
+        self.ids_by_path.capacity() * (size_of::<Arc<Path>>() + size_of::<SourceFileId>() + 1)
             + self.files.capacity() * (size_of::<SourceFileId>() + size_of::<Arc<SourceFile>>() + 1)
             + self.files.len() * size_of::<SourceFile>()
             + self
                 .files
                 .values()
                 .map(|file| {
-                    file.path.as_os_str().len()
-                        + file.source.as_ref().map(String::capacity).unwrap_or(0)
-                        + vec_payload_bytes(&file.line_index.line_offsets)
+                    2 * size_of::<usize>()
+                        + file.path.as_os_str().len()
+                        + file.line_index.estimated_heap_bytes()
                 })
                 .sum::<usize>()
             + self.export_fingerprints.capacity()
@@ -533,8 +569,8 @@ mod tests {
     fn same_path_gets_same_id() {
         let mut files = Files::default();
 
-        let first = files.id_or_insert("app/user.rb");
-        let second = files.id_or_insert("app/user.rb");
+        let first = files.path_entry(Path::new("app/user.rb")).0;
+        let second = files.path_entry(Path::new("app/user.rb")).0;
 
         assert_eq!(first, second);
         assert_eq!(files.id("app/user.rb"), Some(first));
@@ -544,11 +580,83 @@ mod tests {
     fn different_paths_get_different_ids() {
         let mut files = Files::default();
 
-        let first = files.id_or_insert("app/user.rb");
-        let second = files.id_or_insert("app/team.rb");
+        let first = files.path_entry(Path::new("app/user.rb")).0;
+        let second = files.path_entry(Path::new("app/team.rb")).0;
 
         assert_ne!(first, second);
         assert_eq!(files.id("app/user.rb"), Some(first));
         assert_eq!(files.id("app/team.rb"), Some(second));
+    }
+
+    fn register(files: &mut Files, path: &str, content: &str) -> SourceFileId {
+        files.register_borrowed(PathBuf::from(path), content, SourceKind::Project, None)
+    }
+
+    #[test]
+    fn a_registered_path_is_stored_once() {
+        let mut files = Files::default();
+        let id = register(&mut files, "app/./user.rb", "A = 1\n");
+
+        let file = files.get(id).expect("registered file");
+        let (key, _) = files
+            .ids_by_path
+            .get_key_value(Path::new("app/user.rb"))
+            .expect("normalized path is mapped");
+        assert!(Arc::ptr_eq(key, &file.path));
+        assert_eq!(files.id("app/user.rb"), Some(id));
+    }
+
+    #[test]
+    fn non_ascii_files_keep_only_their_non_ascii_lines() {
+        let mut files = Files::default();
+        let content = "a = 1\nb = \"é😀\" # 1\r\nc = 3\nd = \"ü\"";
+        let id = register(&mut files, "app/text.rb", content);
+        let file = files.get(id).expect("registered file");
+
+        assert!(!file.line_index.is_ascii());
+        assert_eq!(
+            file.line_index.retained_text_bytes(),
+            "b = \"é😀\" # 1\r\nd = \"ü\"".len()
+        );
+        assert_eq!(file.line_text(0), None);
+        assert_eq!(file.line_text(1), Some("b = \"é😀\" # 1"));
+        assert_eq!(file.line_text(3), Some("d = \"ü\""));
+        for (offset, _) in content.char_indices() {
+            let before = &content[..offset];
+            let line = before.matches('\n').count();
+            let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+            let character = content[line_start..offset].encode_utf16().count();
+            assert_eq!(
+                file.byte_offset_to_line_character(offset as u32),
+                Some((line as u32, character as u32)),
+                "offset {offset}"
+            );
+        }
+        let emoji = content.find('😀').expect("emoji") as u32;
+        assert_eq!(file.byte_offset_to_line_character(emoji + 1), None);
+        assert_eq!(file.non_ascii_text(emoji, emoji + 4), Some("😀"));
+        assert_eq!(file.non_ascii_text(emoji, emoji + 1), None);
+        assert_eq!(file.non_ascii_text(0, 1), None);
+        assert_eq!(
+            file.end_position(),
+            (3, "d = \"ü\"".encode_utf16().count() as u32)
+        );
+    }
+
+    #[test]
+    fn end_position_counts_newlines_and_the_last_line() {
+        let mut files = Files::default();
+        for (content, expected) in [
+            ("", (0, 0)),
+            ("a", (0, 1)),
+            ("\n", (1, 0)),
+            ("a\nbc", (1, 2)),
+            ("a\nbc\n", (2, 0)),
+            ("é\nñé", (1, 2)),
+        ] {
+            let id = register(&mut files, "app/end.rb", content);
+            let file = files.get(id).expect("registered file");
+            assert_eq!(file.end_position(), expected, "{content:?}");
+        }
     }
 }

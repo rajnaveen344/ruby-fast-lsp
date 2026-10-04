@@ -887,11 +887,21 @@ mod tests {
         let first_definition = first.view().constant_definition_ranges(&parts, &[])[0];
         let second_definition = second.view().constant_definition_ranges(&parts, &[])[0];
         assert_eq!(
-            first.view().file(first_definition.file_id).unwrap().path,
+            first
+                .view()
+                .file(first_definition.file_id)
+                .unwrap()
+                .path
+                .to_path_buf(),
             crate::test::harness::fixture_path("/projects/one/vendor/widget.rb")
         );
         assert_eq!(
-            second.view().file(second_definition.file_id).unwrap().path,
+            second
+                .view()
+                .file(second_definition.file_id)
+                .unwrap()
+                .path
+                .to_path_buf(),
             crate::test::harness::fixture_path("/projects/two/vendor/widget.rb")
         );
         assert_ne!(first_definition.file_id, second_definition.file_id);

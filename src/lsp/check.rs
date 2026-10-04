@@ -313,61 +313,54 @@ impl CheckSession {
         let mut inference = InferenceTelemetry::default();
         for workspace in &workspaces {
             workspace.handle().view(|view| -> Result<()> {
-            for file in view.files() {
-                if !matches!(file.kind, SourceKind::Project | SourceKind::Signature)
-                    || !source_is_selected(&file.path, selected_file.as_deref(), &root)
-                {
-                    continue;
-                }
-                files_checked = files_checked.checked_add(1).expect_invariant(
-                    "checked file count exhausted usize",
-                    "one process cannot retain more files than addressable memory",
-                    "bound project discovery below usize::MAX",
-                );
-                if let Some(file_telemetry) = view.inference_telemetry_in_file(file.id) {
-                    inference.merge(file_telemetry);
-                }
-                inferred_types.extend(solved_types_in_file(view, &root, file.id)?);
-                if file.kind == SourceKind::Project {
-                    let source = match file.source_text() {
-                        Some(source) => source.to_string(),
-                        None => std::fs::read_to_string(&file.path).with_context(|| {
+                for file in view.files() {
+                    if !matches!(file.kind, SourceKind::Project | SourceKind::Signature)
+                        || !source_is_selected(&file.path, selected_file.as_deref(), &root)
+                    {
+                        continue;
+                    }
+                    files_checked = files_checked.checked_add(1).expect_invariant(
+                        "checked file count exhausted usize",
+                        "one process cannot retain more files than addressable memory",
+                        "bound project discovery below usize::MAX",
+                    );
+                    if let Some(file_telemetry) = view.inference_telemetry_in_file(file.id) {
+                        inference.merge(file_telemetry);
+                    }
+                    inferred_types.extend(solved_types_in_file(view, &root, file.id)?);
+                    if file.kind == SourceKind::Project {
+                        let source = std::fs::read_to_string(&file.path).with_context(|| {
                             format!(
-                                "failed to reread {} for syntax diagnostics after semantic indexing",
-                                file.path.display()
-                            )
-                        })?,
-                    };
-                    if !view.file_content_matches(file.id, &source) {
-                        return Err(anyhow!(
+                            "failed to reread {} for syntax diagnostics after semantic indexing",
+                            file.path.display()
+                        )
+                        })?;
+                        if !view.file_content_matches(file.id, &source) {
+                            return Err(anyhow!(
                             "check source {} changed while analysis was running; rerun the check \
                              so syntax and semantic diagnostics use one byte-identical input",
                             file.path.display()
                         ));
+                        }
+                        let uri = Url::from_file_path(&file.path).map_err(|()| {
+                            anyhow!(
+                                "check source is not a valid file URI: {}",
+                                file.path.display()
+                            )
+                        })?;
+                        let projected_source = analysis_source(&uri, &source);
+                        let parse = ruby_prism::parse(projected_source.as_bytes());
+                        let document =
+                            RubyDocument::with_analysis_file_id(uri, source.clone(), 0, file.id);
+                        diagnostics.extend(
+                            generate_diagnostics(&parse, &document)
+                                .into_iter()
+                                .map(|diagnostic| lsp_diagnostic(&root, &file.path, diagnostic)),
+                        );
                     }
-                    let uri = Url::from_file_path(&file.path).map_err(|()| {
-                        anyhow!(
-                            "check source is not a valid file URI: {}",
-                            file.path.display()
-                        )
-                    })?;
-                    let projected_source = analysis_source(&uri, &source);
-                    let parse = ruby_prism::parse(projected_source.as_bytes());
-                    let document =
-                        RubyDocument::with_analysis_file_id(uri, source.clone(), 0, file.id);
-                    diagnostics.extend(
-                        generate_diagnostics(&parse, &document)
-                            .into_iter()
-                            .map(|diagnostic| lsp_diagnostic(&root, &file.path, diagnostic)),
-                    );
                 }
-            }
-            diagnostics.extend(domain_diagnostics(
-                view,
-                &root,
-                selected_file.as_deref(),
-            )?);
-            Ok(())
+                diagnostics.extend(domain_diagnostics(view, &root, selected_file.as_deref())?);
+                Ok(())
             })?;
         }
         if let Some(selected_file) = selected_file.as_deref() {
@@ -599,7 +592,7 @@ fn domain_diagnostics(
                 diagnostic.range.file_id
             )
         })?;
-        if selected_file.is_some_and(|selected| file.path != selected) {
+        if selected_file.is_some_and(|selected| *file.path != *selected) {
             continue;
         }
         let start = file
