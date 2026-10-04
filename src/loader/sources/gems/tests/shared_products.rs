@@ -29,7 +29,7 @@ fn shared_dependency_indexer(project_root: &Path, gem_root: &Path) -> IndexerGem
         }],
     );
     indexer.set_file_processor(FileProcessor::new());
-    indexer.set_dependency_seed_engine(Project::new());
+    indexer.set_dependency_seed_engine(Arc::new(Project::new()));
     indexer
 }
 

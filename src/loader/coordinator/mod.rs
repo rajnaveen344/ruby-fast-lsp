@@ -90,7 +90,7 @@ pub struct IndexingCoordinator {
 
     // The main indexing engine
     file_processor: Option<FileProcessor>,
-    dependency_seed_engine: Option<Project>,
+    dependency_seed_engine: Option<Arc<Project>>,
 
     // Project-specific indexer
     project_indexer: Option<IndexerProject>,
@@ -254,9 +254,7 @@ impl IndexingCoordinator {
         .await?;
 
         let core_start = Instant::now();
-        let dependency_seed_engine = Arc::new(parking_lot::RwLock::new(
-            self.index_core_stubs(ctx, ruby_version).await?,
-        ));
+        let core_seed = self.index_core_stubs(ctx, ruby_version).await?;
         let core_stub_dur = core_start.elapsed();
         let priority_sink = ctx.sink.clone();
         let priority_sources = ctx.sources.clone();
@@ -322,9 +320,8 @@ impl IndexingCoordinator {
             (navigation_demands, run.generation())
         });
         let startup_dependency_seed = {
-            let dependency_seed = dependency_seed_engine.read();
             invariant!(
-                dependency_seed.view().files().all(|source| matches!(
+                core_seed.view().files().all(|source| matches!(
                     source.kind,
                     ruby_analysis::core::SourceKind::Stub
                         | ruby_analysis::core::SourceKind::Stdlib
@@ -336,7 +333,7 @@ impl IndexingCoordinator {
                 why = "dependency products must be reusable before project timing",
                 fix = "fork the seed right after core stub indexing",
             );
-            dependency_seed.clone()
+            Arc::clone(&core_seed)
         };
         let (project_frontier_release, project_frontier_wait) = tokio::sync::oneshot::channel();
         let startup_gem_indexing = Self::discover_and_bind_startup_priority_gems(
@@ -404,11 +401,11 @@ impl IndexingCoordinator {
         // inside jruby.jar. Materialize only the bounded runtime source allowlist
         // so implementation navigation outranks compatibility declarations.
         let runtime_sources_start = Instant::now();
-        self.index_jruby_runtime_sources_off_reactor(ctx, dependency_seed_engine.clone())
+        let dependency_seed = self
+            .index_jruby_runtime_sources_off_reactor(ctx, core_seed)
             .await?;
         let runtime_sources_dur = runtime_sources_start.elapsed();
         self.dependency_seed_engine = Some({
-            let dependency_seed = dependency_seed_engine.read();
             invariant!(
                 dependency_seed.view().files().all(|source| matches!(
                     source.kind,
@@ -421,7 +418,7 @@ impl IndexingCoordinator {
                 why = "editor timing or one dependency could contaminate every reusable gem product identity",
                 fix = "build the seed only from clean core and runtime inputs",
             );
-            dependency_seed.clone()
+            dependency_seed
         });
         let core_dur = core_stub_dur + runtime_sources_dur;
         let runtime_dur = runtime_selection_dur + runtime_provider_dur;

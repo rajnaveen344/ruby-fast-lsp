@@ -25,10 +25,13 @@ pub(super) const GEM_PRODUCT_TRANSIENT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 
 fn build_gem_dependency_product(
     manifest: &GemDependencyManifest,
-    dependency_seed: ruby_analysis::engine::Project,
+    dependency_seed: Arc<ruby_analysis::engine::Project>,
     processor: FileProcessor,
 ) -> Result<GemDependencyProduct> {
-    let producer_engine = std::sync::Arc::new(parking_lot::RwLock::new(dependency_seed));
+    // Only a product cache miss pays for a private copy of the shared seed.
+    let producer_engine = Arc::new(parking_lot::RwLock::new(Arc::unwrap_or_clone(
+        dependency_seed,
+    )));
     let known_namespaces = std::sync::Arc::new({
         let engine = producer_engine.read();
         engine.view().known_namespace_fqns()

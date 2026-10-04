@@ -416,8 +416,8 @@ fn index_jruby_runtime_sources_blocking(
     user_cache_root_override: Option<PathBuf>,
     processor: FileProcessor,
     analysis_engine: Arc<dyn LoadTarget>,
-    dependency_seed_engine: Arc<parking_lot::RwLock<Project>>,
-) -> Result<()> {
+    dependency_seed: Arc<Project>,
+) -> Result<Arc<Project>> {
     let cache_root = jruby_cache_root_for_project(
         &workspace_root,
         user_cache_root_override.as_deref(),
@@ -430,6 +430,10 @@ fn index_jruby_runtime_sources_blocking(
             workspace_root.display()
         )
     })?;
+    // Runtime sources extend this project's copy of the shared core seed.
+    let dependency_seed_engine = Arc::new(parking_lot::RwLock::new(Arc::unwrap_or_clone(
+        dependency_seed,
+    )));
     for source in sources {
         let uri = Url::from_file_path(&source.path).map_err(|_| {
             anyhow!(
@@ -450,7 +454,16 @@ fn index_jruby_runtime_sources_blocking(
             ruby_analysis::core::SourceKind::Stdlib,
         )?;
     }
-    Ok(())
+    Ok(Arc::new(
+        Arc::try_unwrap(dependency_seed_engine)
+            .ok()
+            .expect_invariant(
+                "JRuby runtime source indexing retained the dependency seed",
+                "collection borrows the seed only for each file",
+                "release every indexing handle before publishing the seed",
+            )
+            .into_inner(),
+    ))
 }
 
 impl IndexingCoordinator {
@@ -473,10 +486,10 @@ impl IndexingCoordinator {
     pub(super) async fn index_jruby_runtime_sources_off_reactor(
         &self,
         ctx: &LoadContext,
-        dependency_seed_engine: Arc<parking_lot::RwLock<Project>>,
-    ) -> Result<()> {
+        dependency_seed: Arc<Project>,
+    ) -> Result<Arc<Project>> {
         let Some(artifact) = self.jruby_runtime_archive.clone() else {
-            return Ok(());
+            return Ok(dependency_seed);
         };
         let provider = self.jruby_import_provider.clone().expect_invariant(
             "a JRuby runtime archive exists without its import provider",
@@ -505,7 +518,7 @@ impl IndexingCoordinator {
                     user_cache_root_override,
                     processor,
                     analysis_engine,
-                    dependency_seed_engine,
+                    dependency_seed,
                 )
             },
         )

@@ -223,6 +223,10 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
         live_seed.view().semantic_context_fingerprint(),
         "editor open timing must not change the immutable dependency seed identity"
     );
+    assert!(
+        std::sync::Arc::ptr_eq(&clean_seed, &live_seed),
+        "projects with the same core inputs must share one dependency seed instead of copies"
+    );
 }
 
 #[tokio::test]

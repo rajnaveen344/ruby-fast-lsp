@@ -4,6 +4,7 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass, MIB};
 use super::runtime::runtime_stdlib_paths_for_project;
 use super::IndexingCoordinator;
 use crate::environment::runtime::version::RubyVersion;
+use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::require_paths::RequireFeatureIndex;
@@ -89,7 +90,7 @@ impl IndexingCoordinator {
         &self,
         ctx: &LoadContext,
         ruby_version: Option<RubyVersion>,
-    ) -> Result<Project> {
+    ) -> Result<Arc<Project>> {
         let analysis_engine = self.load_target(ctx);
         let extension_path = self.config.extension_path.clone();
         let key = format!(
@@ -128,8 +129,16 @@ impl IndexingCoordinator {
                             indexer
                                 .index_core_stubs_blocking(template_engine.clone())
                                 .map_err(|error| error.to_string())?;
-                            let engine = template_engine.read().clone();
-                            Ok(engine)
+                            drop(indexer);
+                            Ok(Arc::try_unwrap(template_engine)
+                                .ok()
+                                .expect_invariant(
+                                    "core stub indexing retained its template engine",
+                                    "the template producer is the engine's only owner once \
+                                     indexing returns",
+                                    "release every indexing handle before publishing the template",
+                                )
+                                .into_inner())
                         },
                     )
                     .await
@@ -137,9 +146,8 @@ impl IndexingCoordinator {
             })
             .await
             .map_err(anyhow::Error::msg)?;
-        let dependency_seed = template.as_ref().clone();
         if analysis_engine.install_template_if_empty(template.as_ref()) {
-            return Ok(dependency_seed);
+            return Ok(template);
         }
 
         // An active document may be opened while this coordinator waits for
@@ -156,7 +164,7 @@ impl IndexingCoordinator {
             self.config.extension_path.clone(),
         )
         .await?;
-        Ok(dependency_seed)
+        Ok(template)
     }
 
     /// Index runtime standard library modules after project declarations.

@@ -133,7 +133,7 @@ impl IndexingCoordinator {
         cancellation: Option<CancellationToken>,
         analysis_engine: Arc<dyn LoadTarget>,
         gem_indexer: IndexerGem,
-        dependency_seed: Project,
+        dependency_seed: Arc<Project>,
         priority_keys: HashSet<String>,
         excluded_gems: HashSet<String>,
         navigation_demands: Option<(
