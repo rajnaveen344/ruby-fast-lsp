@@ -752,13 +752,11 @@ impl IndexerGem {
             why = "an empty navigation frontier cannot select bounded work",
             fix = "skip the priority phase when the active document exposes no constant roots",
         );
-        invariant!(
-            !self.locked_gems.is_empty(),
-            what =
-                "priority vendor-archive discovery started before lockfile identities were loaded",
-            why = "source selection must use the exact owning-project lock identity",
-            fix = "load and select Gemfile.lock identities before scheduling priority archive work",
-        );
+        // Archives are selected only by locked identity; a project without a
+        // lockfile (or with an empty one) locks no archive to read.
+        if self.locked_gems.is_empty() {
+            return Ok(());
+        }
         self.discover_cached_gem_archives_matching(Some(priority_keys))
     }
 

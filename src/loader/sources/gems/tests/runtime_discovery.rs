@@ -397,3 +397,36 @@ fn unlocked_project_reuses_only_the_installed_gem_fallback() {
         "Bundler without a lockfile resolves against installed gems and must never be reused"
     );
 }
+
+/// A Gemfile without a lockfile locks nothing, so the bounded navigation
+/// phase has no vendor archive to select; it still finds installed gems.
+#[cfg(unix)]
+#[test]
+fn unlocked_project_navigation_discovery_skips_vendor_archives() {
+    let workspace = TempDir::new().unwrap();
+    let project = workspace.path().join("project");
+    let gem_dir = workspace.path().join("installed/gems/example-1.2.3");
+    std::fs::create_dir_all(gem_dir.join("lib")).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("Gemfile"), "gemspec\n").unwrap();
+    let fake_ruby = workspace.path().join("ruby");
+    write_discovery_runtime(
+        &fake_ruby,
+        &workspace.path().join("invocations"),
+        "global",
+        &gem_dir,
+        &[],
+    );
+    let mut indexer = IndexerGem::new(Some(project));
+    indexer.set_selected_runtime(fake_ruby, RuntimeImplementation::Jruby, None);
+    indexer.set_discovery_cache_root(workspace.path().join("cache"));
+
+    indexer
+        .discover_navigation_gems_blocking(&HashSet::from(["example".to_string()]))
+        .unwrap();
+
+    assert_eq!(
+        indexer.discovered_gems["example"][0].source,
+        GemSource::GlobalInstalled
+    );
+}
