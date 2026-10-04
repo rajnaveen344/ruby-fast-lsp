@@ -99,6 +99,12 @@ impl RequireContext {
     pub fn feature_index(&self) -> Arc<RequireFeatureIndex> {
         self.published.feature_index()
     }
+
+    /// Project-relative folders the project's gemspecs declare as
+    /// `require_paths`, as currently published.
+    pub fn declared_require_paths(&self) -> Vec<String> {
+        self.published.declared_paths()
+    }
 }
 
 /// Require roots and feature index a project publishes after dependency
@@ -107,16 +113,26 @@ impl RequireContext {
 pub struct PublishedRequires {
     paths: Arc<RwLock<Vec<PathBuf>>>,
     index: Arc<RwLock<Arc<RequireFeatureIndex>>>,
+    declared: Arc<RwLock<Vec<String>>>,
 }
 impl Default for PublishedRequires {
     fn default() -> Self {
         Self {
             paths: Arc::default(),
             index: Arc::new(RwLock::new(Arc::new(RequireFeatureIndex::empty()))),
+            declared: Arc::default(),
         }
     }
 }
 impl PublishedRequires {
+    pub fn replace_declared_paths(&self, declared: Vec<String>) {
+        *self.declared.write() = declared;
+    }
+
+    pub fn declared_paths(&self) -> Vec<String> {
+        self.declared.read().clone()
+    }
+
     pub fn replace(&self, paths: Vec<PathBuf>, index: Arc<RequireFeatureIndex>) {
         *self.paths.write() = paths;
         *self.index.write() = index;
@@ -349,6 +365,14 @@ pub(crate) trait LoadSink: Send + Sync {
         target: &Arc<dyn LoadTarget>,
         paths: Vec<PathBuf>,
         index: Arc<RequireFeatureIndex>,
+    );
+    /// Publish the gemspec-declared require folders of the project at `root`,
+    /// only while `target` is still that project's engine.
+    fn publish_declared_require_paths(
+        &self,
+        root: &Path,
+        target: &Arc<dyn LoadTarget>,
+        declared: Vec<String>,
     );
     /// Re-resolve unresolved-require diagnostics of the project at `root`
     /// against its published require roots.

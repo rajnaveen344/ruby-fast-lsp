@@ -29,6 +29,10 @@
 //! - **Out of scope (intentional)**: `autoload`, `load`, interpolated/dynamic
 //!   arguments, non-`.rb` native extensions.
 
+mod gemspec;
+
+pub use gemspec::{declared_gemspec_require_paths, project_load_paths};
+
 use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -423,7 +427,8 @@ fn require_target_from_unresolved_message(message: &str) -> (RequireKind, &str) 
 ///
 /// Search order:
 /// - `require_relative`: `dirname(current_file)` only
-/// - `require`: configured project `loadPaths`, then `<project>/lib`, then
+/// - `require`: `load_paths` (configured project `loadPaths`, then the
+///   gemspec's declared `require_paths`), then `<project>/lib`, then
 ///   project root (each probed as-is and with `.rb`), then the published
 ///   gem/stdlib feature index
 ///

@@ -200,7 +200,7 @@ fn project_inputs_trigger_only_the_owning_project_rebuild() {
         discovery_source: RuntimeDiscoverySource::Rvm,
         java_home: None,
     });
-    for changed in ["Gemfile", "Gemfile.lock"] {
+    for changed in ["Gemfile", "Gemfile.lock", "example.gemspec"] {
         assert!(project_input_change_requires_rebuild(
             &project,
             &project.join(changed),
@@ -212,6 +212,14 @@ fn project_inputs_trigger_only_the_owning_project_rebuild() {
         &project.join("lib/jars/runtime.jar"),
         &config
     ));
+    assert!(
+        !project_input_change_requires_rebuild(
+            &project,
+            &project.join("vendor/nested/nested.gemspec"),
+            &config
+        ),
+        "only the project's own root gemspec declares its require folders"
+    );
     assert!(!project_input_change_requires_rebuild(
         &project,
         &project.join(".ruby-version"),

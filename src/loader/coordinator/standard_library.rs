@@ -7,7 +7,7 @@ use crate::environment::runtime::version::RubyVersion;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
-use crate::loader::require_paths::RequireFeatureIndex;
+use crate::loader::require_paths::{declared_gemspec_require_paths, RequireFeatureIndex};
 use crate::loader::sources::stdlib::IndexerStdlib;
 use crate::utils::admission::{IndexingResourcePriority, IndexingWorkSpec};
 use anyhow::Result;
@@ -44,6 +44,29 @@ async fn index_core_stubs_additively_off_reactor(
 }
 
 impl IndexingCoordinator {
+    /// Read the require folders the project's own gemspecs declare and
+    /// publish them before any project file resolves its requires.
+    pub(super) async fn publish_declared_require_paths(&mut self, ctx: &LoadContext) -> Result<()> {
+        let root = self.workspace_root.clone();
+        let declared = run_cpu_indexing_task(
+            &ctx.resources,
+            Some(root.clone()),
+            self.resource_cancellation(),
+            IndexingWorkClass::Io,
+            "gemspec require paths",
+            move || declared_gemspec_require_paths(&root),
+        )
+        .await?;
+        self.indexing_checkpoint(ctx)?;
+        self.declared_require_paths = declared.clone();
+        ctx.sink.publish_declared_require_paths(
+            &self.workspace_root,
+            &self.load_target(ctx),
+            declared,
+        );
+        Ok(())
+    }
+
     /// Retain Bundler/RubyGems require roots for goto and unresolved-require diagnostics.
     pub(super) fn publish_dependency_require_paths(&mut self, ctx: &LoadContext) -> Result<()> {
         self.indexing_checkpoint(ctx)?;

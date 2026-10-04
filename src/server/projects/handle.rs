@@ -57,6 +57,17 @@ impl ProjectHandle {
         self.requires.paths()
     }
 
+    /// Project-relative folders the project's gemspecs declare as
+    /// `require_paths`, searched after configured `loadPaths`.
+    pub fn declared_require_paths(&self) -> Vec<String> {
+        self.requires.declared_paths()
+    }
+
+    /// Publish the gemspec-declared require folders an indexing run read.
+    pub(crate) fn set_declared_require_paths(&self, declared: Vec<String>) {
+        self.requires.replace_declared_paths(declared);
+    }
+
     /// The require feature index published for the project.
     pub fn require_feature_index(&self) -> Arc<RequireFeatureIndex> {
         self.requires.feature_index()

@@ -9,6 +9,7 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::context::{IndexingRunState, LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::jruby_add_on::JrubyAddOn;
+use crate::loader::require_paths::project_load_paths;
 use crate::loader::sources::gems::IndexerGem;
 use crate::loader::sources::project::IndexerProject;
 use crate::loader::sources::stdlib::IndexerStdlib;
@@ -81,6 +82,8 @@ pub struct IndexingCoordinator {
 
     // Ruby version info
     detected_ruby_version: Option<RubyVersion>,
+    /// Literal `require_paths` of the project's own gemspecs for this run.
+    declared_require_paths: Vec<String>,
     effective_runtime: Option<SelectedRuntimeDescriptor>,
     /// Legacy MRI compatibility from this project's effective selection.
     legacy_compatibility: Option<RubyVersion>,
@@ -135,6 +138,7 @@ impl IndexingCoordinator {
             config,
             extension_registry: None,
             detected_ruby_version: None,
+            declared_require_paths: Vec::new(),
             effective_runtime: None,
             legacy_compatibility: None,
             jruby_import_provider: None,
@@ -226,6 +230,7 @@ impl IndexingCoordinator {
             ruby_version.map(|version| version.to_string()),
         );
         info!("Detected Ruby version: {:?}", ruby_version);
+        self.publish_declared_require_paths(ctx).await?;
 
         // Install a providerless processor for the active-file frontier.
         // Ordinary Ruby facts do not depend on the JVM catalog and are the
@@ -708,7 +713,10 @@ impl IndexingCoordinator {
                     .with_jruby_import_provider(provider.clone())
             })
             .unwrap_or(processor);
-        let require_load_paths = ctx.config.load_paths_for_project(&self.workspace_root);
+        let require_load_paths = project_load_paths(
+            ctx.config.load_paths_for_project(&self.workspace_root),
+            &self.declared_require_paths,
+        );
         let require_dependency_roots = ctx.requires.dependency_require_paths();
         let processor = processor.with_require_resolve_context(
             self.workspace_root.clone(),

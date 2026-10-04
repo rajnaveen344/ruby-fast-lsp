@@ -99,6 +99,19 @@ impl LoadSink for Server {
         }
     }
 
+    fn publish_declared_require_paths(
+        &self,
+        root: &Path,
+        target: &Arc<dyn LoadTarget>,
+        declared: Vec<String>,
+    ) {
+        if let Some(workspace) = self.project_at_root(root) {
+            if workspace.handle().is_target(target) {
+                workspace.handle().set_declared_require_paths(declared);
+            }
+        }
+    }
+
     async fn refresh_require_diagnostics(&self, root: &Path) {
         if let Some(workspace) = self.project_at_root(root) {
             self.refresh_unresolved_require_diagnostics_for_workspace(&workspace)

@@ -109,6 +109,14 @@ pub(super) fn project_input_change_requires_rebuild(
     if matches!(file_name, Some("Gemfile" | "Gemfile.lock")) {
         return true;
     }
+    // A root gemspec declares the project's own require folders.
+    if changed_path.parent() == Some(project_root)
+        && changed_path
+            .extension()
+            .is_some_and(|extension| extension == "gemspec")
+    {
+        return true;
+    }
     let runtime_selection = config
         .runtime
         .selection_for_project(&root, &config.ruby_version);

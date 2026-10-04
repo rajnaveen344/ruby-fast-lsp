@@ -19,7 +19,8 @@ use crate::features::cursor::{Cursor, EngineQuery};
 use crate::features::navigation::definition::require_string_lsp_range;
 use crate::invariant::ExpectInvariant;
 use crate::loader::require_paths::{
-    find_require_string_at_offset, resolve_require_path, RequireKind, RequireStringTarget,
+    find_require_string_at_offset, project_load_paths, resolve_require_path, RequireKind,
+    RequireStringTarget,
 };
 use crate::server::Server;
 use crate::utils::lsp::source_position;
@@ -76,13 +77,16 @@ fn require_path_hover(
         .workspace_for_uri(uri)
         .map(|workspace| workspace.root_path)
         .or_else(|| current_file.parent().map(PathBuf::from))?;
-    let load_paths = server.with_configuration(|config| {
-        config
-            .indexing
-            .load_paths
-            .paths_for_project(&project_root)
-            .to_vec()
-    });
+    let load_paths = project_load_paths(
+        server.with_configuration(|config| {
+            config
+                .indexing
+                .load_paths
+                .paths_for_project(&project_root)
+                .to_vec()
+        }),
+        &server.project_for_uri(uri).declared_require_paths(),
+    );
     let feature_index = server.require_feature_index_for_uri(uri);
     let resolved = server.project_for_uri(uri).view(|view| {
         resolve_require_path(

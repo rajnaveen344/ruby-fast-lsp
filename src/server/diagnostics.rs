@@ -183,13 +183,18 @@ impl Server {
 
         let feature_index = workspace.handle().require_feature_index();
         let generation = workspace.indexing_status.snapshot().generation;
-        let load_paths = self
-            .config
-            .lock()
-            .indexing
-            .load_paths
-            .paths_for_project(&workspace.root_path)
-            .to_vec();
+        let current_load_paths = || {
+            crate::loader::require_paths::project_load_paths(
+                self.config
+                    .lock()
+                    .indexing
+                    .load_paths
+                    .paths_for_project(&workspace.root_path)
+                    .to_vec(),
+                &workspace.handle().declared_require_paths(),
+            )
+        };
+        let load_paths = current_load_paths();
         let project_root = &workspace.root_path;
 
         let open_paths = self
@@ -288,13 +293,7 @@ impl Server {
                 // a newer dependency refresh must never be overwritten by this one.
                 let current_features = workspace.handle().require_feature_guard();
                 if !Arc::ptr_eq(&current_features, &feature_index)
-                    || self
-                        .config
-                        .lock()
-                        .indexing
-                        .load_paths
-                        .paths_for_project(project_root)
-                        != load_paths
+                    || current_load_paths() != load_paths
                 {
                     break 'commit;
                 }

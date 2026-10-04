@@ -12,7 +12,7 @@ use super::merge::{
 };
 use super::FileProcessor;
 use crate::loader::context::{LoadContext, LoadTarget};
-use crate::loader::require_paths::unresolved_require_diagnostics;
+use crate::loader::require_paths::{project_load_paths, unresolved_require_diagnostics};
 use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::indexer::fact_collector::FactCollectorOutput;
 use ruby_analysis::indexer::RubyDocument;
@@ -146,7 +146,10 @@ impl FileProcessor {
                 else {
                     return;
                 };
-                let load_paths = ctx.config.load_paths_for_project(&project_root);
+                let load_paths = project_load_paths(
+                    ctx.config.load_paths_for_project(&project_root),
+                    &ctx.requires.declared_require_paths(),
+                );
                 let feature_index = ctx.requires.feature_index();
                 let diagnostics = analysis_engine.view(|view| {
                     unresolved_require_diagnostics(

@@ -610,3 +610,74 @@ async fn goto_class_identifier_still_works() {
     let locs = editor.goto_def_at("project/main.rb", 3, 0).await;
     assert!(!locs.is_empty(), "class goto must remain available");
 }
+
+/// A gemspec's literal `require_paths` put extra project folders on the load
+/// path, so vendored jars and Ruby files there resolve like `lib`.
+#[tokio::test]
+async fn gemspec_require_paths_resolve_project_requires() {
+    use crate::lsp::lifecycle::indexing::init_workspace_for_run;
+    use std::time::Duration;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().canonicalize().unwrap().join("project");
+    let jar = root.join("lib/jars/org/example/widget/1.0/widget-1.0.jar");
+    std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
+    std::fs::write(&jar, b"PK\x03\x04").unwrap();
+    std::fs::write(
+        root.join("example.gemspec"),
+        "Gem::Specification.new do |spec|\n  spec.name = 'example'\n  spec.require_paths = ['lib'.freeze, 'lib/jars'.freeze]\nend\n",
+    )
+    .unwrap();
+    let jars_source = "require 'org/example/widget/1.0/widget-1.0.jar'\nrequire 'org/example/absent/1.0/absent-1.0.jar'\n";
+    let jars_file = root.join("lib/jars/example_jars.rb");
+    std::fs::write(&jars_file, jars_source).unwrap();
+    let main_source = "require 'example_jars'\n";
+    let main_file = root.join("lib/example.rb");
+    std::fs::write(&main_file, main_source).unwrap();
+
+    let root_uri = Url::from_directory_path(&root).unwrap();
+    let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
+    let server = editor.server().clone();
+    server.set_discovered_runtimes_for_tests(Vec::new());
+    let workspace = server.add_workspace(root_uri.clone());
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        init_workspace_for_run(&server, root_uri, workspace.begin_indexing_run()),
+    )
+    .await
+    .expect("cold indexing must finish")
+    .expect("cold indexing must succeed");
+
+    let jars_name = jars_file.to_str().unwrap().trim_start_matches('/');
+    let main_name = main_file.to_str().unwrap().trim_start_matches('/');
+    editor.open(jars_name, jars_source).await;
+    editor.open(main_name, main_source).await;
+    let unresolved = |diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>| {
+        diagnostics
+            .into_iter()
+            .filter(|diagnostic| {
+                matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "unresolved-require")
+            })
+            .map(|diagnostic| diagnostic.range.start.line)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        unresolved(editor.diagnostics(jars_name).await),
+        vec![1],
+        "a jar under a declared require path resolves; a missing jar stays reported"
+    );
+    assert_eq!(
+        unresolved(editor.diagnostics(main_name).await),
+        Vec::<u32>::new(),
+        "a Ruby file under a declared require path resolves"
+    );
+    let locations = editor.goto_def_at(jars_name, 0, 12).await;
+    assert_eq!(
+        locations
+            .iter()
+            .map(|location| location.uri.to_file_path().unwrap())
+            .collect::<Vec<_>>(),
+        vec![jar],
+        "the jar require navigates to the vendored jar"
+    );
+}
