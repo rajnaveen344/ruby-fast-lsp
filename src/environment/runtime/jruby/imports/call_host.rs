@@ -7,7 +7,7 @@ use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyType, TypeProven
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::stats::{StatsRegistry, StatsSnapshot};
 use ruby_fast_lsp_jruby_support::syntax::{
-    canonical_java_constant_path, dotted_call_name, dotted_call_root,
+    canonical_java_constant_path, dotted_call_name, dotted_call_root, package_module_call_reference,
 };
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_prism::{CallNode, Node};
@@ -118,7 +118,7 @@ impl JrubyImportProvider {
 
     fn call_may_be_static_java_proxy(&self, call: &CallNode<'_>) -> bool {
         let Some(root) = dotted_call_root(call) else {
-            return false;
+            return package_module_call_reference(call).is_some();
         };
         let Ok(root) = std::str::from_utf8(root) else {
             return false;
@@ -131,22 +131,7 @@ impl JrubyImportProvider {
             let Some(reference) = canonical_java_constant_path(&path) else {
                 return;
             };
-            if !self.catalog.has_proxy(&reference) {
-                return;
-            }
-            // The selected project's class catalog proves this proxy exists.
-            // Ordinary constant inference must not guess Java classes from
-            // syntax before the provider installs its runtime evidence.
-            let proxy = FullyQualifiedName::try_from(reference.as_str()).expect_invariant(
-                "a catalog-owned Java proxy has an invalid Ruby constant path",
-                "catalog proxies are projected from validated Java class names",
-                "preserve validation when composing catalog proxies",
-            );
-            visitor.direct_push_expression_type(
-                node,
-                RubyType::ClassReference(proxy),
-                TypeProvenance::Runtime,
-            );
+            self.seed_catalog_proxy(visitor, node, &reference);
             return;
         }
         let Some(call) = node.as_call_node() else {
@@ -154,6 +139,10 @@ impl JrubyImportProvider {
         };
         if let Some(receiver) = call.receiver() {
             self.seed_static_proxy_expression(visitor, &receiver);
+        }
+        if let Some(reference) = package_module_call_reference(&call) {
+            self.seed_catalog_proxy(visitor, node, &reference);
+            return;
         }
         let Some(dotted_name) = dotted_call_name(&call) else {
             return;
@@ -178,6 +167,25 @@ impl JrubyImportProvider {
                     )
                 })
                 .collect::<Vec<_>>(),
+        );
+        visitor.direct_push_expression_type(
+            node,
+            RubyType::ClassReference(proxy),
+            TypeProvenance::Runtime,
+        );
+    }
+
+    fn seed_catalog_proxy(&self, visitor: &mut FactCollector, node: &Node<'_>, reference: &str) {
+        if !self.catalog.has_proxy(reference) {
+            return;
+        }
+        // The selected project's class catalog proves this proxy exists.
+        // Ordinary constant inference must not guess Java classes from
+        // syntax before the provider installs its runtime evidence.
+        let proxy = FullyQualifiedName::try_from(reference).expect_invariant(
+            "a catalog-owned Java proxy has an invalid Ruby constant path",
+            "catalog proxies are projected from validated Java class names",
+            "preserve validation when composing catalog proxies",
         );
         visitor.direct_push_expression_type(
             node,

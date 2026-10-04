@@ -17,6 +17,7 @@ use tower_lsp::lsp_types::{
 
 mod batching;
 mod cross_file_constants;
+mod jruby_package_calls;
 mod jruby_replay;
 mod navigation_demand;
 mod open_documents;

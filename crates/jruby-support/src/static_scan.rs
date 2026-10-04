@@ -3,7 +3,7 @@
 
 use crate::syntax::{
     canonical_java_constant_path, dotted_call_name, evaluate_static_import_alias,
-    is_java_class_name,
+    is_java_class_name, package_module_call_reference,
 };
 use ruby_prism::{
     visit_call_node, visit_constant_path_node, visit_constant_read_node, CallNode,
@@ -131,8 +131,7 @@ impl<'pr> Visit<'pr> for StaticNavigationVisitor {
         ) {
             self.catalog_sensitive = true;
         }
-        if let Some(reference) = dotted_call_name(node).filter(|reference| reference.contains('.'))
-        {
+        if let Some(reference) = static_call_proxy_reference(node) {
             self.proxy_references.push(reference);
         }
         visit_call_node(self, node);
@@ -154,8 +153,7 @@ impl<'pr> Visit<'pr> for StaticNavigationVisitor {
 
 impl<'pr> Visit<'pr> for StaticProxyVisitor {
     fn visit_call_node(&mut self, node: &CallNode<'pr>) {
-        if let Some(reference) = dotted_call_name(node).filter(|reference| reference.contains('.'))
-        {
+        if let Some(reference) = static_call_proxy_reference(node) {
             self.references.push(reference);
         }
         visit_call_node(self, node);
@@ -174,6 +172,13 @@ impl<'pr> Visit<'pr> for StaticImportVisitor {
         collect_static_dependencies_from_call(node, &mut self.dependencies);
         visit_call_node(self, node);
     }
+}
+
+/// A dotted `java.util.List` or package-module `Java::JavaUtil.List` call.
+fn static_call_proxy_reference(node: &CallNode<'_>) -> Option<String> {
+    dotted_call_name(node)
+        .filter(|reference| reference.contains('.'))
+        .or_else(|| package_module_call_reference(node))
 }
 
 fn collect_static_dependencies_from_call(
@@ -267,10 +272,21 @@ mod tests {
     fn preflight_proxy_scan_finds_dotted_and_canonical_java_proxy_forms() {
         let references = static_java_proxy_references(
             "DOTTED = java.lang.String.new\n\
-                 CANONICAL = Java::JavaUtil::Map::Entry\n",
+                 CANONICAL = Java::JavaUtil::Map::Entry\n\
+                 PACKAGE_CALL = Java::JavaUtil.ArrayList\n\
+                 LOWERCASE = Java::JavaUtil.helper\n\
+                 WITH_ARGUMENT = Java::JavaUtil.Vector(1)\n",
         );
         assert!(references.contains(&"java.lang.String".to_string()));
         assert!(references.contains(&"Java::JavaUtil::Map::Entry".to_string()));
+        assert!(references.contains(&"Java::JavaUtil::ArrayList".to_string()));
+        assert!(
+            !references
+                .iter()
+                .any(|reference| reference.ends_with("::helper") || reference.ends_with("::Vector")),
+            "only argument-free class-name calls on a package module are proxy lookups: \
+             {references:?}"
+        );
     }
 
     #[test]

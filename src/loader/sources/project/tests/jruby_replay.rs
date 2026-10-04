@@ -3,7 +3,7 @@
 use super::*;
 use crate::invariant::ExpectInvariant;
 
-fn jruby_provider(class_names: &[&str]) -> JrubyImportProvider {
+pub(super) fn jruby_provider(class_names: &[&str]) -> JrubyImportProvider {
     jruby_provider_with_superclasses(
         &class_names
             .iter()

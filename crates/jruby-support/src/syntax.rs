@@ -91,6 +91,22 @@ pub fn canonical_java_constant_path(node: &ConstantPathNode<'_>) -> Option<Strin
     (parts.first().is_some_and(|part| part == "Java") && parts.len() >= 3).then(|| parts.join("::"))
 }
 
+/// The canonical proxy named by JRuby's method-style class lookup on a package
+/// module, `Java::JavaUtil.ArrayList` -> `Java::JavaUtil::ArrayList`.
+pub fn package_module_call_reference(call: &CallNode<'_>) -> Option<String> {
+    if call.arguments().is_some() || call.block().is_some() {
+        return None;
+    }
+    let package = call.receiver()?.as_constant_path_node()?;
+    let mut parts = Vec::new();
+    collect_ruby_constant_path(&package, &mut parts)?;
+    let name = std::str::from_utf8(call.name().as_slice()).ok()?;
+    (parts.len() == 2 && parts[0] == "Java" && is_java_class_name(name)).then(|| {
+        parts.push(name.to_string());
+        parts.join("::")
+    })
+}
+
 pub fn collect_ruby_constant_path(
     node: &ConstantPathNode<'_>,
     parts: &mut Vec<String>,
