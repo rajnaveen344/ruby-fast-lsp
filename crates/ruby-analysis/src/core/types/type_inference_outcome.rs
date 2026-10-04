@@ -4,17 +4,13 @@
 //! the reason that a concrete type was withheld so non-LSP consumers can make
 //! the same decision and explain it without reimplementing inference policy.
 
-use crate::core::callables::callable_body::ConstantCallableBodyFact;
-use crate::core::{
-    ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation, RubyType, TextRange,
-};
+use crate::core::RubyType;
 use crate::invariant::ExpectInvariant;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
-use std::mem::size_of;
 
-use crate::core::storage::memory_estimate::{fqn_heap_bytes, ruby_type_heap_bytes};
+use crate::core::storage::memory_estimate::ruby_type_heap_bytes;
 
 /// Stable, machine-readable reasons that inference withheld a concrete type.
 ///
@@ -260,72 +256,6 @@ pub struct InferenceTelemetry {
     /// Exact retained proof outcomes withheld for shape-specific reasons.
     pub shape_invalidated_outcomes: u64,
     pub shape_bound_exceeded_outcomes: u64,
-}
-
-/// File-owned proof results and their observational solver telemetry.
-///
-/// The exact outcomes are semantic evidence consumed by both editor and
-/// headless adapters. They are replaced atomically with the file that produced
-/// them; process/session aggregates intentionally merge only the counters.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct InferenceEvidence {
-    pub method_return_outcomes: BTreeMap<FullyQualifiedName, TypeInferenceOutcome>,
-    /// Compact proof equations retained independently of Prism so the shared
-    /// engine can solve recursive components spanning project files.
-    pub method_return_equations: Vec<MethodReturnEquation>,
-    /// File-owned type equations whose terms contain lexical value-constant
-    /// lookups. The engine solves them after the complete namespace graph is
-    /// installed and before method-return equations consume their results.
-    pub constant_type_equations: Vec<ConstantTypeEquation>,
-    /// Capture-free callable constants lowered during the owning file's
-    /// ordinary traversal. Cross-file consumers resolve these facts through
-    /// `View`; replacement removes them with the source file.
-    pub(crate) constant_callable_bodies: Vec<ConstantCallableBodyFact>,
-    /// Compact, file-owned results for complete call expressions. These are
-    /// resolved from the same method candidates as navigation and diagnostics
-    /// instead of duplicating method lookup in the AST visitor.
-    pub call_expression_outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
-    /// Exact expression ranges whose type is Unknown, paired with the proof
-    /// failure that prevented a concrete result.
-    pub expression_unknown_reasons: Vec<(TextRange, UnknownReason)>,
-    pub telemetry: InferenceTelemetry,
-}
-
-impl InferenceEvidence {
-    pub(crate) fn estimated_heap_bytes(&self) -> usize {
-        self.method_return_outcomes.len()
-            * (size_of::<FullyQualifiedName>()
-                + size_of::<TypeInferenceOutcome>()
-                + 3 * size_of::<usize>())
-            + self
-                .method_return_outcomes
-                .iter()
-                .map(|(method, outcome)| fqn_heap_bytes(method) + outcome.estimated_heap_bytes())
-                .sum::<usize>()
-            + self.method_return_equations.capacity() * size_of::<MethodReturnEquation>()
-            + self
-                .method_return_equations
-                .iter()
-                .map(MethodReturnEquation::estimated_heap_bytes)
-                .sum::<usize>()
-            + self.constant_type_equations.capacity() * size_of::<ConstantTypeEquation>()
-            + self.constant_callable_bodies.capacity() * size_of::<ConstantCallableBodyFact>()
-            + self
-                .constant_callable_bodies
-                .iter()
-                .map(ConstantCallableBodyFact::estimated_heap_bytes)
-                .sum::<usize>()
-            + self.call_expression_outcomes.capacity()
-                * size_of::<(TextRange, TypeInferenceOutcome)>()
-            + self
-                .call_expression_outcomes
-                .iter()
-                .map(|(_, outcome)| outcome.estimated_heap_bytes())
-                .sum::<usize>()
-            + self.expression_unknown_reasons.capacity() * size_of::<(TextRange, UnknownReason)>()
-            + self.telemetry.unknown_reasons.len()
-                * (size_of::<UnknownReason>() + size_of::<u64>() + 3 * size_of::<usize>())
-    }
 }
 
 impl InferenceTelemetry {

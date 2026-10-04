@@ -305,7 +305,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
                     RubyType::Unknown,
                     UnknownReason::UnprovenRecursiveCycle,
                 )],
-                telemetry: recursive,
+                telemetry: recursive.into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -337,7 +337,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
                     method.clone(),
                     RubyType::string(),
                 )],
-                telemetry: proven,
+                telemetry: proven.into(),
                 ..Default::default()
             },
             ..Default::default()

@@ -51,12 +51,11 @@ pub use storage::symbol_store::{SymbolFact, SymbolKind};
 pub use storage::type_store::{
     SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeSubject,
 };
+pub use types::inference_evidence::{FileTelemetry, InferenceEvidence, MethodReturnOutcomes};
 pub use types::ruby_type::RubyType;
 pub use types::shape_type::{
     LiteralKey, LiteralValue, ShapeConstructionError, ShapeExactness, ShapeField,
     ShapeFieldPresence, ShapeRest, ShapeStability, ShapeType, MAX_SHAPE_ALIASES, MAX_SHAPE_DEPTH,
     MAX_SHAPE_FIELDS, MAX_SHAPE_SOLVE_ITERATIONS, MAX_SHAPE_UNION_VARIANTS,
 };
-pub use types::type_inference_outcome::{
-    InferenceEvidence, InferenceTelemetry, TypeInferenceOutcome, UnknownReason,
-};
+pub use types::type_inference_outcome::{InferenceTelemetry, TypeInferenceOutcome, UnknownReason};

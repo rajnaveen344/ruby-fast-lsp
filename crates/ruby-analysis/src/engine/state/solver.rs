@@ -10,7 +10,7 @@ use std::mem::size_of;
 use crate::core::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
     FullyQualifiedName, GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodReturnEquation,
-    RubyType, SourceFileId, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+    MethodReturnOutcomes, RubyType, SourceFileId, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnknownReason,
 };
 
@@ -180,6 +180,8 @@ impl Solver {
         evidence: InferenceEvidence,
         equations_changed: bool,
     ) {
+        let mut evidence = evidence;
+        evidence.shrink_to_fit();
         self.count_constant_inputs(&evidence, 1);
         if let Some(previous) = self.evidence_by_file.insert(file_id, evidence) {
             self.count_constant_inputs(&previous, -1);
@@ -269,7 +271,7 @@ impl Solver {
                 "keep telemetry refresh inside the file replacement lifecycle",
             )
             .telemetry
-            .replace_retained_shape_observations(&observed);
+            .update(|telemetry| telemetry.replace_retained_shape_observations(&observed));
     }
 
     fn has_method_return_constant_dependencies(&self) -> bool {
@@ -510,7 +512,7 @@ impl Solver {
                     });
                     (method.clone(), outcome.clone())
                 })
-                .collect::<BTreeMap<_, _>>();
+                .collect::<MethodReturnOutcomes>();
             types.update_inferred_method_return_types_in_file(
                 *file_id,
                 outcomes
@@ -523,15 +525,15 @@ impl Solver {
                 "keep equation solving and evidence projection atomic",
             );
             evidence.method_return_outcomes = outcomes;
-            let max_live_shape_aliases = evidence.telemetry.max_live_shape_aliases;
-            evidence.telemetry = InferenceTelemetry::default();
-            evidence.telemetry.observe_max_live_shape_aliases(
-                usize::try_from(max_live_shape_aliases).expect_invariant(
+            let mut telemetry = InferenceTelemetry::default();
+            telemetry.observe_max_live_shape_aliases(
+                usize::try_from(evidence.telemetry.get().max_live_shape_aliases).expect_invariant(
                     "retained shape alias telemetry did not fit usize",
                     "the configured alias bound is representable on every supported target",
                     "keep the telemetry representation aligned with MAX_SHAPE_ALIASES",
                 ),
             );
+            evidence.telemetry = telemetry.into();
         }
 
         let telemetry_owner = *file_ids.first().expect_invariant(
@@ -547,15 +549,16 @@ impl Solver {
                 "resolution owns the engine write lock",
                 "assign telemetry before leaving the atomic solve pass",
             );
-        let max_live_shape_aliases = telemetry_evidence.telemetry.max_live_shape_aliases;
-        telemetry_evidence.telemetry = solve_result.telemetry;
-        telemetry_evidence.telemetry.observe_max_live_shape_aliases(
-            usize::try_from(max_live_shape_aliases).expect_invariant(
-                "retained shape alias telemetry did not fit usize",
-                "the configured alias bound is representable on every supported target",
-                "keep the telemetry representation aligned with MAX_SHAPE_ALIASES",
-            ),
+        let mut telemetry = solve_result.telemetry;
+        telemetry.observe_max_live_shape_aliases(
+            usize::try_from(telemetry_evidence.telemetry.get().max_live_shape_aliases)
+                .expect_invariant(
+                    "retained shape alias telemetry did not fit usize",
+                    "the configured alias bound is representable on every supported target",
+                    "keep the telemetry representation aligned with MAX_SHAPE_ALIASES",
+                ),
         );
+        telemetry_evidence.telemetry = telemetry.into();
         for file_id in &file_ids {
             self.refresh_retained_shape_telemetry(*file_id, types);
         }
@@ -579,7 +582,8 @@ impl Solver {
                         "engine queries hold a stable shared borrow",
                         "keep telemetry replacement behind the engine write lock",
                     )
-                    .telemetry,
+                    .telemetry
+                    .get(),
             );
         }
         aggregate
@@ -700,13 +704,13 @@ impl<'a> View<'a> {
         self.engine
             .solver
             .evidence(file_id)
-            .map(|evidence| &evidence.telemetry)
+            .map(|evidence| evidence.telemetry.get())
     }
 
     pub fn method_return_outcomes_in_file(
         &self,
         file_id: SourceFileId,
-    ) -> Option<&'a BTreeMap<FullyQualifiedName, TypeInferenceOutcome>> {
+    ) -> Option<&'a MethodReturnOutcomes> {
         self.engine
             .solver
             .evidence(file_id)

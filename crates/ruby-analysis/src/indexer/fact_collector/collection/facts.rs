@@ -214,13 +214,18 @@ impl FactCollector {
         method_return_equations.sort_unstable();
 
         InferenceEvidence {
-            method_return_outcomes: self.method_returns.outcomes.clone(),
+            method_return_outcomes: self
+                .method_returns
+                .outcomes
+                .iter()
+                .map(|(method, outcome)| (method.clone(), outcome.clone()))
+                .collect(),
             method_return_equations,
             constant_type_equations: self.constants.equations.clone(),
             constant_callable_bodies: self.constants.callable_bodies.clone(),
             call_expression_outcomes,
             expression_unknown_reasons,
-            telemetry: self.inference_telemetry(),
+            telemetry: self.inference_telemetry().into(),
         }
     }
 }

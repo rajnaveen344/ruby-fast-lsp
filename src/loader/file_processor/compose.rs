@@ -78,7 +78,7 @@ impl FileProcessor {
             document,
         } = output;
         if !source_kind.contributes_project_diagnostics() {
-            analysis.inference.method_return_outcomes.clear();
+            analysis.inference.method_return_outcomes = Default::default();
             analysis.inference.method_return_equations.clear();
         }
         if let Some(declarations) = declarations {
