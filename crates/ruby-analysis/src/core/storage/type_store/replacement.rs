@@ -17,12 +17,7 @@ impl TypeStore {
             self.free_facts.push(stale_id);
             self.retired += 1;
             if let Some(subject_id) = stale.subject.interned_id() {
-                if let Some(ids) = self.facts_by_subject.get_mut(&subject_id) {
-                    ids.retain(|id| *id != stale_id);
-                    if ids.is_empty() {
-                        self.facts_by_subject.remove(&subject_id);
-                    }
-                }
+                self.facts_by_subject.remove(subject_id, stale_id);
             }
         }
     }
@@ -60,15 +55,12 @@ impl TypeStore {
                 provenance: fact.provenance,
             });
             if let Some(subject_id) = subject.interned_id() {
-                self.facts_by_subject
-                    .entry(subject_id)
-                    .or_default()
-                    .push(id);
+                self.facts_by_subject.push(subject_id, id);
             }
             self.facts_by_file.entry(file_id).or_default().push(id);
         }
         for (subject, appended_count) in touched_subjects {
-            if let Some(ids) = self.facts_by_subject.get_mut(&subject) {
+            if let Some(ids) = self.facts_by_subject.many_mut(subject) {
                 if self.file_owned_indexes_ordered {
                     place_appended_file_facts(
                         ids,

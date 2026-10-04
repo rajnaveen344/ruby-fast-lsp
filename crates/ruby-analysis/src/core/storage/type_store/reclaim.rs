@@ -49,10 +49,11 @@ impl TypeStore {
         external: impl IntoIterator<Item = RubyTypeId>,
     ) -> Option<RubyTypeRemap> {
         self.retired = 0;
-        // Every fact with an interned subject is indexed under it, and empty
-        // buckets are removed, so the keys are exactly the live subjects.
+        // Every fact with an interned subject is indexed under it, and the
+        // index forgets a subject with its last fact, so these are exactly the
+        // live subjects.
         let mut live_subjects = vec![false; self.subjects.len()];
-        for subject in self.facts_by_subject.keys() {
+        for subject in self.facts_by_subject.subjects() {
             live_subjects[subject.index()] = true;
         }
         let mut live_types = vec![false; self.ruby_types.len()];
@@ -70,11 +71,7 @@ impl TypeStore {
                     fact.subject = StoredTypeSubject::interned(new_id(id));
                 }
             }
-            self.facts_by_subject = self
-                .facts_by_subject
-                .drain()
-                .map(|(id, facts)| (new_id(id), facts))
-                .collect();
+            self.facts_by_subject.renumber(new_id);
         }
         let remap = RubyTypeRemap(self.ruby_types.retain_own(&live_types)?);
         for fact in self.facts.iter_mut().flatten() {

@@ -24,7 +24,7 @@ impl TypeStore {
             let Some(subject_id) = self.subject_id(&subject) else {
                 continue;
             };
-            let Some(fact_ids) = self.facts_by_subject.get(&subject_id) else {
+            let Some(fact_ids) = self.facts_by_subject.get(subject_id) else {
                 continue;
             };
             let targets = fact_ids
@@ -62,7 +62,7 @@ impl TypeStore {
         let Some(subject_id) = self.subject_id(subject) else {
             return 0;
         };
-        let Some(fact_ids) = self.facts_by_subject.get(&subject_id) else {
+        let Some(fact_ids) = self.facts_by_subject.get(subject_id) else {
             return 0;
         };
         let targets = fact_ids

@@ -5,13 +5,15 @@ mod facts;
 mod ordered_append;
 mod reclaim;
 mod replacement;
+mod subject_index;
 mod updates;
 
 use crate::invariant::ExpectInvariant;
-pub(crate) use compact::RubyTypeId;
+pub(crate) use compact::{RubyTypeId, StoredOutcome};
 use compact::{StoredTypeFact, StoredTypeSubject, TypeFactId, TypeSubjectId};
 pub(crate) use facts::NamedTypeResolution;
 pub use facts::{SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeSubject};
+use subject_index::SubjectIndex;
 
 use std::collections::HashMap;
 
@@ -29,7 +31,7 @@ pub struct TypeStore {
     free_facts: Vec<TypeFactId>,
     subjects: SharedInterner<TypeSubject>,
     ruby_types: SharedInterner<RubyType>,
-    facts_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
+    facts_by_subject: SubjectIndex,
     facts_by_file: HashMap<SourceFileId, Vec<TypeFactId>>,
     file_owned_indexes_ordered: bool,
     /// References to interned values dropped since the last reclamation.
@@ -43,7 +45,7 @@ impl Default for TypeStore {
             free_facts: Vec::new(),
             subjects: SharedInterner::default(),
             ruby_types: SharedInterner::default(),
-            facts_by_subject: HashMap::new(),
+            facts_by_subject: SubjectIndex::default(),
             facts_by_file: HashMap::new(),
             file_owned_indexes_ordered: true,
             retired: 0,
@@ -68,10 +70,7 @@ impl TypeStore {
             provenance: fact.provenance,
         });
         if let Some(subject_id) = subject.interned_id() {
-            self.facts_by_subject
-                .entry(subject_id)
-                .or_default()
-                .push(id);
+            self.facts_by_subject.push(subject_id, id);
         }
         self.facts_by_file.entry(file_id).or_default().push(id);
     }
@@ -94,7 +93,7 @@ impl TypeStore {
                     return Vec::new();
                 };
                 self.facts_by_subject
-                    .get(&subject_id)
+                    .get(subject_id)
                     .map(|ids| self.clone_facts(ids))
                     .unwrap_or_default()
             }
@@ -318,13 +317,8 @@ impl TypeStore {
             + vec_payload_bytes(&self.free_facts)
             + self.subjects.estimated_heap_bytes(type_subject_heap_bytes)
             + self.ruby_types.estimated_heap_bytes(ruby_type_heap_bytes)
-            + map_table_bytes(&self.facts_by_subject)
+            + self.facts_by_subject.estimated_heap_bytes()
             + map_table_bytes(&self.facts_by_file)
-            + self
-                .facts_by_subject
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
             + self
                 .facts_by_file
                 .values()
@@ -351,9 +345,6 @@ impl TypeStore {
         self.ruby_types.shrink_to_fit();
         self.facts_by_subject.shrink_to_fit();
         self.facts_by_file.shrink_to_fit();
-        for ids in self.facts_by_subject.values_mut() {
-            ids.shrink_to_fit();
-        }
         for ids in self.facts_by_file.values_mut() {
             ids.shrink_to_fit();
         }
@@ -529,8 +520,7 @@ impl TypeStore {
             | TypeSubject::MethodReturn(_)
             | TypeSubject::Parameter { .. } => self
                 .subject_id(subject)
-                .and_then(|subject_id| self.facts_by_subject.get(&subject_id))
-                .map(Vec::as_slice),
+                .and_then(|subject_id| self.facts_by_subject.get(subject_id)),
         }
     }
 

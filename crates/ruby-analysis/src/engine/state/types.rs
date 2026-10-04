@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::mem::size_of;
 
-use crate::core::storage::type_store::{RubyTypeId, TypeStore};
+use crate::core::storage::type_store::{RubyTypeId, StoredOutcome, TypeStore};
 use crate::core::{
     FullyQualifiedName, RubyType, SourceFileId, TextRange, TypeFact, TypeInferenceOutcome,
     TypeResolution, TypeSubject, UnknownReason,
@@ -15,10 +15,28 @@ use crate::invariant::ExpectInvariant;
 use super::Project;
 use crate::engine::View;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StoredTypeInferenceOutcome {
-    Proven(RubyTypeId),
-    Unknown(UnknownReason),
+/// A byte range inside the file whose row set holds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Span {
+    start: u32,
+    end: u32,
+}
+
+impl Span {
+    fn of(range: TextRange) -> Self {
+        Self {
+            start: range.start_byte,
+            end: range.end_byte,
+        }
+    }
+
+    fn in_file(self, file_id: SourceFileId) -> TextRange {
+        TextRange {
+            file_id,
+            start_byte: self.start,
+            end_byte: self.end,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,34 +45,31 @@ pub(in crate::engine) enum TypeInferenceOutcomeRef<'a> {
     Unknown(UnknownReason),
 }
 
-impl StoredTypeInferenceOutcome {
-    fn from_domain(types: &mut TypeStore, outcome: TypeInferenceOutcome) -> Self {
-        match outcome.unknown_reason() {
-            Some(reason) => Self::Unknown(reason),
-            None => Self::Proven(types.intern_ruby_type(
-                outcome.into_proven_type().expect_invariant(
-                    "call-expression outcome is neither proven nor Unknown",
-                    "TypeInferenceOutcome has exactly those two states",
-                    "build outcomes via TypeInferenceOutcome::proven or ::unknown",
-                ),
-            )),
-        }
+fn store_outcome(types: &mut TypeStore, outcome: TypeInferenceOutcome) -> StoredOutcome {
+    match outcome.unknown_reason() {
+        Some(reason) => StoredOutcome::unknown(reason),
+        None => StoredOutcome::proven(types.intern_ruby_type(
+            outcome.into_proven_type().expect_invariant(
+                "call-expression outcome is neither proven nor Unknown",
+                "TypeInferenceOutcome has exactly those two states",
+                "build outcomes via TypeInferenceOutcome::proven or ::unknown",
+            ),
+        )),
     }
+}
 
-    fn as_ref<'a>(self, types: &'a TypeStore) -> TypeInferenceOutcomeRef<'a> {
-        match self {
-            Self::Proven(ruby_type) => TypeInferenceOutcomeRef::Proven(types.ruby_type(ruby_type)),
-            Self::Unknown(reason) => TypeInferenceOutcomeRef::Unknown(reason),
-        }
+fn outcome_ref(types: &TypeStore, outcome: StoredOutcome) -> TypeInferenceOutcomeRef<'_> {
+    match outcome.get() {
+        Ok(ruby_type) => TypeInferenceOutcomeRef::Proven(types.ruby_type(ruby_type)),
+        Err(reason) => TypeInferenceOutcomeRef::Unknown(reason),
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct TypeTable {
     store: TypeStore,
-    call_expression_outcomes_by_file:
-        HashMap<SourceFileId, Box<[(TextRange, StoredTypeInferenceOutcome)]>>,
-    local_read_types_by_file: HashMap<SourceFileId, Box<[(TextRange, RubyTypeId)]>>,
+    call_expression_outcomes_by_file: HashMap<SourceFileId, Box<[(Span, StoredOutcome)]>>,
+    local_read_types_by_file: HashMap<SourceFileId, Box<[(Span, RubyTypeId)]>>,
 }
 
 impl TypeTable {
@@ -110,10 +125,14 @@ impl TypeTable {
             let outcomes = call_expression_outcomes
                 .into_iter()
                 .map(|(range, outcome)| {
-                    (
-                        range,
-                        StoredTypeInferenceOutcome::from_domain(&mut self.store, outcome),
-                    )
+                    invariant_eq!(
+                        range.file_id,
+                        file_id,
+                        what = "call-expression outcome belongs to a different file",
+                        why = "inference evidence must be replaced atomically with its source",
+                        fix = "partition call-expression outcomes by SourceFileId before replacing",
+                    );
+                    (Span::of(range), store_outcome(&mut self.store, outcome))
                 })
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
@@ -127,7 +146,7 @@ impl TypeTable {
             let local_read_types = local_read_types
                 .into_vec()
                 .into_iter()
-                .map(|(range, ruby_type)| (range, self.store.intern_ruby_type(ruby_type)))
+                .map(|(range, ruby_type)| (Span::of(range), self.store.intern_ruby_type(ruby_type)))
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             self.local_read_types_by_file
@@ -164,10 +183,7 @@ impl TypeTable {
         let external = outcomes
             .values()
             .flat_map(|rows| rows.iter())
-            .filter_map(|(_, outcome)| match outcome {
-                StoredTypeInferenceOutcome::Proven(ruby_type) => Some(*ruby_type),
-                StoredTypeInferenceOutcome::Unknown(_) => None,
-            })
+            .filter_map(|(_, outcome)| outcome.get().ok())
             .chain(
                 reads
                     .values()
@@ -177,11 +193,8 @@ impl TypeTable {
             return;
         };
         for (_, outcome) in outcomes.values_mut().flat_map(|rows| rows.iter_mut()) {
-            match outcome {
-                StoredTypeInferenceOutcome::Proven(ruby_type) => {
-                    *ruby_type = remap.apply(*ruby_type)
-                }
-                StoredTypeInferenceOutcome::Unknown(_) => {}
+            if let Ok(ruby_type) = outcome.get() {
+                *outcome = StoredOutcome::proven(remap.apply(ruby_type));
             }
         }
         for (_, ruby_type) in reads.values_mut().flat_map(|rows| rows.iter_mut()) {
@@ -196,9 +209,9 @@ impl TypeTable {
         self.call_expression_outcomes_by_file
             .get(&file_id)
             .map(|outcomes| {
-                outcomes
-                    .iter()
-                    .map(|(range, outcome)| (*range, outcome.as_ref(&self.store)))
+                outcomes.iter().map(move |(span, outcome)| {
+                    (span.in_file(file_id), outcome_ref(&self.store, *outcome))
+                })
             })
     }
 
@@ -208,9 +221,9 @@ impl TypeTable {
     ) -> Option<TypeInferenceOutcomeRef<'_>> {
         let outcomes = self.call_expression_outcomes_by_file.get(&range.file_id)?;
         let index = outcomes
-            .binary_search_by_key(&range, |(outcome_range, _)| *outcome_range)
+            .binary_search_by_key(&Span::of(range), |(span, _)| *span)
             .ok()?;
-        Some(outcomes[index].1.as_ref(&self.store))
+        Some(outcome_ref(&self.store, outcomes[index].1))
     }
 
     /// One file's proven local-read types in range order; empty when the file
@@ -225,7 +238,7 @@ impl TypeTable {
             .map_or(&[][..], Box::as_ref);
         reads
             .iter()
-            .map(|(range, ruby_type)| (*range, self.store.ruby_type(*ruby_type)))
+            .map(move |(span, ruby_type)| (span.in_file(file_id), self.store.ruby_type(*ruby_type)))
     }
 
     /// Every file's proven local-read types, in map order.
@@ -234,12 +247,12 @@ impl TypeTable {
     ) -> impl Iterator<Item = (SourceFileId, impl Iterator<Item = (TextRange, &RubyType)>)> {
         self.local_read_types_by_file
             .iter()
-            .map(|(file_id, reads)| {
+            .map(move |(&file_id, reads)| {
                 (
-                    *file_id,
-                    reads
-                        .iter()
-                        .map(|(range, ruby_type)| (*range, self.store.ruby_type(*ruby_type))),
+                    file_id,
+                    reads.iter().map(move |(span, ruby_type)| {
+                        (span.in_file(file_id), self.store.ruby_type(*ruby_type))
+                    }),
                 )
             })
     }
@@ -250,7 +263,7 @@ impl TypeTable {
     ) -> Option<&RubyType> {
         let reads = self.local_read_types_by_file.get(&range.file_id)?;
         let index = reads
-            .binary_search_by_key(&range, |(candidate, _)| *candidate)
+            .binary_search_by_key(&Span::of(range), |(span, _)| *span)
             .ok()?;
         Some(self.store.ruby_type(reads[index].1))
     }
@@ -261,11 +274,11 @@ impl TypeTable {
         byte_offset: u32,
     ) -> Option<&RubyType> {
         let reads = self.local_read_types_by_file.get(&file_id)?;
-        let upper = reads.partition_point(|(range, _)| range.start_byte <= byte_offset);
+        let upper = reads.partition_point(|(span, _)| span.start <= byte_offset);
         reads[..upper]
             .iter()
             .rev()
-            .find(|(range, _)| range.contains_offset(file_id, byte_offset))
+            .find(|(span, _)| byte_offset <= span.end)
             .map(|(_, ruby_type)| self.store.ruby_type(*ruby_type))
     }
 
@@ -287,7 +300,7 @@ impl TypeTable {
         let mut replaced = 0;
         while let Some(first_range) = ordered_ranges.next() {
             let file_id = first_range.file_id;
-            let first_outcome = StoredTypeInferenceOutcome::from_domain(
+            let first_outcome = store_outcome(
                 &mut self.store,
                 outcomes.remove(&first_range).expect_invariant(
                     "sorted call-expression range has no resolved outcome",
@@ -295,7 +308,7 @@ impl TypeTable {
                     "remove each map entry exactly once while grouping by file",
                 ),
             );
-            let mut incoming = vec![(first_range, first_outcome)];
+            let mut incoming = vec![(Span::of(first_range), first_outcome)];
             while ordered_ranges
                 .peek()
                 .is_some_and(|range| range.file_id == file_id)
@@ -305,7 +318,7 @@ impl TypeTable {
                     "the local iterator is not shared",
                     "keep grouping and consumption in one loop",
                 );
-                let outcome = StoredTypeInferenceOutcome::from_domain(
+                let outcome = store_outcome(
                     &mut self.store,
                     outcomes.remove(&range).expect_invariant(
                         "grouped call-expression range has no resolved outcome",
@@ -313,7 +326,7 @@ impl TypeTable {
                         "remove each map entry exactly once while grouping by file",
                     ),
                 );
-                incoming.push((range, outcome));
+                incoming.push((Span::of(range), outcome));
             }
 
             invariant!(
@@ -449,13 +462,14 @@ impl TypeTable {
             .unwrap_or_default()
             .into_vec();
         let before = reads.len();
-        reads.retain(|(existing, _)| *existing != range);
+        let span = Span::of(range);
+        reads.retain(|(existing, _)| *existing != span);
         self.store.retire(before - reads.len());
         if ruby_type != RubyType::Unknown {
             let ruby_type = self.store.intern_ruby_type(ruby_type);
-            reads.push((range, ruby_type));
+            reads.push((span, ruby_type));
         }
-        reads.sort_unstable_by_key(|(range, _)| *range);
+        reads.sort_unstable_by_key(|(span, _)| *span);
         if !reads.is_empty() {
             self.local_read_types_by_file
                 .insert(range.file_id, reads.into_boxed_slice());
@@ -474,22 +488,18 @@ impl TypeTable {
     /// Heap held by the per-file call-expression outcomes and local-read types.
     pub(in crate::engine) fn file_outcomes_heap_bytes(&self) -> usize {
         self.call_expression_outcomes_by_file.capacity()
-            * (size_of::<SourceFileId>()
-                + size_of::<Box<[(TextRange, StoredTypeInferenceOutcome)]>>()
-                + 1)
+            * (size_of::<SourceFileId>() + size_of::<Box<[(Span, StoredOutcome)]>>() + 1)
             + self
                 .call_expression_outcomes_by_file
                 .values()
-                .map(|outcomes| {
-                    outcomes.len() * size_of::<(TextRange, StoredTypeInferenceOutcome)>()
-                })
+                .map(|outcomes| outcomes.len() * size_of::<(Span, StoredOutcome)>())
                 .sum::<usize>()
             + self.local_read_types_by_file.capacity()
-                * (size_of::<SourceFileId>() + size_of::<Box<[(TextRange, RubyTypeId)]>>() + 1)
+                * (size_of::<SourceFileId>() + size_of::<Box<[(Span, RubyTypeId)]>>() + 1)
             + self
                 .local_read_types_by_file
                 .values()
-                .map(|reads| reads.len() * size_of::<(TextRange, RubyTypeId)>())
+                .map(|reads| reads.len() * size_of::<(Span, RubyTypeId)>())
                 .sum::<usize>()
     }
 

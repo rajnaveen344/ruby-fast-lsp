@@ -134,7 +134,6 @@ impl<T: Hash + Eq> SharedInterner<T> {
             index += 1;
             own_live[index - 1]
         });
-        self.own.shrink_to_fit();
         Some(IdRemap { offset, own })
     }
 
