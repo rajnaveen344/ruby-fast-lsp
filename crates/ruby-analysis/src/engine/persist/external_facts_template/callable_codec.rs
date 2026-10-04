@@ -17,6 +17,7 @@ use crate::core::callables::callable_body::CallableBodyParameterKind;
 use crate::core::callables::callable_body::CallableBodySummary;
 use crate::core::callables::callable_body::ConstantCallableBodyFact;
 use crate::core::{RubyMethod, SourceFileId};
+use ustr::Ustr;
 
 pub(super) fn snapshot_constant_callable_body(
     fact: &ConstantCallableBodyFact,
@@ -267,8 +268,8 @@ pub(super) fn snapshot_callable_signature(
     signature: &crate::core::callables::callable_signature::CallableSignature,
 ) -> Result<SnapshotCallableSignature, String> {
     Ok(SnapshotCallableSignature {
-        receiver_type_parameters: signature.receiver_type_parameters.clone(),
-        type_parameters: signature.type_parameters.clone(),
+        receiver_type_parameters: ustr_strings(&signature.receiver_type_parameters),
+        type_parameters: ustr_strings(&signature.type_parameters),
         parameters: signature
             .parameters
             .iter()
@@ -303,7 +304,7 @@ fn snapshot_callable_template(
         }
         CallableTypeTemplate::Receiver => SnapshotCallableTypeTemplate::Receiver,
         CallableTypeTemplate::Variable(name) => {
-            SnapshotCallableTypeTemplate::Variable(name.clone())
+            SnapshotCallableTypeTemplate::Variable(name.to_string())
         }
         CallableTypeTemplate::Array(element) => {
             SnapshotCallableTypeTemplate::Array(Box::new(snapshot_callable_template(element)?))
@@ -327,8 +328,8 @@ pub(super) fn restore_callable_signature(
 ) -> Result<crate::core::callables::callable_signature::CallableSignature, String> {
     Ok(
         crate::core::callables::callable_signature::CallableSignature {
-            receiver_type_parameters: signature.receiver_type_parameters,
-            type_parameters: signature.type_parameters,
+            receiver_type_parameters: interned_strings(&signature.receiver_type_parameters),
+            type_parameters: interned_strings(&signature.type_parameters),
             parameters: signature
                 .parameters
                 .into_iter()
@@ -365,7 +366,9 @@ fn restore_callable_template(
             CallableTypeTemplate::Concrete(restore_ruby_type(ruby_type, 1)?)
         }
         SnapshotCallableTypeTemplate::Receiver => CallableTypeTemplate::Receiver,
-        SnapshotCallableTypeTemplate::Variable(name) => CallableTypeTemplate::Variable(name),
+        SnapshotCallableTypeTemplate::Variable(name) => {
+            CallableTypeTemplate::Variable(Ustr::from(&name))
+        }
         SnapshotCallableTypeTemplate::Array(element) => {
             CallableTypeTemplate::Array(Box::new(restore_callable_template(*element)?))
         }
@@ -381,4 +384,12 @@ fn restore_callable_template(
         ),
         SnapshotCallableTypeTemplate::Unconstrained => CallableTypeTemplate::Unconstrained,
     })
+}
+
+pub(super) fn ustr_strings(names: &[Ustr]) -> Vec<String> {
+    names.iter().map(|name| name.to_string()).collect()
+}
+
+pub(super) fn interned_strings(names: &[String]) -> Vec<Ustr> {
+    names.iter().map(|name| Ustr::from(name)).collect()
 }

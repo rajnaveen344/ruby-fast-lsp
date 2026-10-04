@@ -702,37 +702,15 @@ fn higher_order_method_metadata_heap_bytes(metadata: &HigherOrderMethodMetadata)
             .map(callable_signature_heap_bytes)
             .sum::<usize>()
         + metadata
-            .forwarded_block_call
-            .as_ref()
-            .map(|forwarded| string_heap_bytes(&forwarded.receiver_parameter))
-            .unwrap_or(0)
-        + metadata
             .direct_yield_call
             .as_ref()
-            .map(|direct| {
-                vec_payload_bytes(&direct.parameter_names)
-                    + direct
-                        .parameter_names
-                        .iter()
-                        .map(string_heap_bytes)
-                        .sum::<usize>()
-            })
+            .map(|direct| vec_payload_bytes(&direct.parameter_names))
             .unwrap_or(0)
 }
 
 fn callable_signature_heap_bytes(signature: &CallableSignature) -> usize {
     vec_payload_bytes(&signature.receiver_type_parameters)
-        + signature
-            .receiver_type_parameters
-            .iter()
-            .map(string_heap_bytes)
-            .sum::<usize>()
         + vec_payload_bytes(&signature.type_parameters)
-        + signature
-            .type_parameters
-            .iter()
-            .map(string_heap_bytes)
-            .sum::<usize>()
         + vec_payload_bytes(&signature.parameters)
         + signature
             .parameters
@@ -753,8 +731,7 @@ fn callable_signature_heap_bytes(signature: &CallableSignature) -> usize {
 fn callable_template_heap_bytes(template: &CallableTypeTemplate) -> usize {
     match template {
         CallableTypeTemplate::Concrete(ruby_type) => ruby_type_heap_bytes(ruby_type),
-        CallableTypeTemplate::Receiver => 0,
-        CallableTypeTemplate::Variable(name) => string_heap_bytes(name),
+        CallableTypeTemplate::Receiver | CallableTypeTemplate::Variable(_) => 0,
         CallableTypeTemplate::Array(element) => callable_template_heap_bytes(element),
         CallableTypeTemplate::Hash(key, value) => {
             callable_template_heap_bytes(key) + callable_template_heap_bytes(value)

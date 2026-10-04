@@ -2,13 +2,13 @@ use super::*;
 use crate::core::FullyQualifiedName;
 
 fn variable(name: &str) -> TypeTemplate {
-    TypeTemplate::Variable(name.to_string())
+    TypeTemplate::Variable(Ustr::from(name))
 }
 
 fn map_signature() -> CallableSignature {
     CallableSignature {
         receiver_type_parameters: Vec::new(),
-        type_parameters: vec!["Elem".to_string(), "Output".to_string()],
+        type_parameters: vec![Ustr::from("Elem"), Ustr::from("Output")],
         parameters: Vec::new(),
         block: CallableBlockTemplate {
             parameters: vec![variable("Elem")],
@@ -39,7 +39,7 @@ fn map_substitutes_receiver_and_block_results() {
 fn filter_map_subtracts_declared_falsey_members_before_binding() {
     let signature = CallableSignature {
         receiver_type_parameters: Vec::new(),
-        type_parameters: vec!["Elem".to_string(), "Output".to_string()],
+        type_parameters: vec![Ustr::from("Elem"), Ustr::from("Output")],
         parameters: Vec::new(),
         block: CallableBlockTemplate {
             parameters: vec![variable("Elem")],
@@ -70,7 +70,7 @@ fn filter_map_subtracts_declared_falsey_members_before_binding() {
 fn one_unknown_argument_fails_before_a_partial_result_can_escape() {
     let signature = CallableSignature {
         receiver_type_parameters: Vec::new(),
-        type_parameters: vec!["Accumulator".to_string()],
+        type_parameters: vec![Ustr::from("Accumulator")],
         parameters: vec![CallableParameterTemplate {
             kind: MethodParamKind::Required,
             ruby_type: variable("Accumulator"),
@@ -142,7 +142,7 @@ fn identical_compatible_overloads_produce_one_canonical_result() {
 #[test]
 fn missing_return_binding_fails_closed() {
     let mut signature = map_signature();
-    signature.type_parameters.push("Unbound".to_string());
+    signature.type_parameters.push(Ustr::from("Unbound"));
     signature.return_type = variable("Unbound");
     let prepared = prepare_callable_set(
         None,
@@ -161,7 +161,7 @@ fn missing_return_binding_fails_closed() {
 fn recursive_array_templates_substitute_without_flattening() {
     let signature = CallableSignature {
         receiver_type_parameters: Vec::new(),
-        type_parameters: vec!["Value".to_string()],
+        type_parameters: vec![Ustr::from("Value")],
         parameters: vec![CallableParameterTemplate {
             kind: MethodParamKind::Required,
             ruby_type: TypeTemplate::Array(Box::new(TypeTemplate::Array(Box::new(variable(
@@ -185,7 +185,7 @@ fn recursive_array_templates_substitute_without_flattening() {
 fn type_variable_bound_fails_closed() {
     let mut signature = map_signature();
     signature.type_parameters = (0..=MAX_CALLABLE_TYPE_VARIABLES)
-        .map(|index| format!("T{index}"))
+        .map(|index| Ustr::from(&format!("T{index}")))
         .collect();
     assert_eq!(
         prepare_callable_set(None, &[signature], &[], &[]).unwrap_err(),
@@ -215,7 +215,7 @@ fn block_parameter_bound_fails_closed() {
 fn solve_iteration_bound_fails_closed() {
     let signature = CallableSignature {
         receiver_type_parameters: Vec::new(),
-        type_parameters: vec!["Value".to_string()],
+        type_parameters: vec![Ustr::from("Value")],
         parameters: (0..=MAX_CALLABLE_SOLVE_ITERATIONS)
             .map(|_| CallableParameterTemplate {
                 kind: MethodParamKind::Required,

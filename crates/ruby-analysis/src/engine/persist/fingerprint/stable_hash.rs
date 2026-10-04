@@ -49,10 +49,10 @@ pub(super) fn stable_string(hasher: &mut StableExportHasher, value: &str) {
     hasher.write(value.as_bytes());
 }
 
-pub(super) fn stable_strings(hasher: &mut StableExportHasher, values: &[String]) {
+pub(super) fn stable_strings<S: AsRef<str>>(hasher: &mut StableExportHasher, values: &[S]) {
     stable_len(hasher, values.len());
     for value in values {
-        stable_string(hasher, value);
+        stable_string(hasher, value.as_ref());
     }
 }
 

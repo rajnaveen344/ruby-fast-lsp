@@ -712,20 +712,20 @@ end
             signature.block.parameters,
             [
                 crate::core::callables::callable_signature::CallableTypeTemplate::Variable(
-                    "Input".to_string()
+                    ustr::Ustr::from("Input")
                 )
             ]
         );
         assert_eq!(
             signature.block.return_type,
             crate::core::callables::callable_signature::CallableTypeTemplate::Variable(
-                "Output".to_string()
+                ustr::Ustr::from("Output")
             )
         );
         assert_eq!(
             signature.return_type,
             crate::core::callables::callable_signature::CallableTypeTemplate::Variable(
-                "Output".to_string()
+                ustr::Ustr::from("Output")
             )
         );
     }

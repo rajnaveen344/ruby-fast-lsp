@@ -4,17 +4,19 @@
 //! be retained on an ordinary method fact, while only a fully substituted
 //! [`RubyType`] may escape the higher-order inference proof boundary.
 
+use ustr::Ustr;
+
 use crate::core::{MethodParamKind, RubyMethod, RubyType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ForwardedBlockCall {
-    pub(crate) receiver_parameter: String,
+    pub(crate) receiver_parameter: Ustr,
     pub(crate) method: RubyMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DirectYieldCall {
-    pub(crate) parameter_names: Vec<String>,
+    pub(crate) parameter_names: Vec<Ustr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +24,7 @@ pub(crate) enum CallableTypeTemplate {
     Concrete(RubyType),
     /// The concrete runtime receiver of this call (`self` in RBS).
     Receiver,
-    Variable(String),
+    Variable(Ustr),
     Array(Box<CallableTypeTemplate>),
     Hash(Box<CallableTypeTemplate>, Box<CallableTypeTemplate>),
     Union(Vec<CallableTypeTemplate>),
@@ -49,8 +51,8 @@ pub(crate) struct CallableSignature {
     /// The prefix of `type_parameters` bound by the receiver's declared
     /// generic arguments. Method-local variables are solved from arguments or
     /// the block result instead.
-    pub(crate) receiver_type_parameters: Vec<String>,
-    pub(crate) type_parameters: Vec<String>,
+    pub(crate) receiver_type_parameters: Vec<Ustr>,
+    pub(crate) type_parameters: Vec<Ustr>,
     pub(crate) parameters: Vec<CallableParameterTemplate>,
     pub(crate) block: CallableBlockTemplate,
     pub(crate) return_type: CallableTypeTemplate,

@@ -1,8 +1,8 @@
 //! Snapshot encoding and validated restoration of declaration facts.
 
 use super::callable_codec::{
-    restore_callable_signature, restore_constant_callable_body, snapshot_callable_signature,
-    snapshot_constant_callable_body,
+    interned_strings, restore_callable_signature, restore_constant_callable_body,
+    snapshot_callable_signature, snapshot_constant_callable_body, ustr_strings,
 };
 use super::type_codec::{
     restore_fqn, restore_parts, restore_provenance, restore_range, restore_ruby_type,
@@ -284,14 +284,14 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
             .collect::<Result<Vec<_>, _>>()?,
         forwarded_block_call: fact.forwarded_block_call().map(|forwarded| {
             SnapshotForwardedBlockCall {
-                receiver_parameter: forwarded.receiver_parameter.clone(),
+                receiver_parameter: forwarded.receiver_parameter.to_string(),
                 method: forwarded.method.as_str().to_string(),
             }
         }),
         direct_yield_call: fact
             .direct_yield_call()
             .map(|direct| SnapshotDirectYieldCall {
-                parameter_names: direct.parameter_names.clone(),
+                parameter_names: ustr_strings(&direct.parameter_names),
             }),
     })
 }
@@ -327,7 +327,7 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
         .map(|forwarded| {
             Ok::<crate::core::callables::callable_signature::ForwardedBlockCall, String>(
                 crate::core::callables::callable_signature::ForwardedBlockCall {
-                    receiver_parameter: forwarded.receiver_parameter,
+                    receiver_parameter: Ustr::from(&forwarded.receiver_parameter),
                     method: RubyMethod::new(&forwarded.method).map_err(|error| {
                         format!(
                             "invalid persistent forwarded block method `{}`: {error}",
@@ -340,7 +340,7 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
         .transpose()?;
     let direct_yield_call = fact.direct_yield_call.map(|direct| {
         crate::core::callables::callable_signature::DirectYieldCall {
-            parameter_names: direct.parameter_names,
+            parameter_names: interned_strings(&direct.parameter_names),
         }
     });
     Ok(MethodFact {

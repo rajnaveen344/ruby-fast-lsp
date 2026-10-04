@@ -3,6 +3,7 @@ use ruby_prism::{DefNode, Node};
 use crate::core::callables::callable_signature::DirectYieldCall;
 use crate::core::callables::callable_signature::ForwardedBlockCall;
 use crate::core::RubyMethod;
+use ustr::Ustr;
 
 /// Recognize the bounded forwarding form whose method result is exactly one
 /// higher-order call on an ordinary parameter with the named block parameter.
@@ -41,7 +42,7 @@ pub(crate) fn direct_forwarded_block_call(node: &DefNode<'_>) -> Option<Forwarde
     }
     let method = RubyMethod::new(&String::from_utf8_lossy(call.name().as_slice())).ok()?;
     Some(ForwardedBlockCall {
-        receiver_parameter,
+        receiver_parameter: receiver_parameter.into(),
         method,
     })
 }
@@ -58,7 +59,7 @@ pub(crate) fn direct_yield_call(node: &DefNode<'_>) -> Option<DirectYieldCall> {
     let mut parameter_names = Vec::new();
     for argument in arguments.arguments().iter() {
         let local = argument.as_local_variable_read_node()?;
-        let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+        let name = Ustr::from(&String::from_utf8_lossy(local.name().as_slice()));
         let is_ordinary_parameter = parameters.requireds().iter().any(|parameter| {
             parameter
                 .as_required_parameter_node()

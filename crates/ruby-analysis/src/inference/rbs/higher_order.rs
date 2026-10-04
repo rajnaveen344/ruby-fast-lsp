@@ -7,6 +7,7 @@ use crate::core::callables::callable_signature::CallableTypeTemplate;
 use crate::core::{FullyQualifiedName, MethodFact, MethodParamKind, RubyMethod, RubyType};
 use crate::inference::higher_order::{prepare_callable_set, PreparedCallableSet};
 use crate::inference::semantics::Semantics;
+use ustr::Ustr;
 
 fn receiver_uses_embedded_rbs_without_engine(receiver_type: &RubyType) -> bool {
     matches!(
@@ -140,6 +141,7 @@ fn prepare_from_callable_signatures(
         }
         receiver_parameter_names
             .into_iter()
+            .map(|name| name.to_string())
             .zip(type_arguments)
             .collect()
     };
@@ -243,10 +245,10 @@ fn prepare_direct_yield_from_facts(
             crate::core::UnknownReason::AmbiguousCallableOverload
         });
     };
-    let output = "BlockResult".to_string();
+    let output = Ustr::from("BlockResult");
     let signature = CallableSignature {
         receiver_type_parameters: Vec::new(),
-        type_parameters: vec![output.clone()],
+        type_parameters: vec![output],
         parameters: Vec::new(),
         block: CallableBlockTemplate {
             parameters: block_parameters
@@ -254,7 +256,7 @@ fn prepare_direct_yield_from_facts(
                 .cloned()
                 .map(CallableTypeTemplate::Concrete)
                 .collect(),
-            return_type: CallableTypeTemplate::Variable(output.clone()),
+            return_type: CallableTypeTemplate::Variable(output),
             required: true,
         },
         return_type: CallableTypeTemplate::Variable(output),

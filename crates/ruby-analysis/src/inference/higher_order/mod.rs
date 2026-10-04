@@ -20,6 +20,7 @@ use crate::core::callables::callable_signature::CallableParameterTemplate;
 use crate::core::callables::callable_signature::CallableSignature;
 use crate::core::callables::callable_signature::CallableTypeTemplate as TypeTemplate;
 use crate::core::{MethodParamKind, RubyType, TypeInferenceOutcome, UnknownReason};
+use ustr::Ustr;
 
 pub(crate) const MAX_CALLABLE_OVERLOADS: usize = 8;
 pub(crate) const MAX_CALLABLE_TYPE_VARIABLES: usize = 8;
@@ -205,7 +206,7 @@ fn replace_proven_mutated_binding(
     }
     match template {
         TypeTemplate::Variable(name) => {
-            let Some(previous) = substitutions.get(name) else {
+            let Some(previous) = substitutions.get(name.as_str()) else {
                 return Err(UnknownReason::IncompleteGenericSubstitution);
             };
             if !matches!(previous, RubyType::Shape(_) | RubyType::Hash(_, _))
@@ -216,7 +217,7 @@ fn replace_proven_mutated_binding(
                 }
                 return Err(UnknownReason::UnsupportedCallable);
             }
-            substitutions.insert(name.clone(), actual.clone());
+            substitutions.insert(name.to_string(), actual.clone());
             Ok(())
         }
         TypeTemplate::Concrete(_)
@@ -356,9 +357,11 @@ pub(crate) fn callable_signature_from_rbs(
     let Some(block) = method.block.as_ref() else {
         return Ok(None);
     };
-    let mut type_parameters = receiver_type_parameters.to_vec();
-    type_parameters.extend_from_slice(method_type_parameters);
-    let type_parameter_set = type_parameters.iter().cloned().collect::<BTreeSet<_>>();
+    let type_parameter_set = receiver_type_parameters
+        .iter()
+        .chain(method_type_parameters)
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let parameters = method
         .params
         .iter()
@@ -375,8 +378,15 @@ pub(crate) fn callable_signature_from_rbs(
         .map(|parameter| type_template_from_rbs(&parameter.r#type, &type_parameter_set, 1))
         .collect::<Result<Vec<_>, _>>()?;
     let signature = CallableSignature {
-        receiver_type_parameters: receiver_type_parameters.to_vec(),
-        type_parameters,
+        receiver_type_parameters: receiver_type_parameters
+            .iter()
+            .map(|name| Ustr::from(name))
+            .collect(),
+        type_parameters: receiver_type_parameters
+            .iter()
+            .chain(method_type_parameters)
+            .map(|name| Ustr::from(name))
+            .collect(),
         parameters,
         block: CallableBlockTemplate {
             parameters: block_parameters,
@@ -454,18 +464,18 @@ fn type_template_from_rbs(
         return Err(UnknownReason::HigherOrderBoundExceeded);
     }
     match rbs_type {
-        RbsType::TypeVar(name) => Ok(TypeTemplate::Variable(name.clone())),
+        RbsType::TypeVar(name) => Ok(TypeTemplate::Variable(Ustr::from(name))),
         RbsType::Class(name) if type_parameters.contains(name) => {
-            Ok(TypeTemplate::Variable(name.clone()))
+            Ok(TypeTemplate::Variable(Ustr::from(name)))
         }
         RbsType::Class(name) if name == "boolish" => Ok(TypeTemplate::Unconstrained),
         RbsType::ClassInstance { name, args }
             if args.is_empty()
                 && type_parameters.contains(name.strip_prefix("::").unwrap_or(name)) =>
         {
-            Ok(TypeTemplate::Variable(
-                name.strip_prefix("::").unwrap_or(name).to_string(),
-            ))
+            Ok(TypeTemplate::Variable(Ustr::from(
+                name.strip_prefix("::").unwrap_or(name),
+            )))
         }
         RbsType::ClassInstance { name, args } => {
             let name = name.strip_prefix("::").unwrap_or(name);
@@ -769,7 +779,7 @@ fn resolve_template(
             fix = "recurse through every callable template in instantiate_receiver_signature",
         ),
         TypeTemplate::Variable(name) => substitutions
-            .get(name)
+            .get(name.as_str())
             .cloned()
             .ok_or(UnknownReason::IncompleteGenericSubstitution),
         TypeTemplate::Array(element) => Ok(RubyType::array_of(resolve_template(
