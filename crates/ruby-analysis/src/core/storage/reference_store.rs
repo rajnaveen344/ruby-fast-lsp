@@ -678,17 +678,24 @@ impl ReferenceStore {
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.remove_file_targets(file_id);
+    }
+
+    /// Remove `file_id`'s facts and return the targets they referenced.
+    /// Retaining keeps every remaining list sorted.
+    fn remove_file_targets(&mut self, file_id: SourceFileId) -> Vec<FqnId> {
         let Some(stale_targets) = self.targets_by_file.remove(&file_id) else {
-            return;
+            return Vec::new();
         };
-        for target in stale_targets {
-            if let Some(facts) = self.facts.get_mut(&target) {
+        for target in &stale_targets {
+            if let Some(facts) = self.facts.get_mut(target) {
                 facts.retain(|fact| fact.range.file_id != file_id);
                 if facts.is_empty() {
-                    self.facts.remove(&target);
+                    self.facts.remove(target);
                 }
             }
         }
+        stale_targets
     }
 
     pub fn clear(&mut self) {
@@ -701,7 +708,7 @@ impl ReferenceStore {
         file_id: SourceFileId,
         facts: impl IntoIterator<Item = (FqnId, ReferenceFact)>,
     ) {
-        self.remove_file(file_id);
+        let mut touched = self.remove_file_targets(file_id);
         for (target, fact) in facts {
             invariant!(
                 fact.range.file_id == file_id,
@@ -711,7 +718,22 @@ impl ReferenceStore {
             );
             self.add(target, fact);
         }
-        self.sort_all();
+        // Only the targets this file referenced before or now changed; every
+        // other list is still sorted and compact.
+        if let Some(targets) = self.targets_by_file.get_mut(&file_id) {
+            targets.sort_unstable();
+            targets.dedup();
+            targets.shrink_to_fit();
+            touched.extend_from_slice(targets);
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        for target in touched {
+            if let Some(facts) = self.facts.get_mut(&target) {
+                sort_reference_facts(facts);
+                facts.shrink_to_fit();
+            }
+        }
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
@@ -820,5 +842,60 @@ mod tests {
         assert!(facts
             .iter()
             .any(|fact| fact.range.file_id == SourceFileId(2)));
+    }
+
+    #[test]
+    fn replace_file_keeps_every_target_sorted_and_leaves_other_files_intact() {
+        let shared = FqnId(1);
+        let untouched = FqnId(2);
+        let dropped = FqnId(3);
+        let fact = |file: u32, start: u32| {
+            ReferenceFact::new(TextRange::new(SourceFileId(file), start, start + 1), None)
+        };
+        let mut store = ReferenceStore::default();
+        store.replace_file(
+            SourceFileId(1),
+            [(shared, fact(1, 5)), (dropped, fact(1, 9))],
+        );
+        store.replace_file(
+            SourceFileId(3),
+            [(shared, fact(3, 2)), (untouched, fact(3, 4))],
+        );
+        store.replace_file(
+            SourceFileId(2),
+            [
+                (untouched, fact(2, 7)),
+                (shared, fact(2, 8)),
+                (shared, fact(2, 1)),
+            ],
+        );
+
+        store.replace_file(
+            SourceFileId(1),
+            [
+                (untouched, fact(1, 3)),
+                (shared, fact(1, 6)),
+                (shared, fact(1, 0)),
+            ],
+        );
+
+        let starts = |target| {
+            store
+                .facts_for(target)
+                .iter()
+                .map(|fact| (fact.range.file_id.0, fact.range.start_byte))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(starts(shared), [(1, 0), (1, 6), (2, 1), (2, 8), (3, 2)]);
+        assert_eq!(starts(untouched), [(1, 3), (2, 7), (3, 4)]);
+        assert!(
+            starts(dropped).is_empty(),
+            "a target the file no longer names loses its facts"
+        );
+        assert_eq!(
+            store.targets_for_exact_range(TextRange::new(SourceFileId(1), 0, 1)),
+            [shared]
+        );
+        assert_eq!(store.facts_in_file(SourceFileId(3)).len(), 2);
     }
 }
