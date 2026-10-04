@@ -460,3 +460,36 @@ fn method_fact_in_path(
         found
     })
 }
+
+#[tokio::test]
+async fn workspace_symbol_search_finds_indexed_and_generated_methods_once() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    editor
+        .open(
+            "workspace_a/account.rb",
+            "class Account\n  attr_reader :balance\n  def deposit(amount); end\nend\n",
+        )
+        .await;
+
+    for (query, expected) in [("deposit", "deposit"), ("balance", "balance")] {
+        let symbols = crate::features::navigation::workspace_symbols::handle(
+            editor.server(),
+            WorkspaceSymbolParams {
+                query: query.to_string(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let methods = symbols
+            .iter()
+            .filter(|symbol| symbol.kind == tower_lsp::lsp_types::SymbolKind::METHOD)
+            .map(|symbol| (symbol.name.as_str(), symbol.container_name.as_deref()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(methods, [(expected, Some("Account"))], "query {query}");
+    }
+}

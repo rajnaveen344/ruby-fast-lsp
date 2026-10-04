@@ -3,8 +3,7 @@ use super::*;
 use crate::server::Server;
 use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant,
-    RubyMethod, RubyType, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
-    TypeFact, TypeProvenance, TypeSubject,
+    RubyMethod, RubyType, SourceKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::engine::{Project, ResolveMode, SemanticChange};
 use std::collections::HashSet;
@@ -76,26 +75,16 @@ fn execution_context_merge_replaces_lexical_method_with_generated_owner() {
     let generated_fqn = FullyQualifiedName::method(generated_parts.clone(), method);
     let mut merged = ruby_analysis::core::FileAnalysis {
         methods: vec![MethodFact::new(
-            lexical_fqn.clone(),
-            FullyQualifiedName::namespace(lexical_parts),
-            range,
-        )],
-        symbols: vec![SymbolFact::new(
             lexical_fqn,
-            AnalysisSymbolKind::Method,
+            FullyQualifiedName::namespace(lexical_parts),
             range,
         )],
         ..Default::default()
     };
     let extension_aware = ruby_analysis::core::FileAnalysis {
         methods: vec![MethodFact::new(
-            generated_fqn.clone(),
-            FullyQualifiedName::namespace(generated_parts.clone()),
-            range,
-        )],
-        symbols: vec![SymbolFact::new(
             generated_fqn,
-            AnalysisSymbolKind::Method,
+            FullyQualifiedName::namespace(generated_parts.clone()),
             range,
         )],
         graph_nodes: vec![GraphNodeFact::new(
@@ -110,8 +99,6 @@ fn execution_context_merge_replaces_lexical_method_with_generated_owner() {
 
     assert_eq!(merged.methods.len(), 1);
     assert!(merged.methods[0].owner.has_generated_owner());
-    assert_eq!(merged.symbols.len(), 1);
-    assert!(merged.symbols[0].fqn.has_generated_owner());
     assert_eq!(merged.graph_nodes, extension_aware.graph_nodes);
 }
 

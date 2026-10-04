@@ -3,8 +3,7 @@
 
 use crate::core::{
     FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, MethodVisibility,
-    MethodVisibilityOverrideFact, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange,
-    TypeFact, TypeSubject,
+    MethodVisibilityOverrideFact, RubyConstant, RubyMethod, TextRange, TypeFact, TypeSubject,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
@@ -39,9 +38,6 @@ impl AnalysisIndexer<'_> {
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.facts
-            .symbols
-            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.facts.methods.push(
             MethodFact::new(fqn, owner, range).with_visibility(self.scope.current_visibility()),
         );
@@ -57,9 +53,6 @@ impl AnalysisIndexer<'_> {
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.facts
-            .symbols
-            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.facts.methods.push(
             MethodFact::with_param_facts(fqn, owner, range, params)
                 .with_visibility(self.scope.current_visibility()),
@@ -390,9 +383,6 @@ impl AnalysisIndexer<'_> {
             };
             let fqn = FullyQualifiedName::method(self.owner_namespace(), method);
             let owner = FullyQualifiedName::namespace_with_kind(self.owner_namespace(), owner_kind);
-            self.facts
-                .symbols
-                .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
             self.facts.methods.push(
                 MethodFact::with_delegate_receiver(fqn, owner, range, receiver_method)
                     .with_visibility(self.scope.current_visibility()),
@@ -417,9 +407,6 @@ impl AnalysisIndexer<'_> {
             };
             let fqn = FullyQualifiedName::method(self.owner_namespace(), method);
             let owner = FullyQualifiedName::namespace_with_kind(self.owner_namespace(), owner_kind);
-            self.facts
-                .symbols
-                .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
             self.facts.methods.push(
                 MethodFact::with_delegate_receiver(fqn, owner, range, receiver_method)
                     .with_visibility(self.scope.current_visibility()),

@@ -401,6 +401,13 @@ impl<'a> View<'a> {
         self.method_facts_where(|_, _| true)
     }
 
+    /// Stored method rows in store order, without expanding their names.
+    pub(in crate::engine) fn stored_method_facts(
+        &self,
+    ) -> impl Iterator<Item = &'a StoredMethodFact> + 'a {
+        self.engine.decls.methods.facts()
+    }
+
     /// Method facts named `method` on any owner, in store order.
     pub fn method_facts_named(&self, method: RubyMethod) -> impl Iterator<Item = MethodFact> + 'a {
         self.method_facts_where(move |fact, _| fact.method == Some(method))

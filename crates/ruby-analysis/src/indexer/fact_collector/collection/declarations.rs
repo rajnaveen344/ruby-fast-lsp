@@ -349,9 +349,6 @@ impl FactCollector {
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.facts.analysis.symbols.push(
-            SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
-        );
         self.push_direct_method_fact(
             MethodFact::with_param_facts(fqn, owner, range, params)
                 .with_name_range(name_range)
@@ -371,10 +368,6 @@ impl FactCollector {
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.facts
-            .analysis
-            .symbols
-            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.push_direct_method_fact(
             MethodFact::new(fqn, owner, range).with_visibility(visibility),
         );

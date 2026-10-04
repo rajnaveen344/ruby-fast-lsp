@@ -250,9 +250,6 @@ fn push_method(
         .with_visibility(method_visibility(method.visibility))
         .with_signature_metadata(None, return_type_label)
         .with_callable_signatures(callable_signatures);
-    facts
-        .symbols
-        .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
     facts.methods.push(fact);
     for (name, ruby_type) in complete_parameter_contracts(method) {
         facts.types.push(TypeFact::new(

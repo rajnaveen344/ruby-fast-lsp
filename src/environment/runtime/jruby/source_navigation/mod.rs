@@ -619,10 +619,6 @@ pub fn java_source_navigation_facts_with_declaration(
                 )),
             ),
         );
-        facts.symbols.push(
-            SymbolFact::new(method_fqn.clone(), SymbolKind::Method, method_range)
-                .with_name_range(method_name_range),
-        );
         facts.types.push(TypeFact::new(
             TypeSubject::MethodReturn(method_fqn),
             ruby_type_for_jvm(&descriptor.returns),

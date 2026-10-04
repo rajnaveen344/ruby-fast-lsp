@@ -173,17 +173,6 @@ pub(super) fn add_extension_analysis_facts(
                 let fqn = FullyQualifiedName::method(namespace.clone(), ruby_method);
                 let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
                 let range = text_range_from_source_range(document, method.location, "method");
-                if !facts
-                    .symbols
-                    .iter()
-                    .any(|fact| fact.fqn == fqn && fact.range == range)
-                {
-                    facts.symbols.push(SymbolFact::new(
-                        fqn.clone(),
-                        AnalysisSymbolKind::Method,
-                        range,
-                    ));
-                }
                 let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
                     .expect_invariant(
                         "extension return type reached fact conversion without validation",

@@ -113,8 +113,8 @@ fn analysis_symbol_kind_to_lsp_kind(kind: AnalysisSymbolKind) -> SymbolKind {
 #[cfg(test)]
 mod tests {
     use ruby_analysis::core::{
-        FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
-        SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, MethodFact, RubyConstant, RubyMethod, SourceFileId,
+        SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
     };
     use ruby_analysis::engine::{Project, ResolveMode, SourceFileInput};
 
@@ -140,21 +140,19 @@ mod tests {
         engine.update(
             file_id,
             FileAnalysis {
-                symbols: vec![
-                    SymbolFact::new(
-                        FullyQualifiedName::namespace(vec![user]),
-                        AnalysisSymbolKind::Class,
-                        TextRange::new(file_id, 6, 10),
+                symbols: vec![SymbolFact::new(
+                    FullyQualifiedName::namespace(vec![user.clone()]),
+                    AnalysisSymbolKind::Class,
+                    TextRange::new(file_id, 6, 10),
+                )],
+                methods: vec![MethodFact::new(
+                    FullyQualifiedName::method(
+                        vec![user.clone()],
+                        RubyMethod::new("name").expect("test method must be valid"),
                     ),
-                    SymbolFact::new(
-                        FullyQualifiedName::method(
-                            vec![user],
-                            RubyMethod::new("name").expect("test method must be valid"),
-                        ),
-                        AnalysisSymbolKind::Method,
-                        TextRange::new(file_id, 17, 21),
-                    ),
-                ],
+                    FullyQualifiedName::namespace(vec![user]),
+                    TextRange::new(file_id, 13, 25),
+                )],
                 ..Default::default()
             },
             ResolveMode::Immediate,

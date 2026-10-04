@@ -3,8 +3,8 @@
 
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, MethodAvailability,
-    MethodFact, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod, SymbolFact, SymbolKind,
-    TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    MethodFact, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod, TypeFact,
+    TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{
@@ -312,9 +312,6 @@ impl Visit<'_> for AnalysisIndexer<'_> {
             },
             None => MethodAvailability::Available,
         };
-        self.facts.symbols.push(
-            SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
-        );
         self.facts.methods.push(
             MethodFact::with_param_facts(fqn.clone(), owner, range, params.clone())
                 .with_name_range(name_range)

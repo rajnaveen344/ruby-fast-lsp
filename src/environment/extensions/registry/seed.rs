@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, MethodFact, NamespaceKind,
-    SourceFileId, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
+    SourceFileId, SourceKind, TextRange,
 };
 use ruby_analysis::engine::SourceFileInput;
 
@@ -75,11 +75,6 @@ impl ExtensionSemanticSeed {
                 .push(GraphNodeFact::new(owner.clone(), *kind, range));
         }
         for (fqn, owner) in &self.methods {
-            facts.symbols.push(SymbolFact::new(
-                fqn.clone(),
-                AnalysisSymbolKind::Method,
-                range,
-            ));
             facts
                 .methods
                 .push(MethodFact::new(fqn.clone(), owner.clone(), range));

@@ -34,14 +34,6 @@ impl FactCollector {
             };
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            self.facts
-                .analysis
-                .symbols
-                .push(crate::core::SymbolFact::new(
-                    fqn.clone(),
-                    crate::core::SymbolKind::Method,
-                    range,
-                ));
             self.push_direct_method_fact(MethodFact::with_delegate_receiver(
                 fqn,
                 owner,
@@ -107,14 +99,6 @@ impl FactCollector {
             };
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            self.facts
-                .analysis
-                .symbols
-                .push(crate::core::SymbolFact::new(
-                    fqn.clone(),
-                    crate::core::SymbolKind::Method,
-                    range,
-                ));
             self.push_direct_method_fact(MethodFact::with_delegate_receiver(
                 fqn.clone(),
                 owner,

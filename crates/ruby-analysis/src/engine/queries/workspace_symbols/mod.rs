@@ -1,8 +1,10 @@
 pub(in crate::engine) mod types;
 
-use crate::core::{FullyQualifiedName, SymbolFact, SymbolKind};
+use crate::core::{FullyQualifiedName, SourceFileId, SymbolFact, SymbolKind};
 use crate::engine::queries::workspace_symbols::types::WorkspaceSymbolMatch;
 use crate::engine::queries::View;
+use crate::invariant::ExpectInvariant;
+use std::collections::HashSet;
 
 impl<'a> View<'a> {
     pub fn top_level_symbols(&self, limit: usize) -> Vec<WorkspaceSymbolMatch> {
@@ -58,6 +60,7 @@ impl<'a> View<'a> {
                 }
             }
         }
+        self.push_matching_methods(&matcher, query, &mut results);
 
         results.sort_by(|a, b| {
             b.relevance
@@ -69,13 +72,64 @@ impl<'a> View<'a> {
     }
 }
 
-fn fact_is_project(query: &View<'_>, fact: &SymbolFact) -> bool {
-    !fact.fqn.has_generated_owner()
-        && query
-            .engine
+impl View<'_> {
+    /// Methods are served from the method store; several declarations of one
+    /// method at the same range appear once.
+    fn push_matching_methods(
+        &self,
+        matcher: &SymbolMatcher,
+        query: &str,
+        results: &mut Vec<WorkspaceSymbolMatch>,
+    ) {
+        let names = &self.engine.names;
+        let mut seen = HashSet::new();
+        for stored in self.stored_method_facts() {
+            if !self.file_is_workspace_owned(stored.range.file_id) {
+                continue;
+            }
+            let fqn = names.fqn(stored.fqn).expect_invariant(
+                "method fact points to missing FQN id",
+                "method facts must only store interned FQN ids",
+                "intern method FQNs before inserting facts",
+            );
+            let FullyQualifiedName::Method(_, method) = fqn else {
+                unreachable_invariant!(
+                    what = "method fact stores non-method FQN `{}`",
+                    why = "method facts are keyed by method FQNs",
+                    fix = "build method facts only from FullyQualifiedName::Method",
+                    fqn,
+                );
+            };
+            if fqn.has_generated_owner() {
+                continue;
+            }
+            let name = method.get_name();
+            let Some(relevance) = matcher.calculate_relevance(&name, query) else {
+                continue;
+            };
+            if !seen.insert((stored.fqn, stored.range)) {
+                continue;
+            }
+            results.push(WorkspaceSymbolMatch {
+                name,
+                kind: SymbolKind::Method,
+                range: stored.range,
+                container_name: container_name(fqn),
+                relevance,
+            });
+        }
+    }
+
+    fn file_is_workspace_owned(&self, file_id: SourceFileId) -> bool {
+        self.engine
             .view()
-            .file(fact.range.file_id)
+            .file(file_id)
             .is_some_and(|file| file.kind.is_workspace_owned())
+    }
+}
+
+fn fact_is_project(query: &View<'_>, fact: &SymbolFact) -> bool {
+    !fact.fqn.has_generated_owner() && query.file_is_workspace_owned(fact.range.file_id)
 }
 
 fn workspace_symbol_match(fact: SymbolFact, relevance: f64) -> Option<WorkspaceSymbolMatch> {
@@ -275,8 +329,8 @@ impl SymbolMatcher {
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FileAnalysis, FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId,
-        SourceKind, SymbolFact, SymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, GeneratedOwnerId, MethodFact, RubyConstant, RubyMethod,
+        SourceFileId, SourceKind, SymbolFact, SymbolKind, TextRange,
     };
     use crate::engine::View;
     use crate::engine::{Project, ResolveMode, SourceFileInput};
@@ -295,21 +349,19 @@ mod tests {
         engine.update(
             file_id,
             FileAnalysis {
-                symbols: vec![
-                    SymbolFact::new(
-                        FullyQualifiedName::namespace(vec![user.clone()]),
-                        SymbolKind::Class,
-                        TextRange::new(file_id, 6, 10),
+                symbols: vec![SymbolFact::new(
+                    FullyQualifiedName::namespace(vec![user.clone()]),
+                    SymbolKind::Class,
+                    TextRange::new(file_id, 6, 10),
+                )],
+                methods: vec![MethodFact::new(
+                    FullyQualifiedName::method(
+                        vec![user.clone()],
+                        RubyMethod::new("name").expect("test method must be valid"),
                     ),
-                    SymbolFact::new(
-                        FullyQualifiedName::method(
-                            vec![user],
-                            RubyMethod::new("name").expect("test method must be valid"),
-                        ),
-                        SymbolKind::Method,
-                        TextRange::new(file_id, 17, 21),
-                    ),
-                ],
+                    FullyQualifiedName::namespace(vec![user]),
+                    TextRange::new(file_id, 13, 25),
+                )],
                 ..Default::default()
             },
             ResolveMode::Immediate,
@@ -329,6 +381,35 @@ mod tests {
         assert_eq!(symbols[0].kind, SymbolKind::Method);
         assert_eq!(symbols[0].range.file_id, file_id);
         assert_eq!(symbols[0].container_name.as_deref(), Some("User"));
+    }
+
+    #[test]
+    fn workspace_symbol_search_lists_a_repeated_method_declaration_once() {
+        let (mut engine, file_id) = query_with_symbols();
+        let user = RubyConstant::new("User").expect("test constant must be valid");
+        let fqn = FullyQualifiedName::method(
+            vec![user.clone()],
+            RubyMethod::new("name").expect("test method must be valid"),
+        );
+        let owner = FullyQualifiedName::namespace(vec![user]);
+        let range = TextRange::new(file_id, 13, 25);
+        engine.update(
+            file_id,
+            FileAnalysis {
+                methods: vec![
+                    MethodFact::new(fqn.clone(), owner.clone(), range),
+                    MethodFact::new(fqn, owner, range),
+                ],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        let query = View::new(&engine);
+
+        let symbols = query.search_workspace_symbols("name", 100);
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].range, range);
     }
 
     #[test]
@@ -386,12 +467,12 @@ mod tests {
         engine.update(
             file_id,
             FileAnalysis {
-                symbols: vec![SymbolFact::new(
+                methods: vec![MethodFact::new(
                     FullyQualifiedName::method(
-                        vec![owner],
+                        vec![owner.clone()],
                         RubyMethod::new("generated_helper").expect("test method must be valid"),
                     ),
-                    SymbolKind::Method,
+                    FullyQualifiedName::namespace(vec![owner]),
                     TextRange::new(file_id, 0, 1),
                 )],
                 ..Default::default()

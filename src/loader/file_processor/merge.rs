@@ -3,8 +3,7 @@
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadTarget;
 use ruby_analysis::core::{
-    FullyQualifiedName, RubyType, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact,
-    TypeProvenance, TypeSubject,
+    FullyQualifiedName, RubyType, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::indexer::{AnalysisIndexer, KnownSemantics};
 use std::collections::{HashMap, HashSet};
@@ -42,24 +41,6 @@ pub(super) fn merge_execution_context_direct_facts(
         });
         if !merged.methods.contains(&generated) {
             merged.methods.push(generated);
-        }
-    }
-
-    let generated_symbols = extension_aware
-        .symbols
-        .iter()
-        .filter(|fact| fact.kind == AnalysisSymbolKind::Method && fact.fqn.has_generated_owner())
-        .cloned()
-        .collect::<Vec<_>>();
-    for generated in generated_symbols {
-        merged.symbols.retain(|fact| {
-            fact.fqn.has_generated_owner()
-                || fact.kind != AnalysisSymbolKind::Method
-                || fact.range != generated.range
-                || fact.fqn.name() != generated.fqn.name()
-        });
-        if !merged.symbols.contains(&generated) {
-            merged.symbols.push(generated);
         }
     }
 
@@ -193,16 +174,6 @@ pub(super) fn merge_runtime_direct_facts(
             .methods
             .retain(|fact| fact.range != method.range || fact.fqn.name() != method.fqn.name());
         merged.methods.push(method.clone());
-    }
-    for symbol in runtime_aware.symbols.iter().filter(|fact| {
-        fact.kind == AnalysisSymbolKind::Method && runtime_methods.contains(&fact.fqn)
-    }) {
-        merged.symbols.retain(|fact| {
-            fact.kind != AnalysisSymbolKind::Method
-                || fact.range != symbol.range
-                || fact.fqn.name() != symbol.fqn.name()
-        });
-        merged.symbols.push(symbol.clone());
     }
     for symbol in runtime_aware
         .symbols
