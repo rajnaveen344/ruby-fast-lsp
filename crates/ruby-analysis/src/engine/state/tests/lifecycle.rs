@@ -455,6 +455,58 @@ fn shrink_to_fit_compacts_visibility_overrides_and_execution_contexts() {
 }
 
 #[test]
+fn visibility_override_reads_follow_file_replacement() {
+    let source = "describe do\nend\n";
+    let mut engine = Project::new();
+    let first = register_project_file(&mut engine, "spec/sample_0_spec.rb", source);
+    let second = register_project_file(&mut engine, "spec/sample_1_spec.rb", source);
+    engine.update(
+        first,
+        declaration_side_facts(first, 0),
+        ResolveMode::Immediate,
+    );
+    engine.update(
+        second,
+        declaration_side_facts(second, 1),
+        ResolveMode::Immediate,
+    );
+    let widget = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let render = RubyMethod::new("render").unwrap();
+    let override_files = |engine: &Project| {
+        let view = engine.view();
+        let named = view
+            .method_visibility_overrides_named(render)
+            .map(|fact| fact.range.file_id)
+            .collect::<Vec<_>>();
+        let owned = view
+            .method_visibility_overrides_matching_owner_name(&widget, &render)
+            .into_iter()
+            .map(|fact| fact.range.file_id)
+            .collect::<Vec<_>>();
+        assert_eq!(named, owned);
+        named
+    };
+
+    assert_eq!(override_files(&engine), [first, second]);
+    assert_eq!(
+        engine.view().method_visibility_overrides_in_file(second),
+        declaration_side_facts(second, 1).method_visibility_overrides
+    );
+    assert!(engine
+        .view()
+        .method_visibility_overrides_matching_owner_name(
+            &widget.to_singleton_namespace().unwrap(),
+            &render
+        )
+        .is_empty());
+
+    engine.update(first, FileAnalysis::default(), ResolveMode::Immediate);
+    assert_eq!(override_files(&engine), [second]);
+    assert!(engine.remove(second, ResolveMode::Immediate));
+    assert_eq!(override_files(&engine), []);
+}
+
+#[test]
 fn frozen_template_clones_share_storage_and_stay_isolated() {
     fn module_facts(file_id: SourceFileId, name: &FullyQualifiedName) -> FileAnalysis {
         FileAnalysis {

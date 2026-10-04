@@ -337,16 +337,16 @@ impl View<'_> {
                 }),
             );
         }
-        for fact in self.engine.decls.method_visibility_overrides() {
+        for (file_id, fact) in self.engine.decls.method_visibility_overrides() {
             push_component(
                 &mut components,
-                fact.range.file_id,
+                file_id,
                 export_hash(|hasher| {
                     stable_u8(hasher, 3);
-                    stable_fqn(hasher, &fact.owner);
+                    stable_fqn(hasher, self.engine.names.expand_interned_ref(fact.owner));
                     stable_method(hasher, fact.method);
                     stable_method_visibility(hasher, fact.visibility);
-                    stable_range_offsets(hasher, fact.range);
+                    stable_range_offsets(hasher, fact.range(file_id));
                 }),
             );
         }

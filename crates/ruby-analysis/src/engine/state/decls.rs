@@ -7,10 +7,11 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 
 use crate::core::names::fqn_id::FqnId;
-use crate::core::storage::memory_estimate::{
-    fqn_heap_bytes, map_table_bytes, string_heap_bytes, vec_payload_bytes,
+use crate::core::storage::memory_estimate::{fqn_heap_bytes, map_table_bytes, string_heap_bytes};
+use crate::core::storage::method_store::{
+    MethodStore, StoredMethodFact, StoredMethodFactMatch, StoredVisibilityOverride,
+    VisibilityOverrideStore,
 };
-use crate::core::storage::method_store::{MethodStore, StoredMethodFact, StoredMethodFactMatch};
 use crate::core::storage::symbol_store::{StoredSymbolFact, SymbolStore};
 use crate::core::{
     ExecutionContextFact, FullyQualifiedName, MethodAvailability, MethodFact,
@@ -30,8 +31,8 @@ pub(in crate::engine) type EffectiveMethodFactMatch = MethodAnswer<MethodFact, I
 pub(in crate::engine) struct DeclIndex {
     symbols: SymbolStore,
     methods: MethodStore,
-    method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
-    execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
+    method_visibility_overrides: VisibilityOverrideStore,
+    execution_contexts: HashMap<SourceFileId, Box<[ExecutionContextFact]>>,
 }
 
 impl DeclIndex {
@@ -50,10 +51,10 @@ impl DeclIndex {
         self.symbols.replace_file(file_id, symbols);
         let methods = intern_method_facts(names, methods);
         self.methods.replace_file(file_id, methods);
+        let method_visibility_overrides =
+            intern_visibility_overrides(names, file_id, method_visibility_overrides);
         self.method_visibility_overrides
-            .retain(|fact| fact.range.file_id != file_id);
-        self.method_visibility_overrides
-            .extend(method_visibility_overrides);
+            .replace_file(file_id, method_visibility_overrides);
         self.replace_execution_contexts(file_id, execution_contexts);
     }
 
@@ -62,8 +63,7 @@ impl DeclIndex {
     pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
         self.symbols.remove_file(file_id);
         self.methods.remove_file(file_id);
-        self.method_visibility_overrides
-            .retain(|fact| fact.range.file_id != file_id);
+        self.method_visibility_overrides.remove_file(file_id);
         self.execution_contexts.remove(&file_id);
     }
 
@@ -113,7 +113,8 @@ impl DeclIndex {
         if contexts.is_empty() {
             self.execution_contexts.remove(&file_id);
         } else {
-            self.execution_contexts.insert(file_id, contexts);
+            self.execution_contexts
+                .insert(file_id, contexts.into_boxed_slice());
         }
     }
 
@@ -135,11 +136,14 @@ impl DeclIndex {
     ) -> impl Iterator<Item = (SourceFileId, &[ExecutionContextFact])> {
         self.execution_contexts
             .iter()
-            .map(|(file_id, contexts)| (*file_id, contexts.as_slice()))
+            .map(|(file_id, contexts)| (*file_id, &**contexts))
     }
 
-    pub(in crate::engine) fn method_visibility_overrides(&self) -> &[MethodVisibilityOverrideFact] {
-        &self.method_visibility_overrides
+    /// Every file's visibility overrides, with interned owners.
+    pub(in crate::engine) fn method_visibility_overrides(
+        &self,
+    ) -> impl Iterator<Item = (SourceFileId, &StoredVisibilityOverride)> {
+        self.method_visibility_overrides.iter()
     }
 
     fn symbol_facts_for(&self, names: &Names, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
@@ -279,12 +283,7 @@ impl DeclIndex {
     }
 
     pub(in crate::engine) fn method_visibility_overrides_heap_bytes(&self) -> usize {
-        vec_payload_bytes(&self.method_visibility_overrides)
-            + self
-                .method_visibility_overrides
-                .iter()
-                .map(|fact| fqn_heap_bytes(&fact.owner))
-                .sum::<usize>()
+        self.method_visibility_overrides.estimated_heap_bytes()
     }
 
     pub(in crate::engine) fn execution_contexts_heap_bytes(&self) -> usize {
@@ -293,7 +292,7 @@ impl DeclIndex {
                 .execution_contexts
                 .values()
                 .map(|contexts| {
-                    vec_payload_bytes(contexts)
+                    std::mem::size_of_val::<[ExecutionContextFact]>(contexts)
                         + contexts
                             .iter()
                             .map(|context| {
@@ -312,9 +311,6 @@ impl DeclIndex {
         self.methods.shrink_to_fit();
         self.method_visibility_overrides.shrink_to_fit();
         self.execution_contexts.shrink_to_fit();
-        for contexts in self.execution_contexts.values_mut() {
-            contexts.shrink_to_fit();
-        }
     }
 }
 
@@ -461,16 +457,12 @@ impl<'a> View<'a> {
         owner: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<MethodVisibilityOverrideFact> {
-        self.engine
-            .decls
-            .method_visibility_overrides
-            .iter()
-            .filter(|fact| {
-                fact.method == *method
-                    && fact.owner.namespace_parts() == owner.namespace_parts()
-                    && fact.owner.namespace_kind() == owner.namespace_kind()
-            })
-            .cloned()
+        // Override owners are namespaces, so a namespace with the same parts
+        // and kind is the same interned name.
+        let Some(owner_id) = self.engine.names.fqn_id(owner) else {
+            return Vec::new();
+        };
+        self.method_visibility_overrides_where(*method, |fact| fact.owner == owner_id)
             .collect()
     }
 
@@ -478,17 +470,36 @@ impl<'a> View<'a> {
         &self,
         file_id: SourceFileId,
     ) -> Vec<MethodVisibilityOverrideFact> {
+        let names = &self.engine.names;
         self.engine
             .decls
             .method_visibility_overrides
+            .in_file(file_id)
             .iter()
-            .filter(|fact| fact.range.file_id == file_id)
-            .cloned()
+            .map(|fact| expand_visibility_override(names, file_id, fact))
             .collect()
     }
 
-    pub fn method_visibility_overrides(&self) -> &'a [MethodVisibilityOverrideFact] {
-        &self.engine.decls.method_visibility_overrides
+    /// Every override of `method`, by file, then in source order.
+    pub fn method_visibility_overrides_named(
+        &self,
+        method: RubyMethod,
+    ) -> impl Iterator<Item = MethodVisibilityOverrideFact> + 'a {
+        self.method_visibility_overrides_where(method, |_| true)
+    }
+
+    fn method_visibility_overrides_where(
+        &self,
+        method: RubyMethod,
+        keep: impl Fn(&StoredVisibilityOverride) -> bool + 'a,
+    ) -> impl Iterator<Item = MethodVisibilityOverrideFact> + 'a {
+        let names = &self.engine.names;
+        self.engine
+            .decls
+            .method_visibility_overrides
+            .named(method)
+            .filter(move |(_, fact)| keep(fact))
+            .map(move |(file_id, fact)| expand_visibility_override(names, file_id, fact))
     }
 
     pub fn method_names_for_owner(&self, owner: &FullyQualifiedName) -> Vec<&'static str> {
@@ -518,6 +529,50 @@ fn intern_method_facts(names: &mut Names, facts: Vec<MethodFact>) -> Vec<StoredM
         .into_iter()
         .map(|fact| StoredMethodFact::new(fact, |fqn| names.intern_fqn(fqn)))
         .collect()
+}
+
+fn intern_visibility_overrides(
+    names: &mut Names,
+    file_id: SourceFileId,
+    facts: Vec<MethodVisibilityOverrideFact>,
+) -> Box<[StoredVisibilityOverride]> {
+    facts
+        .into_iter()
+        .map(|fact| {
+            invariant_eq!(
+                fact.range.file_id,
+                file_id,
+                what = "method visibility override range belongs to a different file",
+                why = "FileAnalysis replacement must be file-local",
+                fix = "construct override ranges from the owning RubyDocument",
+            );
+            invariant!(
+                fact.owner.namespace_kind().is_some(),
+                what = "method visibility override owner is not a namespace",
+                why = "visibility overrides apply to the methods of a class or module",
+                fix = "build override owners with FullyQualifiedName::namespace_with_kind",
+            );
+            StoredVisibilityOverride::new(
+                names.intern_fqn(fact.owner),
+                fact.method,
+                fact.visibility,
+                fact.range,
+            )
+        })
+        .collect()
+}
+
+fn expand_visibility_override(
+    names: &Names,
+    file_id: SourceFileId,
+    fact: &StoredVisibilityOverride,
+) -> MethodVisibilityOverrideFact {
+    MethodVisibilityOverrideFact::new(
+        names.expand_interned_fqn(fact.owner),
+        fact.method,
+        fact.visibility,
+        fact.range(file_id),
+    )
 }
 
 fn expand_symbol_facts(names: &Names, facts: Vec<StoredSymbolFact>) -> Vec<SymbolFact> {

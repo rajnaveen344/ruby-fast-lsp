@@ -432,10 +432,7 @@ impl<'a> View<'a> {
                 }
             }
         }
-        for override_fact in self.method_visibility_overrides() {
-            if override_fact.method != *method {
-                continue;
-            }
+        for override_fact in self.method_visibility_overrides_named(*method) {
             if !lookup_chains.iter().any(|chain| {
                 chain.iter().any(|ancestor| {
                     ancestor.namespace_parts() == override_fact.owner.namespace_parts()

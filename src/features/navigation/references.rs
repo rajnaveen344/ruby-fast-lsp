@@ -442,9 +442,8 @@ fn has_private_method(view: &View<'_>, method: &RubyMethod) -> bool {
     view.method_facts_named(*method)
         .any(|fact| fact.visibility == MethodVisibility::Private)
         || view
-            .method_visibility_overrides()
-            .iter()
-            .any(|fact| fact.method == *method && fact.visibility == MethodVisibility::Private)
+            .method_visibility_overrides_named(*method)
+            .any(|fact| fact.visibility == MethodVisibility::Private)
 }
 
 /// The text of the location's line: from the current document, from a

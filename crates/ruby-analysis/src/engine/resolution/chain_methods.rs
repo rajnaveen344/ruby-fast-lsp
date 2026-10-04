@@ -190,10 +190,7 @@ pub(super) fn global_visibility_override_for_method_owner(
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut public_overrides = Vec::new();
     let mut non_public_overrides = Vec::new();
-    for override_fact in engine.view().method_visibility_overrides() {
-        if override_fact.method != *method {
-            continue;
-        }
+    for override_fact in engine.view().method_visibility_overrides_named(*method) {
         if !method_lookup_chain(engine, &override_fact.owner)
             .iter()
             .any(|ancestor| {
@@ -209,7 +206,7 @@ pub(super) fn global_visibility_override_for_method_owner(
             non_public_overrides.push(override_fact);
         }
     }
-    let sort_key = |fact: &&crate::core::MethodVisibilityOverrideFact| {
+    let sort_key = |fact: &crate::core::MethodVisibilityOverrideFact| {
         (
             fact.range.file_id,
             fact.range.start_byte,
@@ -221,7 +218,6 @@ pub(super) fn global_visibility_override_for_method_owner(
     non_public_overrides
         .pop()
         .or_else(|| public_overrides.pop())
-        .cloned()
 }
 
 pub(super) fn global_visibility_override_for_method_owner_matching(
@@ -232,11 +228,9 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
     let mut overrides = engine
         .view()
-        .method_visibility_overrides()
-        .iter()
+        .method_visibility_overrides_named(*method)
         .filter(|override_fact| {
-            override_fact.method == *method
-                && override_fact.visibility == visibility
+            override_fact.visibility == visibility
                 && method_lookup_chain(engine, &override_fact.owner)
                     .iter()
                     .any(|ancestor| {
@@ -252,7 +246,7 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
             fact.range.end_byte,
         )
     });
-    overrides.pop().cloned()
+    overrides.pop()
 }
 
 fn method_visibility_allowed(

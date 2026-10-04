@@ -749,3 +749,6 @@ fn callable_template_heap_bytes(template: &CallableTypeTemplate) -> usize {
 
 #[cfg(test)]
 mod tests;
+mod visibility_overrides;
+
+pub(crate) use visibility_overrides::{StoredVisibilityOverride, VisibilityOverrideStore};
