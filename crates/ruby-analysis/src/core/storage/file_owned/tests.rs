@@ -211,6 +211,32 @@ mod arena {
     }
 
     #[test]
+    fn small_buckets_stay_inline_and_a_spilled_bucket_keeps_file_order() {
+        assert_eq!(
+            std::mem::size_of::<crate::core::storage::file_owned::arena::RowIds>(),
+            std::mem::size_of::<Vec<u64>>(),
+            "an inline bucket must be no larger than a Vec header"
+        );
+        let mut store = Indexed::default();
+        store.replace(2, &[row(2, 1)]);
+        store.replace(3, &[row(3, 11)]);
+        let inline_bytes = store.by_digit.estimated_heap_bytes();
+
+        store.replace(1, &[row(1, 21)]);
+
+        assert_eq!(
+            store.with_digit(1),
+            [row(1, 21), row(2, 1), row(3, 11)],
+            "a run spliced before inline ids must keep files ascending"
+        );
+        assert!(store.by_digit.estimated_heap_bytes() > inline_bytes);
+        store.replace(3, &[]);
+        store.by_digit.shrink_to_fit();
+        assert_eq!(store.with_digit(1), [row(1, 21), row(2, 1)]);
+        assert_eq!(store.by_digit.estimated_heap_bytes(), inline_bytes);
+    }
+
+    #[test]
     #[should_panic(expected = "a file's rows were inserted while its old rows remain")]
     fn insert_requires_the_file_to_be_removed_first() {
         let mut arena = FileArena::default();

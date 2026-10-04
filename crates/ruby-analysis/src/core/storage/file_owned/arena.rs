@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use smallvec::SmallVec;
+
 use super::FileRow;
 use crate::core::storage::memory_estimate::{map_table_bytes, vec_payload_bytes};
 use crate::core::SourceFileId;
@@ -223,10 +225,14 @@ impl<T: FileRow> FileArena<T> {
     }
 }
 
+/// One key's row ids. Most keys have one or two rows, which stay inline in
+/// the same 24 bytes a `Vec` header takes, so they need no allocation.
+pub(in crate::core::storage) type RowIds = SmallVec<[RowId; 2]>;
+
 /// Row ids by key. Each bucket holds ids grouped by file, files ascending.
 #[derive(Debug, Clone)]
 pub(in crate::core::storage) struct FileIndex<K> {
-    buckets: HashMap<K, Vec<RowId>>,
+    buckets: HashMap<K, RowIds>,
 }
 
 impl<K> Default for FileIndex<K> {
@@ -239,7 +245,7 @@ impl<K> Default for FileIndex<K> {
 
 impl<K: Copy + Eq + Hash> FileIndex<K> {
     pub fn get(&self, key: &K) -> &[RowId] {
-        self.buckets.get(key).map(Vec::as_slice).unwrap_or(&[])
+        self.buckets.get(key).map(RowIds::as_slice).unwrap_or(&[])
     }
 
     /// Drop the ids of one file from one key's bucket.
@@ -264,7 +270,7 @@ impl<K: Copy + Eq + Hash> FileIndex<K> {
         arena: &FileArena<T>,
         mut compare: impl FnMut(&T, &T) -> Ordering,
     ) {
-        let mut runs: HashMap<K, Vec<RowId>> = HashMap::new();
+        let mut runs: HashMap<K, RowIds> = HashMap::new();
         for (key, id) in entries {
             runs.entry(key).or_default().push(id);
         }
@@ -278,13 +284,14 @@ impl<K: Copy + Eq + Hash> FileIndex<K> {
                 why = "replacement must unlink a file's stale ids first",
                 fix = "unlink every index key inside FileArena::remove_file",
             );
-            ids.splice(at..at, run);
+            ids.insert_many(at, run);
             ids.shrink_to_fit();
         }
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        map_table_bytes(&self.buckets) + self.buckets.values().map(vec_payload_bytes).sum::<usize>()
+        map_table_bytes(&self.buckets)
+            + self.buckets.values().map(row_ids_heap_bytes).sum::<usize>()
     }
 
     pub fn shrink_to_fit(&mut self) {
@@ -292,5 +299,13 @@ impl<K: Copy + Eq + Hash> FileIndex<K> {
         for ids in self.buckets.values_mut() {
             ids.shrink_to_fit();
         }
+    }
+}
+
+fn row_ids_heap_bytes(ids: &RowIds) -> usize {
+    if ids.spilled() {
+        ids.capacity() * std::mem::size_of::<RowId>()
+    } else {
+        0
     }
 }
