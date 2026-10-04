@@ -162,11 +162,11 @@ impl IndexerGem {
         let processor = self.file_processor.clone().ok_or_else(|| {
             anyhow!("gem dependency product requires a configured file processor")
         })?;
-        let dependency_seed = self.dependency_seed_engine.clone().ok_or_else(|| {
-            anyhow!(
-                "gem dependency product requires the dependency-only core/runtime semantic seed"
-            )
-        })?;
+        let dependency_seed = self
+            .dependency_seed
+            .as_ref()
+            .map(|(engine, _)| Arc::clone(engine))
+            .ok_or_else(missing_dependency_seed)?;
         let project_root = self.workspace_root.clone().expect_invariant(
             "shared gem product indexing has no owning project root",
             "resource priority and semantic provenance must use the same isolated project",
@@ -364,35 +364,26 @@ impl IndexerGem {
         ctx: &LoadContext,
         analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<Vec<Url>> {
-        let seed = self
-            .dependency_seed_engine
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow!(
-                    "gem dependency product requires the dependency-only core/runtime semantic seed"
-                )
-            })?
-            .view()
-            .semantic_context_fingerprint();
+        let seed = self.dependency_seed_fingerprint()?;
         let manifests = self.required_gem_manifests(seed)?;
         self.index_prepared_required_gems_with_shared_product(ctx, analysis_engine, manifests, None)
             .await
+    }
+
+    fn dependency_seed_fingerprint(
+        &self,
+    ) -> Result<ruby_analysis::engine::SemanticExportFingerprint> {
+        self.dependency_seed
+            .as_ref()
+            .map(|(_, fingerprint)| *fingerprint)
+            .ok_or_else(missing_dependency_seed)
     }
 
     pub(crate) fn prepare_required_gem_manifest_blocking(
         &self,
         gem_name: &str,
     ) -> Result<Option<GemDependencyManifest>> {
-        let seed = self
-            .dependency_seed_engine
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow!(
-                    "gem dependency product requires the dependency-only core/runtime semantic seed"
-                )
-            })?
-            .view()
-            .semantic_context_fingerprint();
+        let seed = self.dependency_seed_fingerprint()?;
         self.required_gem_manifest(gem_name, seed)
     }
 
@@ -497,4 +488,8 @@ impl IndexerGem {
         )
         .map(Some)
     }
+}
+
+fn missing_dependency_seed() -> anyhow::Error {
+    anyhow!("gem dependency product requires the dependency-only core/runtime semantic seed")
 }

@@ -115,7 +115,12 @@ pub struct IndexerGem {
     java_home: Option<PathBuf>,
     cached_gem_root_override: Option<PathBuf>,
     file_processor: Option<FileProcessor>,
-    dependency_seed_engine: Option<Arc<ruby_analysis::engine::Project>>,
+    /// The immutable core/runtime seed and its semantic identity, computed
+    /// once because every gem manifest keys on it.
+    dependency_seed: Option<(
+        Arc<ruby_analysis::engine::Project>,
+        ruby_analysis::engine::SemanticExportFingerprint,
+    )>,
     runtime_provider_fingerprint: Option<String>,
     discovery_stage: GemDiscoveryStage,
 }
@@ -139,7 +144,7 @@ impl IndexerGem {
             java_home: None,
             cached_gem_root_override: None,
             file_processor: None,
-            dependency_seed_engine: None,
+            dependency_seed: None,
             runtime_provider_fingerprint: None,
             discovery_stage: GemDiscoveryStage::NotStarted,
         }
@@ -159,7 +164,8 @@ impl IndexerGem {
         &mut self,
         dependency_seed_engine: Arc<ruby_analysis::engine::Project>,
     ) {
-        self.dependency_seed_engine = Some(dependency_seed_engine);
+        let fingerprint = dependency_seed_engine.view().semantic_context_fingerprint();
+        self.dependency_seed = Some((dependency_seed_engine, fingerprint));
     }
 
     pub fn set_runtime_provider_fingerprint(&mut self, fingerprint: Option<String>) {

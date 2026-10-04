@@ -389,8 +389,12 @@ impl TypeStore {
     }
 
     fn resolution_from_expanded_facts(&self, mut candidates: Vec<TypeFact>) -> TypeResolution {
-        candidates
-            .sort_by_key(|fact| (fact.ruby_type.to_string(), provenance_rank(fact.provenance)));
+        if candidates.len() > 1 {
+            // Rendering a type allocates, so render each candidate once.
+            candidates.sort_by_cached_key(|fact| {
+                (fact.ruby_type.to_string(), provenance_rank(fact.provenance))
+            });
+        }
         candidates.dedup_by(|a, b| a.ruby_type == b.ruby_type && a.provenance == b.provenance);
         match candidates.len() {
             0 => TypeResolution::Unresolved,
