@@ -98,9 +98,44 @@ impl<T: Hash + Eq> SharedInterner<T> {
         self.shared.keys().chain(self.own.keys())
     }
 
-    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.shared.len() + self.own.len()
+    }
+
+    /// Drop the appended values `live` does not mark, keeping id order.
+    /// `live` is indexed by id. Shared values always stay. Returns the old to
+    /// new id map, or None when every appended value is live.
+    pub(crate) fn retain_own(&mut self, live: &[bool]) -> Option<IdRemap> {
+        invariant_eq!(
+            live.len(),
+            self.len(),
+            what = "interner liveness marks do not cover every id",
+            why = "reclamation must decide each appended value exactly once",
+            fix = "size the liveness marks from SharedInterner::len",
+        );
+        let offset = self.shared.len();
+        let own_live = &live[offset..];
+        if own_live.iter().all(|keep| *keep) {
+            return None;
+        }
+        let mut next = 0u32;
+        let own = own_live
+            .iter()
+            .map(|keep| {
+                if !keep {
+                    return IdRemap::DROPPED;
+                }
+                next += 1;
+                next - 1
+            })
+            .collect();
+        let mut index = 0;
+        self.own.retain(|_, _| {
+            index += 1;
+            own_live[index - 1]
+        });
+        self.own.shrink_to_fit();
+        Some(IdRemap { offset, own })
     }
 
     /// Move the appended values into the shared prefix. Ids do not change.
@@ -136,9 +171,56 @@ impl<T: Hash + Eq> SharedInterner<T> {
     }
 }
 
+/// Old to new ids after `SharedInterner::retain_own`.
+#[derive(Debug)]
+pub(crate) struct IdRemap {
+    offset: usize,
+    own: Box<[u32]>,
+}
+
+impl IdRemap {
+    const DROPPED: u32 = u32::MAX;
+
+    /// The new id of a value that was kept.
+    pub(crate) fn id(&self, old: usize) -> usize {
+        let Some(own) = old.checked_sub(self.offset) else {
+            return old;
+        };
+        let new = self.own[own];
+        invariant_ne!(
+            new,
+            Self::DROPPED,
+            what = "a live reference points to a reclaimed interned value",
+            why = "reclamation keeps every value its owner marked live",
+            fix = "mark every stored id before calling SharedInterner::retain_own",
+        );
+        self.offset + new as usize
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SharedInterner;
+
+    #[test]
+    fn retaining_appended_values_keeps_shared_ids_and_compacts_the_rest() {
+        let mut names = SharedInterner::default();
+        names.intern("Object".to_string());
+        names.freeze();
+        for name in ["Stale", "App", "Old", "Lib"] {
+            names.intern(name.to_string());
+        }
+
+        assert!(names.retain_own(&[false, true, true, true, true]).is_none());
+        let remap = names
+            .retain_own(&[false, false, true, false, true])
+            .expect("dropping appended values returns a remap");
+        assert_eq!((remap.id(0), remap.id(2), remap.id(4)), (0, 1, 2));
+        assert_eq!(names.iter().collect::<Vec<_>>(), ["Object", "App", "Lib"]);
+        assert_eq!(names.get_index_of("Lib"), Some(2));
+        assert_eq!(names.get_index_of("Stale"), None);
+        assert_eq!(names.intern("Stale".to_string()), 3);
+    }
 
     #[test]
     fn frozen_values_keep_their_ids_and_are_shared_by_clones() {

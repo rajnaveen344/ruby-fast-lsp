@@ -15,6 +15,7 @@ impl TypeStore {
                 continue;
             };
             self.free_facts.push(stale_id);
+            self.retired += 1;
             if let Some(subject_id) = stale.subject.interned_id() {
                 if let Some(ids) = self.facts_by_subject.get_mut(&subject_id) {
                     ids.retain(|id| *id != stale_id);

@@ -3,6 +3,7 @@
 use crate::core::{FullyQualifiedName, RubyType};
 use crate::invariant::ExpectInvariant;
 
+use super::compact::TypeFactId;
 use super::{SourceFileId, TextRange, TypeProvenance, TypeStore, TypeSubject};
 
 impl TypeStore {
@@ -23,35 +24,30 @@ impl TypeStore {
             let Some(subject_id) = self.subject_id(&subject) else {
                 continue;
             };
-            let ruby_type = self.intern_ruby_type(ruby_type);
-            let Some(fact_ids) = self.facts_by_subject.get(&subject_id).cloned() else {
+            let Some(fact_ids) = self.facts_by_subject.get(&subject_id) else {
                 continue;
             };
-            for fact_id in fact_ids {
-                let fact = self.facts.get_mut(fact_id.index()).unwrap_or_else(|| {
-                    unreachable_invariant!(
-                        what = "method-return type index points outside the fact arena",
-                        why = "indexed type ids must reference allocated slots",
-                        fix = "update every TypeStore index when facts are removed or reused",
-                    )
-                });
-                let fact = fact.as_mut().unwrap_or_else(|| {
-                    unreachable_invariant!(
-                        what = "method-return type index points to a vacant fact slot",
-                        why = "removed type facts must be removed from every index",
-                        fix = "keep TypeStore subject indexes synchronized with the fact arena",
-                    )
-                });
-                if fact.range.file_id != file_id || fact.provenance != TypeProvenance::Inferred {
-                    continue;
-                }
-                fact.ruby_type = ruby_type;
-                updated = updated.checked_add(1).expect_invariant(
+            let targets = fact_ids
+                .iter()
+                .copied()
+                .filter(|fact_id| {
+                    let fact = self.fact(*fact_id).unwrap_or_else(|| {
+                        unreachable_invariant!(
+                            what = "method-return type index points to a vacant fact slot",
+                            why = "removed type facts must be removed from every index",
+                            fix = "keep TypeStore subject indexes synchronized with the fact arena",
+                        )
+                    });
+                    fact.range.file_id == file_id && fact.provenance == TypeProvenance::Inferred
+                })
+                .collect::<Vec<_>>();
+            updated = updated
+                .checked_add(self.set_ruby_type(&targets, ruby_type))
+                .expect_invariant(
                     "inferred method-return update count overflowed usize",
                     "the count cannot exceed the bounded fact arena",
                     "keep TypeStore fact counts within addressable memory",
                 );
-            }
         }
         updated
     }
@@ -66,30 +62,24 @@ impl TypeStore {
         let Some(subject_id) = self.subject_id(subject) else {
             return 0;
         };
-        let ruby_type = self.intern_ruby_type(ruby_type);
-        let Some(fact_ids) = self.facts_by_subject.get(&subject_id).cloned() else {
+        let Some(fact_ids) = self.facts_by_subject.get(&subject_id) else {
             return 0;
         };
-        let mut updated = 0usize;
-        for fact_id in fact_ids {
-            let fact = self.facts[fact_id.index()].as_mut().unwrap_or_else(|| {
-                unreachable_invariant!(
-                    what = "a constant-equation target points to a vacant type fact",
-                    why = "file replacement must update every type index atomically",
-                    fix = "remove stale ids from facts_by_subject when a file is replaced",
-                )
-            });
-            if fact.range != range {
-                continue;
-            }
-            fact.ruby_type = ruby_type;
-            updated = updated.checked_add(1).expect_invariant(
-                "constant-equation update count overflowed usize",
-                "it cannot exceed the bounded type arena",
-                "bound retained type facts by addressable memory",
-            );
-        }
-        updated
+        let targets = fact_ids
+            .iter()
+            .copied()
+            .filter(|fact_id| {
+                let fact = self.fact(*fact_id).unwrap_or_else(|| {
+                    unreachable_invariant!(
+                        what = "a constant-equation target points to a vacant type fact",
+                        why = "file replacement must update every type index atomically",
+                        fix = "remove stale ids from facts_by_subject when a file is replaced",
+                    )
+                });
+                fact.range == range
+            })
+            .collect::<Vec<_>>();
+        self.set_ruby_type(&targets, ruby_type)
     }
 
     /// Update every scope projection of one exact local assignment. Scope ids
@@ -101,44 +91,51 @@ impl TypeStore {
         range: TextRange,
         ruby_type: RubyType,
     ) -> usize {
-        let ruby_type = self.intern_ruby_type(ruby_type);
-        let Some(fact_ids) = self.facts_by_file.get(&range.file_id).cloned() else {
+        let Some(fact_ids) = self.facts_by_file.get(&range.file_id) else {
             return 0;
         };
-        let mut updated = 0usize;
-        for fact_id in fact_ids {
-            let matches = self.fact(fact_id).is_some_and(|fact| {
-                if fact.range != range {
-                    return false;
-                }
-                let Some(subject_id) = fact.subject.interned_id() else {
-                    return false;
-                };
-                matches!(
-                    self.subject(subject_id),
-                    TypeSubject::Local {
-                        name: fact_name,
-                        ..
-                    } if fact_name == name
-                )
-            });
-            if !matches {
-                continue;
-            }
-            self.facts[fact_id.index()]
-                .as_mut()
-                .expect_invariant(
-                    "a selected local-assignment equation target became vacant",
-                    "resolution owns the type-store write lock",
-                    "keep target selection and update in one atomic pass",
-                )
-                .ruby_type = ruby_type;
-            updated = updated.checked_add(1).expect_invariant(
-                "local-assignment equation update count overflowed usize",
-                "it cannot exceed the bounded type arena",
-                "bound retained type facts by addressable memory",
-            );
+        let targets = fact_ids
+            .iter()
+            .copied()
+            .filter(|fact_id| {
+                self.fact(*fact_id).is_some_and(|fact| {
+                    if fact.range != range {
+                        return false;
+                    }
+                    let Some(subject_id) = fact.subject.interned_id() else {
+                        return false;
+                    };
+                    matches!(
+                        self.subject(subject_id),
+                        TypeSubject::Local {
+                            name: fact_name,
+                            ..
+                        } if fact_name == name
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        self.set_ruby_type(&targets, ruby_type)
+    }
+
+    /// Write one type into the selected facts, interning it only when a fact
+    /// receives it, and retire each replaced type reference.
+    fn set_ruby_type(&mut self, targets: &[TypeFactId], ruby_type: RubyType) -> usize {
+        if targets.is_empty() {
+            return 0;
         }
-        updated
+        let ruby_type = self.intern_ruby_type(ruby_type);
+        for fact_id in targets {
+            let fact = self.facts[fact_id.index()].as_mut().expect_invariant(
+                "a selected type update target became vacant",
+                "resolution owns the type-store write lock",
+                "keep target selection and update in one atomic pass",
+            );
+            if fact.ruby_type != ruby_type {
+                fact.ruby_type = ruby_type;
+                self.retired += 1;
+            }
+        }
+        targets.len()
     }
 }

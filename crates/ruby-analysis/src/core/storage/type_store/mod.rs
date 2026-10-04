@@ -3,6 +3,7 @@
 mod compact;
 mod facts;
 mod ordered_append;
+mod reclaim;
 mod replacement;
 mod updates;
 
@@ -31,6 +32,8 @@ pub struct TypeStore {
     facts_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
     facts_by_file: HashMap<SourceFileId, Vec<TypeFactId>>,
     file_owned_indexes_ordered: bool,
+    /// References to interned values dropped since the last reclamation.
+    retired: usize,
 }
 
 impl Default for TypeStore {
@@ -43,6 +46,7 @@ impl Default for TypeStore {
             facts_by_subject: HashMap::new(),
             facts_by_file: HashMap::new(),
             file_owned_indexes_ordered: true,
+            retired: 0,
         }
     }
 }
@@ -332,6 +336,12 @@ impl TypeStore {
     pub(crate) fn freeze(&mut self) {
         self.subjects.freeze();
         self.ruby_types.freeze();
+    }
+
+    /// Interned subject and Ruby type counts.
+    #[cfg(test)]
+    pub(crate) fn interned_counts(&self) -> (usize, usize) {
+        (self.subjects.len(), self.ruby_types.len())
     }
 
     pub fn shrink_to_fit(&mut self) {

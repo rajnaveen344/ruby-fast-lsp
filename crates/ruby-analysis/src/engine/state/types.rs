@@ -104,8 +104,8 @@ impl TypeTable {
         local_read_types: Box<[(TextRange, RubyType)]>,
     ) {
         self.store.replace_file(file_id, types);
-        if call_expression_outcomes.is_empty() {
-            self.call_expression_outcomes_by_file.remove(&file_id);
+        let replaced = if call_expression_outcomes.is_empty() {
+            self.call_expression_outcomes_by_file.remove(&file_id)
         } else {
             let outcomes = call_expression_outcomes
                 .into_iter()
@@ -118,10 +118,11 @@ impl TypeTable {
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             self.call_expression_outcomes_by_file
-                .insert(file_id, outcomes);
-        }
-        if local_read_types.is_empty() {
-            self.local_read_types_by_file.remove(&file_id);
+                .insert(file_id, outcomes)
+        };
+        self.store.retire(replaced.map_or(0, |rows| rows.len()));
+        let replaced = if local_read_types.is_empty() {
+            self.local_read_types_by_file.remove(&file_id)
         } else {
             let local_read_types = local_read_types
                 .into_vec()
@@ -130,16 +131,62 @@ impl TypeTable {
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             self.local_read_types_by_file
-                .insert(file_id, local_read_types);
-        }
+                .insert(file_id, local_read_types)
+        };
+        self.store.retire(replaced.map_or(0, |rows| rows.len()));
+        self.reclaim_if_due();
     }
 
     /// Drop one file's type facts, call-expression outcomes, and proven
     /// local-read types.
     pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
         self.store.remove_file(file_id);
-        self.call_expression_outcomes_by_file.remove(&file_id);
-        self.local_read_types_by_file.remove(&file_id);
+        let outcomes = self.call_expression_outcomes_by_file.remove(&file_id);
+        let reads = self.local_read_types_by_file.remove(&file_id);
+        self.store.retire(outcomes.map_or(0, |rows| rows.len()));
+        self.store.retire(reads.map_or(0, |rows| rows.len()));
+        self.reclaim_if_due();
+    }
+
+    /// Reclaim interned values once enough references retired to repay the
+    /// scan.
+    fn reclaim_if_due(&mut self) {
+        if self.store.reclaim_due() {
+            self.reclaim_interned();
+        }
+    }
+
+    /// Drop interned subjects and types that neither a fact nor a file's
+    /// outcomes or local reads reference, then renumber those rows.
+    fn reclaim_interned(&mut self) {
+        let outcomes = &mut self.call_expression_outcomes_by_file;
+        let reads = &mut self.local_read_types_by_file;
+        let external = outcomes
+            .values()
+            .flat_map(|rows| rows.iter())
+            .filter_map(|(_, outcome)| match outcome {
+                StoredTypeInferenceOutcome::Proven(ruby_type) => Some(*ruby_type),
+                StoredTypeInferenceOutcome::Unknown(_) => None,
+            })
+            .chain(
+                reads
+                    .values()
+                    .flat_map(|rows| rows.iter().map(|(_, ruby_type)| *ruby_type)),
+            );
+        let Some(remap) = self.store.reclaim_interned(external) else {
+            return;
+        };
+        for (_, outcome) in outcomes.values_mut().flat_map(|rows| rows.iter_mut()) {
+            match outcome {
+                StoredTypeInferenceOutcome::Proven(ruby_type) => {
+                    *ruby_type = remap.apply(*ruby_type)
+                }
+                StoredTypeInferenceOutcome::Unknown(_) => {}
+            }
+        }
+        for (_, ruby_type) in reads.values_mut().flat_map(|rows| rows.iter_mut()) {
+            *ruby_type = remap.apply(*ruby_type);
+        }
     }
 
     pub(in crate::engine) fn call_expression_outcome_views_in_file(
@@ -237,6 +284,7 @@ impl TypeTable {
         let mut ordered_ranges = outcomes.keys().copied().collect::<Vec<_>>();
         ordered_ranges.sort_unstable();
         let mut ordered_ranges = ordered_ranges.into_iter().peekable();
+        let mut replaced = 0;
         while let Some(first_range) = ordered_ranges.next() {
             let file_id = first_range.file_id;
             let first_outcome = StoredTypeInferenceOutcome::from_domain(
@@ -293,6 +341,7 @@ impl TypeTable {
                                 "keep comparison and consumption atomic",
                             )),
                             std::cmp::Ordering::Equal => {
+                                replaced += 1;
                                 existing.next().expect_invariant(
                                     "an equal existing call outcome disappeared before replacement",
                                     "the local iterator is not shared",
@@ -331,6 +380,8 @@ impl TypeTable {
             why = "every map key was copied into the ordered range list",
             fix = "keep range collection and map ownership in the same merge operation",
         );
+        self.store.retire(replaced);
+        self.reclaim_if_due();
     }
 
     /// Borrow each value-constant type fact, in arena order.
@@ -354,7 +405,9 @@ impl TypeTable {
         range: TextRange,
         ruby_type: RubyType,
     ) -> usize {
-        self.store.update_equation_target(subject, range, ruby_type)
+        let updated = self.store.update_equation_target(subject, range, ruby_type);
+        self.reclaim_if_due();
+        updated
     }
 
     /// Write a solved type into every scope projection of one local assignment.
@@ -364,8 +417,11 @@ impl TypeTable {
         range: TextRange,
         ruby_type: RubyType,
     ) -> usize {
-        self.store
-            .update_local_assignment_equation_target(name, range, ruby_type)
+        let updated = self
+            .store
+            .update_local_assignment_equation_target(name, range, ruby_type);
+        self.reclaim_if_due();
+        updated
     }
 
     /// Write solved method-return types into one file's inferred facts.
@@ -374,8 +430,11 @@ impl TypeTable {
         file_id: SourceFileId,
         updates: impl IntoIterator<Item = (&'a FullyQualifiedName, RubyType)>,
     ) -> usize {
-        self.store
-            .update_inferred_method_return_types_in_file(file_id, updates)
+        let updated = self
+            .store
+            .update_inferred_method_return_types_in_file(file_id, updates);
+        self.reclaim_if_due();
+        updated
     }
 
     /// Replace the solved type of one local read; Unknown removes it.
@@ -389,7 +448,9 @@ impl TypeTable {
             .remove(&range.file_id)
             .unwrap_or_default()
             .into_vec();
+        let before = reads.len();
         reads.retain(|(existing, _)| *existing != range);
+        self.store.retire(before - reads.len());
         if ruby_type != RubyType::Unknown {
             let ruby_type = self.store.intern_ruby_type(ruby_type);
             reads.push((range, ruby_type));
@@ -399,6 +460,7 @@ impl TypeTable {
             self.local_read_types_by_file
                 .insert(range.file_id, reads.into_boxed_slice());
         }
+        self.reclaim_if_due();
     }
 
     pub(in crate::engine) fn fact_count(&self) -> usize {
@@ -435,7 +497,18 @@ impl TypeTable {
         self.store.freeze();
     }
 
+    /// Interned subject and Ruby type counts.
+    #[cfg(test)]
+    pub(in crate::engine) fn interned_counts(&self) -> (usize, usize) {
+        self.store.interned_counts()
+    }
+
+    /// Compact storage, first reclaiming every interned value a dropped
+    /// reference left unused.
     pub(in crate::engine) fn shrink_to_fit(&mut self) {
+        if self.store.has_retired() {
+            self.reclaim_interned();
+        }
         self.store.shrink_to_fit();
         self.call_expression_outcomes_by_file.shrink_to_fit();
         self.local_read_types_by_file.shrink_to_fit();

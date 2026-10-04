@@ -501,3 +501,119 @@ fn frozen_template_clones_share_storage_and_stay_isolated() {
     assert_eq!(template.names.fqn_id(&app), None);
     assert_eq!(seeded.names.fqn_id(&utility), Some(utility_id));
 }
+
+/// One revision of a file whose type fact, call outcome, and local read each
+/// carry a type and subject that no other revision uses.
+fn revision_types(file_id: SourceFileId, revision: usize) -> FileAnalysis {
+    let symbol = |role: &str| {
+        RubyType::Literal(Box::new(crate::core::LiteralValue::symbol(format!(
+            "{role}_{revision}"
+        ))))
+    };
+    FileAnalysis {
+        types: vec![TypeFact {
+            subject: TypeSubject::GlobalVariable(format!("$value_{revision}")),
+            ruby_type: symbol("fact"),
+            range: TextRange::new(file_id, 0, 4),
+            provenance: TypeProvenance::Assignment,
+        }],
+        inference: InferenceEvidence {
+            call_expression_outcomes: vec![(
+                TextRange::new(file_id, 6, 10),
+                TypeInferenceOutcome::proven(symbol("call")),
+            )],
+            ..Default::default()
+        },
+        local_read_types: vec![(TextRange::new(file_id, 12, 14), symbol("read"))].into(),
+        ..Default::default()
+    }
+}
+
+fn replaced_revisions(revisions: usize) -> (Project, SourceFileId) {
+    let mut engine = Project::new();
+    let file_id = register_project_file(&mut engine, "lib/values.rb", "$value = :a\n");
+    for revision in 0..revisions {
+        engine.update(
+            file_id,
+            revision_types(file_id, revision),
+            ResolveMode::Deferred,
+        );
+    }
+    engine.resolve();
+    (engine, file_id)
+}
+
+#[test]
+fn compaction_reclaims_types_and_subjects_of_replaced_revisions() {
+    let (mut engine, file_id) = replaced_revisions(32);
+    engine.shrink_to_fit();
+    let (mut fresh, fresh_id) = replaced_revisions(0);
+    fresh.update(
+        fresh_id,
+        revision_types(fresh_id, 31),
+        ResolveMode::Immediate,
+    );
+    fresh.shrink_to_fit();
+
+    assert_eq!(
+        engine.types.interned_counts(),
+        fresh.types.interned_counts(),
+        "compaction must drop subjects and types only replaced revisions used"
+    );
+    assert_eq!(
+        engine.view().type_facts_in_file(file_id),
+        fresh
+            .view()
+            .type_facts_in_file(fresh_id)
+            .into_iter()
+            .map(|fact| TypeFact {
+                range: TextRange {
+                    file_id,
+                    ..fact.range
+                },
+                ..fact
+            })
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        engine
+            .view()
+            .type_facts_for(&TypeSubject::GlobalVariable("$value_31".to_string())),
+        engine.view().type_facts_in_file(file_id),
+        "renumbered subjects must still find their facts"
+    );
+    assert_eq!(
+        engine.call_expression_outcomes_in_file(file_id),
+        Some(
+            revision_types(file_id, 31)
+                .inference
+                .call_expression_outcomes
+        )
+    );
+    assert_eq!(
+        engine.local_read_types_in_file(file_id),
+        Some(revision_types(file_id, 31).local_read_types.into_vec())
+    );
+}
+
+#[test]
+fn repeated_edits_reclaim_interned_types_without_compaction() {
+    let revisions = 3_000;
+    let (engine, file_id) = replaced_revisions(revisions);
+    let (subjects, types) = engine.types.interned_counts();
+
+    // Each revision interns one subject and three types. Edits alone must
+    // reclaim the ones earlier revisions used once enough of them pile up.
+    assert!(
+        subjects < revisions / 2 && types < revisions,
+        "edits left {subjects} subjects and {types} types for one live revision"
+    );
+    assert_eq!(
+        engine.local_read_types_in_file(file_id),
+        Some(
+            revision_types(file_id, revisions - 1)
+                .local_read_types
+                .into_vec()
+        )
+    );
+}
