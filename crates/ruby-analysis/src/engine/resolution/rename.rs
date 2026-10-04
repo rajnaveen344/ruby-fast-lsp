@@ -76,33 +76,13 @@ impl<'a> View<'a> {
             if !candidate.range.contains_offset(file_id, byte_offset) {
                 continue;
             }
-            let crate::core::storage::reference_store::StoredReferenceCandidateKind::Method {
-                owner,
-                owner_kind,
-                method,
-                is_super,
-                access,
-                caller,
-                call_expression_range,
-                preferred_definition_range,
-                diagnostics,
-            } = candidate.kind
+            let crate::core::storage::reference_store::StoredReferenceCandidateKind::Method(
+                candidate,
+            ) = &candidate.kind
             else {
                 continue;
             };
-            let candidate = StoredMethodReferenceCandidate {
-                range: candidate.range,
-                owner,
-                owner_kind,
-                method,
-                is_super,
-                access,
-                caller,
-                call_expression_range,
-                preferred_definition_range,
-                diagnostics,
-            };
-            identities.extend(self.method_candidate_rename_identities(&candidate));
+            identities.extend(self.method_candidate_rename_identities(candidate));
         }
 
         identities.sort();
@@ -222,10 +202,10 @@ impl<'a> View<'a> {
         for candidate in self.engine.uses.candidates().iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Method(candidate)
-                    if candidate.method == identity.method =>
+                    if candidate.method() == identity.method =>
                 {
                     let targets = self.method_candidate_rename_identities(candidate);
-                    let caller_is_target = candidate.caller.is_some_and(|caller| {
+                    let caller_is_target = candidate.caller().is_some_and(|caller| {
                         self.engine.names.fqn(caller).is_some_and(|caller| {
                             matches!(
                                 caller,
@@ -236,7 +216,7 @@ impl<'a> View<'a> {
                             )
                         })
                     });
-                    if candidate.is_super && (targets.contains(&identity) || caller_is_target) {
+                    if candidate.is_super() && (targets.contains(&identity) || caller_is_target) {
                         return None;
                     }
                     if targets.contains(&identity) {
@@ -244,8 +224,7 @@ impl<'a> View<'a> {
                             return None;
                         }
                         if let Some(new_name) = new_name {
-                            let mut collision_candidate = candidate.clone();
-                            collision_candidate.method = new_name;
+                            let collision_candidate = candidate.renamed(new_name);
                             if !self
                                 .method_candidate_rename_identities(&collision_candidate)
                                 .is_empty()
@@ -313,7 +292,7 @@ impl<'a> View<'a> {
             .into_iter()
             .filter(|callee| {
                 callee.resolution == crate::core::MethodCalleeResolution::Exact
-                    && callee.method == candidate.method
+                    && callee.method == candidate.method()
                     && !callee.definition_ranges.is_empty()
             })
             .map(|callee| MethodRenameIdentity {

@@ -291,11 +291,17 @@ impl FactCollector {
 
         if !inference_failed || deferred_receiver_may_resolve {
             let receiver_label = match (&receiver_info, inferred_expr_type.as_ref()) {
-                (ReceiverInfo::ConstantReceiver(name), _) => Some(name.clone()),
+                (ReceiverInfo::ConstantReceiver(name), _) => {
+                    Some(crate::core::MethodReceiverLabel::Written(name.clone()))
+                }
                 (
                     ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath,
                     Some(ruby_type),
-                ) => Some(ruby_type.to_string()),
+                ) => Some(if receiver_type.as_ref() == Some(ruby_type) {
+                    crate::core::MethodReceiverLabel::ReceiverType
+                } else {
+                    crate::core::MethodReceiverLabel::Rendered(ruby_type.to_string())
+                }),
                 (ReceiverInfo::NoReceiver | ReceiverInfo::SelfReceiver, _)
                 | (ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath, None) => {
                     None

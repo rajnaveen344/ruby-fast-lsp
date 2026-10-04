@@ -41,7 +41,7 @@ impl<'a> View<'a> {
     pub fn incoming_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<IncomingCall> {
         let mut grouped = Vec::<(FullyQualifiedName, Vec<TextRange>)>::new();
         for fact in self.reference_facts_for(method_fqn) {
-            let Some(caller_id) = fact.caller else {
+            let Some(caller_id) = fact.caller() else {
                 continue;
             };
             let Some(caller) = self.engine.names.fqn(caller_id) else {
@@ -68,7 +68,7 @@ impl<'a> View<'a> {
             return Vec::new();
         };
         for (target_id, fact) in self.engine.uses.resolved().iter_facts_with_targets() {
-            if fact.caller != Some(method_id) {
+            if fact.caller() != Some(method_id) {
                 continue;
             }
             let Some(target) = self.engine.names.fqn(target_id) else {

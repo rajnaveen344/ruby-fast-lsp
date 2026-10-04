@@ -9,9 +9,9 @@ use super::policy::{
     arity_mismatch, closest_keyword, MethodArity, MISSING_KWARG, UNKNOWN_KWARG,
     UNSUPPORTED_RUNTIME_API, WRONG_ARITY,
 };
+use crate::core::storage::reference_store::MethodCallDiagnostics;
 use crate::core::{
-    DiagnosticFact, FullyQualifiedName, MethodAvailability, MethodCallSignatureCandidate,
-    MethodFact, SourceFileId, TextRange,
+    DiagnosticFact, FullyQualifiedName, MethodAvailability, MethodFact, SourceFileId, TextRange,
 };
 use crate::engine::resolution::method_lookup_chain;
 use crate::engine::Project;
@@ -45,14 +45,13 @@ impl Project {
         fact: &MethodFact,
         requested_owner: &FullyQualifiedName,
         method: &crate::core::RubyMethod,
-        signature: Option<&MethodCallSignatureCandidate>,
-        receiver_label: Option<&str>,
-        diagnostic_range: TextRange,
+        diagnostics: MethodCallDiagnostics<'_>,
         diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
     ) {
-        let Some(signature) = signature else {
+        let Some(signature) = diagnostics.signature() else {
             return;
         };
+        let diagnostic_range = diagnostics.diagnostic_range();
         if !fact.has_complete_parameter_shape() {
             return;
         }
@@ -62,7 +61,7 @@ impl Project {
             || !arity.required_keywords.is_empty()
             || !arity.optional_keywords.is_empty();
         let keywords_form_options_hash = !declares_keywords && signature.has_nonempty_keyword_hash;
-        let mut effective_signature = signature.clone();
+        let mut effective_signature = signature;
         if keywords_form_options_hash {
             effective_signature.positional_count += 1;
         }
@@ -82,7 +81,7 @@ impl Project {
                 fix = "update positional_count and trailing_positional_may_be_options_hash atomically",
             );
             let direct_mismatch = arity_mismatch(&effective_signature, &arity);
-            let mut converted_signature = effective_signature.clone();
+            let mut converted_signature = effective_signature;
             converted_signature.positional_count -= 1;
             let converted_mismatch = arity_mismatch(&converted_signature, &arity);
             match (direct_mismatch, converted_mismatch) {
@@ -104,7 +103,10 @@ impl Project {
                     target: "ruby_analysis::engine::diagnostics::wrong_arity",
                     "wrong-arity proof: method={} receiver={} requested_owner={} resolved_fqn={} owner={} definition_file_id={} definition_range={}..{} call_file_id={} call_range={}..{} positional={} params={:?} lookup_chain={:?}",
                     method.as_str(),
-                    receiver_label.unwrap_or("<implicit-self>"),
+                    self.names
+                        .method_receiver_label(diagnostics)
+                        .as_deref()
+                        .unwrap_or("<implicit-self>"),
                     requested_owner,
                     fact.fqn,
                     fact.owner,
@@ -145,11 +147,11 @@ impl Project {
                 .chain(arity.optional_keywords.iter())
                 .cloned()
                 .collect::<Vec<_>>();
-            for kwarg in &signature.keyword_args {
-                if declared.contains(&kwarg.name) {
+            for kwarg in signature.keyword_args {
+                if declared.iter().any(|name| name == kwarg.name.as_str()) {
                     continue;
                 }
-                let suggestion = closest_keyword(&kwarg.name, &declared);
+                let suggestion = closest_keyword(kwarg.name.as_str(), &declared);
                 let mut message = format!(
                     "Unknown keyword argument `{}:` for `{}`",
                     kwarg.name,

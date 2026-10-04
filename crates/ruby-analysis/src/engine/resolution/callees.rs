@@ -8,7 +8,7 @@ use super::lookup_chain::{
     method_lookup_chain, method_lookup_chain_has_unresolved_dependency_from_graph,
 };
 use super::{module_instance_receivers, namespace_target_exists, receiver_type_members};
-use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
+use crate::core::storage::reference_store::{StoredMethodReferenceCandidate, StoredReceiverType};
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, ResolvedMethodCallee,
     RubyMethod, RubyType,
@@ -33,7 +33,7 @@ impl<'a> View<'a> {
         let owner_lookup = self
             .engine
             .names
-            .const_lookup(candidate.owner)
+            .const_lookup(candidate.owner())
             .expect_invariant(
                 "method rename candidate points to a missing owner lookup",
                 "candidates contain only interned lookup ids",
@@ -41,21 +41,28 @@ impl<'a> View<'a> {
             );
         let owner = FullyQualifiedName::namespace_with_kind(
             owner_lookup.path.to_vec(),
-            candidate.owner_kind,
+            candidate.owner_kind(),
         );
-        let grouped_receiver_type = candidate
-            .diagnostics
-            .as_deref()
-            .and_then(|diagnostics| diagnostics.receiver_type.as_deref())
-            .filter(|receiver_type| matches!(receiver_type, RubyType::Union(_)));
+        // Class and module receivers are stored as interned names; only a
+        // structural receiver can be a union.
+        let grouped_receiver_type =
+            candidate
+                .diagnostics()
+                .and_then(|diagnostics| match diagnostics.receiver_type()? {
+                    StoredReceiverType::Structural(receiver_type @ RubyType::Union(_)) => {
+                        Some(receiver_type)
+                    }
+                    StoredReceiverType::Structural(_) | StoredReceiverType::Named(..) => None,
+                });
+        let method = candidate.method();
         invariant!(
-            grouped_receiver_type.is_none() || !candidate.is_super,
+            grouped_receiver_type.is_none() || !candidate.is_super(),
             what = "a super reference carries grouped receiver metadata",
             why = "super has one lexical owner chain rather than a value receiver union",
             fix = "attach receiver_type only to explicit call-node receiver inference",
         );
         let callees = if let Some(receiver_type) = grouped_receiver_type {
-            match candidate.access {
+            match candidate.access() {
                 MethodReferenceAccess::InstanceMethodReflection => unreachable_invariant!(
                     what = "instance-method reflection has a grouped value receiver",
                     why = "reflection names one namespace",
@@ -64,7 +71,7 @@ impl<'a> View<'a> {
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
                     .resolve_method_callees_for_type_inner(
                         receiver_type,
-                        &candidate.method,
+                        &method,
                         true,
                         None,
                         lookup_chains.as_deref_mut(),
@@ -72,7 +79,7 @@ impl<'a> View<'a> {
                     .unwrap_or_default(),
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
-                        .caller
+                        .caller()
                         .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
                             let mut owners = self.method_facts_for(caller)
@@ -90,13 +97,13 @@ impl<'a> View<'a> {
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
                             };
-                            self.resolve_method_callees_for_type_inner(receiver_type, &candidate.method, false, Some(&caller), lookup_chains.as_deref_mut())
+                            self.resolve_method_callees_for_type_inner(receiver_type, &method, false, Some(&caller), lookup_chains.as_deref_mut())
                         });
                     protected
                         .or_else(|| {
                             self.resolve_method_callees_for_type_inner(
                                 receiver_type,
-                                &candidate.method,
+                                &method,
                                 false,
                                 None,
                                 lookup_chains.as_deref_mut(),
@@ -105,20 +112,20 @@ impl<'a> View<'a> {
                         .unwrap_or_default()
                 }
             }
-        } else if candidate.is_super {
-            self.resolve_super_method_callee(&owner, &candidate.method)
+        } else if candidate.is_super() {
+            self.resolve_super_method_callee(&owner, &method)
                 .into_iter()
                 .collect::<Vec<_>>()
         } else {
-            match candidate.access {
+            match candidate.access() {
                 MethodReferenceAccess::InstanceMethodReflection => self
-                    .resolve_reflected_method_callee(&owner, &candidate.method)
+                    .resolve_reflected_method_callee(&owner, &method)
                     .into_iter()
                     .collect(),
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
                     .resolve_method_callees_inner(
                         &owner,
-                        &candidate.method,
+                        &method,
                         true,
                         None,
                         lookup_chains.as_deref_mut(),
@@ -126,7 +133,7 @@ impl<'a> View<'a> {
                     .unwrap_or_default(),
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
-                        .caller
+                        .caller()
                         .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
                             let mut owners = self.method_facts_for(caller)
@@ -144,13 +151,13 @@ impl<'a> View<'a> {
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
                             };
-                            self.resolve_method_callees_inner(&owner, &candidate.method, false, Some(&caller), lookup_chains.as_deref_mut())
+                            self.resolve_method_callees_inner(&owner, &method, false, Some(&caller), lookup_chains.as_deref_mut())
                         });
                     protected
                         .or_else(|| {
                             self.resolve_method_callees_inner(
                                 &owner,
-                                &candidate.method,
+                                &method,
                                 false,
                                 None,
                                 lookup_chains.as_deref_mut(),
@@ -160,20 +167,18 @@ impl<'a> View<'a> {
                 }
             }
         };
-        if candidate.access == MethodReferenceAccess::Normal
+        if candidate.access() == MethodReferenceAccess::Normal
             && !callees.iter().any(|callee| {
                 callee.resolution == MethodCalleeResolution::Exact
                     && !callee.definition_ranges.is_empty()
             })
         {
-            if let Some(fact) = self.source_ordered_top_level_method_reference(
-                &owner,
-                &candidate.method,
-                candidate.range,
-            ) {
+            if let Some(fact) =
+                self.source_ordered_top_level_method_reference(&owner, &method, candidate.range)
+            {
                 return vec![ResolvedMethodCallee {
                     owner: fact.owner.clone(),
-                    method: candidate.method,
+                    method,
                     resolution: MethodCalleeResolution::Exact,
                     definition_ranges: vec![fact.range],
                 }];

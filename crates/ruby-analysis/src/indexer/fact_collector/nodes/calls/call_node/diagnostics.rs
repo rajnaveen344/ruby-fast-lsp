@@ -63,7 +63,7 @@ impl FactCollector {
                     let Some(value_loc) = symbol.value_loc() else {
                         continue;
                     };
-                    let name = utf8_str(value_loc.as_slice()).to_string();
+                    let name = ustr::Ustr::from(utf8_str(value_loc.as_slice()));
                     signature.keyword_args.push(KeywordArgCandidate {
                         name,
                         range: self.text_range_from_prism_location(

@@ -85,7 +85,7 @@ impl Project {
         &self,
         callees: &[ResolvedMethodCallee],
         method: RubyMethod,
-        diagnostics: &crate::core::MethodReferenceDiagnostics,
+        diagnostics: crate::core::storage::reference_store::MethodCallDiagnostics<'_>,
         diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
     ) {
         let mut grouped = HashMap::new();
@@ -93,18 +93,10 @@ impl Project {
             self.push_unavailable_method_diagnostic(
                 &fact,
                 &method,
-                diagnostics.diagnostic_range,
+                diagnostics.diagnostic_range(),
                 &mut grouped,
             );
-            self.push_signature_diagnostics(
-                &fact,
-                &fact.owner,
-                &method,
-                diagnostics.signature.as_ref(),
-                diagnostics.receiver_label.as_deref(),
-                diagnostics.diagnostic_range,
-                &mut grouped,
-            );
+            self.push_signature_diagnostics(&fact, &fact.owner, &method, diagnostics, &mut grouped);
         }
         let mut grouped = grouped.into_iter().collect::<Vec<_>>();
         grouped.sort_by_key(|(file_id, _facts)| file_id.0);
@@ -135,11 +127,11 @@ impl Project {
         &self,
         receiver_type: &RubyType,
         method: RubyMethod,
-        diagnostics: &crate::core::MethodReferenceDiagnostics,
+        diagnostics: crate::core::storage::reference_store::MethodCallDiagnostics<'_>,
         absence_claims: &mut MethodAbsenceClaims,
         diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
     ) {
-        if !diagnostics.diagnose_unresolved {
+        if !diagnostics.diagnose_unresolved() {
             return;
         }
         let namespaces = crate::core::receiver_type_to_method_namespaces(receiver_type);
@@ -168,14 +160,15 @@ impl Project {
         }) {
             return;
         }
-        let message = match &diagnostics.receiver_label {
+        let message = match self.names.method_receiver_label(diagnostics) {
             Some(label) => format!("Unresolved method `{}` on `{}`", method.as_str(), label),
             None => format!("Unresolved method `{}`", method.as_str()),
         };
+        let diagnostic_range = diagnostics.diagnostic_range();
         diagnostics_by_file
-            .entry(diagnostics.diagnostic_range.file_id)
+            .entry(diagnostic_range.file_id)
             .or_default()
-            .push(UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message));
+            .push(UNRESOLVED_METHOD.fact(diagnostic_range, message));
     }
 }
 

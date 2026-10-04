@@ -74,20 +74,19 @@ impl Project {
                             ));
                     }
                 }
-                StoredReferenceCandidateKind::Method {
-                    owner,
-                    owner_kind,
-                    method,
-                    is_super,
-                    access,
-                    caller,
-                    call_expression_range,
-                    preferred_definition_range: _,
-                    diagnostics,
-                } => {
-                    let deferred_receiver_range = diagnostics
-                        .as_deref()
-                        .and_then(|diagnostics| diagnostics.receiver_expression_range);
+                StoredReferenceCandidateKind::Method(row) => {
+                    let (owner, owner_kind, method, is_super, access, caller) = (
+                        row.owner(),
+                        row.owner_kind(),
+                        row.method(),
+                        row.is_super(),
+                        row.access(),
+                        row.caller(),
+                    );
+                    let call_expression_range = row.call_expression_range();
+                    let diagnostics = row.diagnostics();
+                    let deferred_receiver_range =
+                        diagnostics.and_then(|diagnostics| diagnostics.receiver_expression_range());
                     let solved_receiver_type = deferred_receiver_range.and_then(|range| {
                         self.proven_deferred_receiver_type(range, &resolved_call_outcomes)
                     });
@@ -96,9 +95,7 @@ impl Project {
                             self.deferred_receiver_is_unknown(range, &resolved_call_outcomes)
                         });
                     let candidate_receiver_type = diagnostics
-                        .as_deref()
-                        .and_then(|diagnostics| diagnostics.receiver_type.as_deref())
-                        .cloned();
+                        .and_then(|diagnostics| self.names.method_receiver_type(diagnostics));
                     let effective_receiver_type = solved_receiver_type.or_else(|| {
                         (!receiver_is_explicitly_unknown)
                             .then_some(candidate_receiver_type)
@@ -114,9 +111,8 @@ impl Project {
                         }
                         continue;
                     }
-                    let safe_navigation = diagnostics
-                        .as_deref()
-                        .is_some_and(|diagnostics| diagnostics.safe_navigation);
+                    let safe_navigation =
+                        diagnostics.is_some_and(|diagnostics| diagnostics.safe_navigation());
                     let Some((effective_receiver_type, nil_skips_dispatch)) =
                         Self::safe_navigation_receiver(
                             &mut resolved_call_outcomes,
@@ -145,7 +141,7 @@ impl Project {
                                     ReferenceFact::method(candidate.range, caller, access),
                                 ));
                             }
-                            if let Some(diagnostics) = diagnostics.as_deref() {
+                            if let Some(diagnostics) = diagnostics {
                                 self.push_grouped_method_fact_diagnostics(
                                     &callees,
                                     method,
@@ -165,7 +161,7 @@ impl Project {
                                     nil_skips_dispatch,
                                 );
                             }
-                        } else if let Some(diagnostics) = diagnostics.as_deref() {
+                        } else if let Some(diagnostics) = diagnostics {
                             self.push_grouped_unresolved_method_diagnostic(
                                 receiver_type,
                                 method,
@@ -190,8 +186,7 @@ impl Project {
                         effective_receiver_type.as_ref()
                     {
                         let allow_unindexed_owner = diagnostics
-                            .as_deref()
-                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner);
+                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner());
                         let Some(owner_fqn) =
                             self.proven_receiver_namespace(receiver_type, allow_unindexed_owner)
                         else {
@@ -290,21 +285,19 @@ impl Project {
                             ReferenceFact::method(candidate.range, caller, access),
                         ));
                         if resolved_method == method {
-                            if let Some(diagnostics) = diagnostics.as_deref() {
+                            if let Some(diagnostics) = diagnostics {
                                 if let Some(fact) = fact {
                                     self.push_unavailable_method_diagnostic(
                                         fact,
                                         &method,
-                                        diagnostics.diagnostic_range,
+                                        diagnostics.diagnostic_range(),
                                         &mut unresolved,
                                     );
                                     self.push_signature_diagnostics(
                                         fact,
                                         &owner_fqn,
                                         &method,
-                                        diagnostics.signature.as_ref(),
-                                        diagnostics.receiver_label.as_deref(),
-                                        diagnostics.diagnostic_range,
+                                        diagnostics,
                                         &mut unresolved,
                                     );
                                 }
@@ -315,8 +308,7 @@ impl Project {
                             .entry(owner_fqn.clone())
                             .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn));
                         let allow_unindexed_owner = diagnostics
-                            .as_deref()
-                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner);
+                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner());
                         if !namespace_exists && !allow_unindexed_owner {
                             continue;
                         }
@@ -328,8 +320,8 @@ impl Project {
                             ReferenceFact::method(candidate.range, caller, access),
                         ));
 
-                        if let Some(diagnostics) = diagnostics.as_deref() {
-                            if !diagnostics.diagnose_unresolved {
+                        if let Some(diagnostics) = diagnostics {
+                            if !diagnostics.diagnose_unresolved() {
                                 continue;
                             }
                             if method_absence_claims.suppresses(self, &owner_fqn, method) {
@@ -345,7 +337,7 @@ impl Project {
                                         .clone()
                                 })
                                 .flatten();
-                            let mut message = match &diagnostics.receiver_label {
+                            let mut message = match self.names.method_receiver_label(diagnostics) {
                                 Some(label) => {
                                     format!(
                                         "Unresolved method `{}` on `{}`",
@@ -359,7 +351,7 @@ impl Project {
                                 message.push_str(&format!(". Did you mean `{}`?", suggestion));
                             }
                             unresolved.entry(file_id).or_default().push(
-                                UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message),
+                                UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range(), message),
                             );
                         }
                     }

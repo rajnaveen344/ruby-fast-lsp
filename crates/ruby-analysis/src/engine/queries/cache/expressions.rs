@@ -22,26 +22,27 @@ impl<'a> View<'a> {
         if let Some(ruby_type) = self.exact_expression_type(receiver_range) {
             return Some(ruby_type);
         }
-        let mut proven_type = None;
+        let mut proven_type: Option<RubyType> = None;
         for candidate in self
             .engine
             .uses
             .candidates()
             .method_candidates_at_exact_range(message_range)
         {
-            let Some(diagnostics) = candidate.diagnostics.as_deref() else {
-                return None;
-            };
-            if diagnostics.receiver_expression_range != Some(receiver_range) {
+            let diagnostics = candidate.diagnostics()?;
+            if diagnostics.receiver_expression_range() != Some(receiver_range) {
                 return None;
             }
-            let ruby_type = diagnostics.receiver_type.as_deref()?;
-            if proven_type.is_some_and(|previous| previous != ruby_type) {
+            let ruby_type = self.engine.names.method_receiver_type(diagnostics)?;
+            if proven_type
+                .as_ref()
+                .is_some_and(|previous| *previous != ruby_type)
+            {
                 return Some(RubyType::Unknown);
             }
             proven_type = Some(ruby_type);
         }
-        proven_type.cloned()
+        proven_type
     }
 
     /// Return the proof failure attached to one exact Unknown expression.

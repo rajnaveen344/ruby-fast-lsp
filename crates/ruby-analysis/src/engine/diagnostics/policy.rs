@@ -7,10 +7,10 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 
+use crate::core::storage::reference_store::MethodCallSignature;
 use crate::core::{
     DiagnosticFact, DiagnosticSeverity, FullyQualifiedName, GraphEdgeKind, GraphNodeKind,
-    MethodCallSignatureCandidate, MethodParamFact, MethodParamKind, NamespaceKind, RubyConstant,
-    RubyMethod, TextRange,
+    MethodParamFact, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod, TextRange,
 };
 use crate::engine::lookup::{LookupUnknown, MethodAnswer};
 use crate::engine::Project;
@@ -413,7 +413,7 @@ impl MethodArity {
 }
 
 pub(in crate::engine) fn arity_mismatch(
-    signature: &MethodCallSignatureCandidate,
+    signature: &MethodCallSignature<'_>,
     arity: &MethodArity,
 ) -> Option<(usize, Option<usize>, usize)> {
     let min = arity.required;

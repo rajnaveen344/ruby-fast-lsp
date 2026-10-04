@@ -252,7 +252,9 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
                     preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: method_range,
-                        receiver_label: Some("User".to_string()),
+                        receiver_label: Some(crate::core::MethodReceiverLabel::Written(
+                            "User".to_string(),
+                        )),
                         receiver_expression_range: None,
                         receiver_type: None,
                         diagnose_unresolved: true,
@@ -368,7 +370,9 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
                     preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: method_range,
-                        receiver_label: Some("User".to_string()),
+                        receiver_label: Some(crate::core::MethodReceiverLabel::Written(
+                            "User".to_string(),
+                        )),
                         receiver_expression_range: None,
                         receiver_type: None,
                         diagnose_unresolved: true,

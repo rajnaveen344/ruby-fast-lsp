@@ -1,5 +1,5 @@
 use crate::core::{
-    FullyQualifiedName, MethodCallSignatureCandidate, MethodReferenceAccess,
+    FullyQualifiedName, MethodCallSignatureCandidate, MethodReceiverLabel, MethodReferenceAccess,
     MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate, RubyMethod,
 };
 use crate::invariant::ExpectInvariant;
@@ -70,7 +70,7 @@ impl FactCollector {
                     preferred_definition_range: None,
                     diagnostics: MethodReferenceDiagnostics {
                         diagnostic_range: range,
-                        receiver_label: Some("super".to_string()),
+                        receiver_label: Some(MethodReceiverLabel::Written("super".to_string())),
                         receiver_expression_range: None,
                         receiver_type: None,
                         diagnose_unresolved: self.options.diagnostics_enabled,

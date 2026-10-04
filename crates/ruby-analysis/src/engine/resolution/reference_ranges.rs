@@ -230,7 +230,7 @@ impl<'a> View<'a> {
         fact: &crate::core::ReferenceFact,
         protected_owner: &FullyQualifiedName,
     ) -> bool {
-        let Some(caller_id) = fact.caller else {
+        let Some(caller_id) = fact.caller() else {
             return false;
         };
         let Some(FullyQualifiedName::Method(parts, _method)) = self.engine.names.fqn(caller_id)

@@ -57,7 +57,7 @@ impl Project {
                 StoredReferenceCandidateRef::Resolved(candidate) => {
                     self.uses.add_resolved(
                         candidate.target,
-                        ReferenceFact::new(candidate.range, candidate.caller),
+                        ReferenceFact::new(candidate.range, candidate.caller()),
                     );
                 }
                 StoredReferenceCandidateRef::Constant(candidate) => {
@@ -105,10 +105,12 @@ impl Project {
                     }
                 }
                 StoredReferenceCandidateRef::Method(candidate) => {
-                    let deferred_receiver_range = candidate
-                        .diagnostics
-                        .as_deref()
-                        .and_then(|diagnostics| diagnostics.receiver_expression_range);
+                    let (method, access, caller) =
+                        (candidate.method(), candidate.access(), candidate.caller());
+                    let call_expression_range = candidate.call_expression_range();
+                    let diagnostics = candidate.diagnostics();
+                    let deferred_receiver_range =
+                        diagnostics.and_then(|diagnostics| diagnostics.receiver_expression_range());
                     let solved_receiver_type = deferred_receiver_range.and_then(|range| {
                         self.proven_deferred_receiver_type(range, &resolved_call_outcomes)
                     });
@@ -116,11 +118,8 @@ impl Project {
                         deferred_receiver_range.is_some_and(|range| {
                             self.deferred_receiver_is_unknown(range, &resolved_call_outcomes)
                         });
-                    let candidate_receiver_type = candidate
-                        .diagnostics
-                        .as_deref()
-                        .and_then(|diagnostics| diagnostics.receiver_type.as_deref())
-                        .cloned();
+                    let candidate_receiver_type = diagnostics
+                        .and_then(|diagnostics| self.names.method_receiver_type(diagnostics));
                     let effective_receiver_type = solved_receiver_type.or_else(|| {
                         (!receiver_is_explicitly_unknown)
                             .then_some(candidate_receiver_type)
@@ -135,7 +134,7 @@ impl Project {
                         }
                     }
                     if deferred_receiver_range.is_some() && effective_receiver_type.is_none() {
-                        if let Some(expression_range) = candidate.call_expression_range {
+                        if let Some(expression_range) = call_expression_range {
                             Self::insert_resolved_call_outcome(
                                 &mut resolved_call_outcomes,
                                 expression_range,
@@ -144,14 +143,12 @@ impl Project {
                         }
                         continue;
                     }
-                    let safe_navigation = candidate
-                        .diagnostics
-                        .as_deref()
-                        .is_some_and(|diagnostics| diagnostics.safe_navigation);
+                    let safe_navigation =
+                        diagnostics.is_some_and(|diagnostics| diagnostics.safe_navigation());
                     let Some((effective_receiver_type, nil_skips_dispatch)) =
                         Self::safe_navigation_receiver(
                             &mut resolved_call_outcomes,
-                            candidate.call_expression_range,
+                            call_expression_range,
                             safe_navigation,
                             effective_receiver_type,
                         )
@@ -165,51 +162,47 @@ impl Project {
                     if let Some(receiver_type) = grouped_receiver_type.as_ref() {
                         if let Some(callees) = self.resolve_grouped_method_callees(
                             receiver_type,
-                            candidate.method,
-                            candidate.access,
-                            candidate.caller,
+                            method,
+                            access,
+                            caller,
                         ) {
-                            let targets = grouped_method_targets(&callees, candidate.method);
+                            let targets = grouped_method_targets(&callees, method);
                             for target in targets {
                                 let target = self.names.intern_fqn(target);
                                 self.uses.add_resolved(
                                     target,
-                                    ReferenceFact::method(
-                                        candidate.range,
-                                        candidate.caller,
-                                        candidate.access,
-                                    ),
+                                    ReferenceFact::method(candidate.range, caller, access),
                                 );
                             }
-                            if let Some(diagnostics) = candidate.diagnostics.as_deref() {
+                            if let Some(diagnostics) = diagnostics {
                                 self.push_grouped_method_fact_diagnostics(
                                     &callees,
-                                    candidate.method,
+                                    method,
                                     diagnostics,
                                     &mut unresolved_constants,
                                 );
                             }
-                            if let Some(expression_range) = candidate.call_expression_range {
+                            if let Some(expression_range) = call_expression_range {
                                 Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     self.call_expression_outcome_from_grouped_resolution(
                                         &callees,
-                                        candidate.method,
+                                        method,
                                         &mut call_outcome_caches,
                                     ),
                                     nil_skips_dispatch,
                                 );
                             }
-                        } else if let Some(diagnostics) = candidate.diagnostics.as_deref() {
+                        } else if let Some(diagnostics) = diagnostics {
                             self.push_grouped_unresolved_method_diagnostic(
                                 receiver_type,
-                                candidate.method,
+                                method,
                                 diagnostics,
                                 &mut method_absence_claims,
                                 &mut unresolved_constants,
                             );
-                            if let Some(expression_range) = candidate.call_expression_range {
+                            if let Some(expression_range) = call_expression_range {
                                 Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
@@ -225,14 +218,12 @@ impl Project {
                     let (owner, owner_kind) = if let Some(receiver_type) =
                         effective_receiver_type.as_ref()
                     {
-                        let allow_unindexed_owner = candidate
-                            .diagnostics
-                            .as_deref()
-                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner);
+                        let allow_unindexed_owner = diagnostics
+                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner());
                         let Some(owner_fqn) =
                             self.proven_receiver_namespace(receiver_type, allow_unindexed_owner)
                         else {
-                            if let Some(expression_range) = candidate.call_expression_range {
+                            if let Some(expression_range) = call_expression_range {
                                 Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
@@ -257,29 +248,28 @@ impl Project {
                         ));
                         (owner, owner_kind)
                     } else {
-                        (candidate.owner, candidate.owner_kind)
+                        (candidate.owner(), candidate.owner_kind())
                     };
                     let owner_fqn = method_reference_owner_fqn(self, owner, owner_kind);
-                    let method_cache_key =
-                        (owner, owner_kind, candidate.method, candidate.is_super);
+                    let method_cache_key = (owner, owner_kind, method, candidate.is_super());
                     let reflects_instance =
-                        candidate.access == MethodReferenceAccess::InstanceMethodReflection;
+                        access == MethodReferenceAccess::InstanceMethodReflection;
                     let fact_cache_key = (method_cache_key, reflects_instance);
                     let cached = method_fact_cache.contains_key(&fact_cache_key);
                     let fact = method_fact_cache.entry(fact_cache_key).or_insert_with(|| {
                         let query = View::new(self);
-                        if candidate.is_super {
-                            query.resolve_super_method_reference(&owner_fqn, &candidate.method)
+                        if candidate.is_super() {
+                            query.resolve_super_method_reference(&owner_fqn, &method)
                         } else if reflects_instance {
                             query.resolve_instance_method_reference_with_chain_cache(
                                 &owner_fqn,
-                                &candidate.method,
+                                &method,
                                 &mut method_lookup_chain_cache,
                             )
                         } else {
                             query.resolve_method_reference_with_chain_cache(
                                 &owner_fqn,
-                                &candidate.method,
+                                &method,
                                 &mut method_lookup_chain_cache,
                             )
                         }
@@ -290,24 +280,24 @@ impl Project {
                         stats.increment(ResolveStat::MethodCacheMisses);
                     }
                     let mut fact = fact.clone();
-                    if candidate.access == MethodReferenceAccess::Normal
+                    if access == MethodReferenceAccess::Normal
                         && matches!(fact, MethodLookupResult::Ambiguous { .. })
                     {
                         if let Some(source_ordered) = View::new(self)
                             .source_ordered_top_level_method_reference(
                                 &owner_fqn,
-                                &candidate.method,
+                                &method,
                                 candidate.range,
                             )
                         {
                             fact = MethodLookupResult::Found(source_ordered);
                         }
                     }
-                    if let Some(expression_range) = candidate.call_expression_range {
+                    if let Some(expression_range) = call_expression_range {
                         let outcome = self.call_expression_outcome_from_method_resolution(
                             method_cache_key,
-                            candidate.access,
-                            candidate.caller,
+                            access,
+                            caller,
                             &method_lookup_chain_cache,
                             &fact,
                             &mut call_outcome_caches,
@@ -325,28 +315,22 @@ impl Project {
                         let target = self.names.intern_fqn(target);
                         self.uses.add_resolved(
                             target,
-                            ReferenceFact::method(
-                                candidate.range,
-                                candidate.caller,
-                                candidate.access,
-                            ),
+                            ReferenceFact::method(candidate.range, caller, access),
                         );
-                        if resolved_method == candidate.method {
-                            if let Some(diagnostics) = candidate.diagnostics.as_deref() {
+                        if resolved_method == method {
+                            if let Some(diagnostics) = diagnostics {
                                 if let Some(fact) = fact {
                                     self.push_unavailable_method_diagnostic(
                                         fact,
-                                        &candidate.method,
-                                        diagnostics.diagnostic_range,
+                                        &method,
+                                        diagnostics.diagnostic_range(),
                                         &mut unresolved_constants,
                                     );
                                     self.push_signature_diagnostics(
                                         fact,
                                         &owner_fqn,
-                                        &candidate.method,
-                                        diagnostics.signature.as_ref(),
-                                        diagnostics.receiver_label.as_deref(),
-                                        diagnostics.diagnostic_range,
+                                        &method,
+                                        diagnostics,
                                         &mut unresolved_constants,
                                     );
                                 }
@@ -358,66 +342,54 @@ impl Project {
                             .or_insert_with_key(|owner_fqn| {
                                 self.method_namespace_target_exists(owner_fqn)
                             });
-                        let allow_unindexed_owner = candidate
-                            .diagnostics
-                            .as_deref()
-                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner);
+                        let allow_unindexed_owner = diagnostics
+                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner());
                         if !namespace_exists && !allow_unindexed_owner {
                             continue;
                         }
-                        let target = FullyQualifiedName::method(
-                            owner_fqn.namespace_parts(),
-                            candidate.method,
-                        );
+                        let target =
+                            FullyQualifiedName::method(owner_fqn.namespace_parts(), method);
                         let target = self.names.intern_fqn(target);
                         self.uses.add_resolved(
                             target,
-                            ReferenceFact::method(
-                                candidate.range,
-                                candidate.caller,
-                                candidate.access,
-                            ),
+                            ReferenceFact::method(candidate.range, caller, access),
                         );
 
-                        if let Some(diagnostics) = candidate.diagnostics.as_deref() {
-                            if !diagnostics.diagnose_unresolved {
+                        if let Some(diagnostics) = diagnostics {
+                            if !diagnostics.diagnose_unresolved() {
                                 continue;
                             }
-                            if method_absence_claims.suppresses(self, &owner_fqn, candidate.method)
-                            {
+                            if method_absence_claims.suppresses(self, &owner_fqn, method) {
                                 continue;
                             }
                             let suggestion = namespace_exists
                                 .then(|| {
                                     method_suggestion_cache
-                                        .entry((owner_fqn.clone(), candidate.method))
+                                        .entry((owner_fqn.clone(), method))
                                         .or_insert_with(|| {
-                                            self.find_method_suggestion(
-                                                &owner_fqn,
-                                                candidate.method.as_str(),
-                                            )
+                                            self.find_method_suggestion(&owner_fqn, method.as_str())
                                         })
                                         .clone()
                                 })
                                 .flatten();
-                            let mut message = match &diagnostics.receiver_label {
+                            let mut message = match self.names.method_receiver_label(diagnostics) {
                                 Some(label) => format!(
                                     "Unresolved method `{}` on `{}`",
-                                    candidate.method.as_str(),
+                                    method.as_str(),
                                     label
                                 ),
                                 None => {
-                                    format!("Unresolved method `{}`", candidate.method.as_str())
+                                    format!("Unresolved method `{}`", method.as_str())
                                 }
                             };
                             if let Some(suggestion) = suggestion {
                                 message.push_str(&format!(". Did you mean `{}`?", suggestion));
                             }
                             unresolved_constants
-                                .entry(diagnostics.diagnostic_range.file_id)
+                                .entry(diagnostics.diagnostic_range().file_id)
                                 .or_default()
                                 .push(
-                                    UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range, message),
+                                    UNRESOLVED_METHOD.fact(diagnostics.diagnostic_range(), message),
                                 );
                         }
                     }

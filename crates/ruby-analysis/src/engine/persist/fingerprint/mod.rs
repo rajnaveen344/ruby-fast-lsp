@@ -417,7 +417,7 @@ impl View<'_> {
                     target,
                 )
             });
-            let caller = fact.caller.map(|caller| {
+            let caller = fact.caller().map(|caller| {
                 self.engine.names.fqn(caller).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "resolved reference caller {:?} has no interned FQN",
@@ -542,7 +542,7 @@ impl View<'_> {
                     target,
                 )
             });
-            let caller = fact.caller.map(|caller| {
+            let caller = fact.caller().map(|caller| {
                 self.engine.names.fqn(caller).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "per-file reference fingerprint caller {:?} has no interned FQN",

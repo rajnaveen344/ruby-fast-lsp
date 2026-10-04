@@ -6,9 +6,10 @@ use super::java_types::{display_java_signature, ruby_type_for_jvm};
 use super::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
-    FullyQualifiedName, MethodParamFact, MethodParamKind, MethodReferenceAccess,
-    MethodReferenceCandidate, MethodReferenceDiagnostics, NamespaceKind, ReferenceCandidate,
-    RubyConstant, RubyMethod, RubyType, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    FullyQualifiedName, MethodParamFact, MethodParamKind, MethodReceiverLabel,
+    MethodReferenceAccess, MethodReferenceCandidate, MethodReferenceDiagnostics, NamespaceKind,
+    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, TextRange, TypeFact, TypeProvenance,
+    TypeSubject,
 };
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_fast_lsp_jruby_support::syntax::static_symbol_or_string;
@@ -337,7 +338,7 @@ impl JrubyImportProvider {
                     .preferred_method_definition_range(&selected.owner, &selected.method),
                 diagnostics: MethodReferenceDiagnostics {
                     diagnostic_range: method_range,
-                    receiver_label: Some(proxy.to_string()),
+                    receiver_label: Some(MethodReceiverLabel::Written(proxy.to_string())),
                     receiver_expression_range: None,
                     receiver_type: None,
                     diagnose_unresolved: false,

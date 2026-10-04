@@ -4,7 +4,7 @@
 use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::reference_store::{
     ConstLookup, ReferenceCandidateStats, ReferenceCandidateStore, ReferenceFact, ReferenceStore,
-    StoredReferenceCandidate,
+    StoredMethodReferenceCandidate, StoredReferenceCandidate, StoredReferenceCandidateKind,
 };
 use crate::core::{FullyQualifiedName, ReferenceCandidate, ReferenceCandidateKind, SourceFileId};
 
@@ -139,7 +139,10 @@ fn intern_reference_candidates(
             } => {
                 let context = names.intern_fqn(FullyQualifiedName::namespace(current_namespace));
                 let lookup = names.intern_const_lookup(ConstLookup::new(parts, false, context));
-                StoredReferenceCandidate::constant(candidate.range, lookup)
+                StoredReferenceCandidate {
+                    range: candidate.range,
+                    kind: StoredReferenceCandidateKind::Constant { lookup },
+                }
             }
             ReferenceCandidateKind::Method {
                 owner,
@@ -155,7 +158,7 @@ fn intern_reference_candidates(
                 let root = names.intern_fqn(FullyQualifiedName::namespace(Vec::new()));
                 let owner = names.intern_const_lookup(ConstLookup::new(owner, true, root));
                 let caller = caller.map(|caller| names.intern_fqn(caller));
-                StoredReferenceCandidate::method(
+                let row = StoredMethodReferenceCandidate::new(
                     candidate.range,
                     owner,
                     owner_kind,
@@ -165,13 +168,21 @@ fn intern_reference_candidates(
                     caller,
                     call_expression_range,
                     preferred_definition_range,
-                    diagnostics,
-                )
+                    diagnostics.map(|diagnostics| *diagnostics),
+                    |fqn| names.intern_fqn(fqn),
+                );
+                StoredReferenceCandidate {
+                    range: candidate.range,
+                    kind: StoredReferenceCandidateKind::Method(row),
+                }
             }
             ReferenceCandidateKind::Resolved { target, caller } => {
                 let target = names.intern_fqn(target);
                 let caller = caller.map(|caller| names.intern_fqn(caller));
-                StoredReferenceCandidate::resolved(candidate.range, target, caller)
+                StoredReferenceCandidate {
+                    range: candidate.range,
+                    kind: StoredReferenceCandidateKind::Resolved { target, caller },
+                }
             }
         })
         .collect()

@@ -28,7 +28,9 @@ fn fixture() -> (Project, SourceFileId, TextRange, TextRange, FileAnalysis) {
                 preferred_definition_range: None,
                 diagnostics: MethodReferenceDiagnostics {
                     diagnostic_range: message,
-                    receiver_label: Some("NilClass".to_string()),
+                    receiver_label: Some(crate::core::MethodReceiverLabel::Written(
+                        "NilClass".to_string(),
+                    )),
                     receiver_expression_range: Some(receiver),
                     receiver_type: Some(Box::new(RubyType::nil_class())),
                     diagnose_unresolved: true,

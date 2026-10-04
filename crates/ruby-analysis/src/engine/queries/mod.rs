@@ -92,7 +92,7 @@ impl<'a> View<'a> {
             .uses
             .candidates()
             .method_candidates_in_file(file_id)
-            .filter(|candidate| candidate.method == method)
+            .filter(|candidate| candidate.method() == method)
         {
             if self
                 .method_candidate_callees(candidate)
@@ -123,17 +123,13 @@ impl<'a> View<'a> {
             if !candidate.range.contains_offset(file_id, byte_offset) {
                 continue;
             }
-            let StoredReferenceCandidateKind::Method {
-                owner,
-                owner_kind,
-                method,
-                is_super: false,
-                access: crate::core::MethodReferenceAccess::Normal,
-                ..
-            } = candidate.kind
-            else {
+            let StoredReferenceCandidateKind::Method(row) = &candidate.kind else {
                 continue;
             };
+            if row.is_super() || row.access() != crate::core::MethodReferenceAccess::Normal {
+                continue;
+            }
+            let (owner, owner_kind, method) = (row.owner(), row.owner_kind(), row.method());
             let owner = self.engine.names.const_lookup(owner).expect_invariant(
                 "module call has no interned owner",
                 "candidates retain owner identity",
@@ -198,29 +194,25 @@ impl<'a> View<'a> {
             .iter()
             .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
             .any(|candidate| {
-                let StoredReferenceCandidateKind::Method {
-                    method,
-                    access,
-                    call_expression_range: _,
-                    diagnostics,
-                    ..
-                } = &candidate.kind
-                else {
+                let StoredReferenceCandidateKind::Method(row) = &candidate.kind else {
                     return false;
                 };
-                if *access == crate::core::MethodReferenceAccess::InstanceMethodReflection
+                let method = row.method();
+                if row.access() == crate::core::MethodReferenceAccess::InstanceMethodReflection
                     && !exact_target_proven
                 {
                     // A failed namespace inspection must not fall back to
                     // ordinary calls on possible including objects.
                     return true;
                 }
-                let receiver_unknown = diagnostics.as_deref().is_some_and(|diagnostics| {
-                    diagnostics.receiver_expression_range.is_some_and(|range| {
-                        self.local_read_type_at(range.file_id, range.start_byte)
-                            == Some(RubyType::Unknown)
-                            || self.exact_expression_unknown_reason(range).is_some()
-                    })
+                let receiver_unknown = row.diagnostics().is_some_and(|diagnostics| {
+                    diagnostics
+                        .receiver_expression_range()
+                        .is_some_and(|range| {
+                            self.local_read_type_at(range.file_id, range.start_byte)
+                                == Some(RubyType::Unknown)
+                                || self.exact_expression_unknown_reason(range).is_some()
+                        })
                 });
                 let resolved_to_fallback = self
                     .engine
@@ -233,7 +225,7 @@ impl<'a> View<'a> {
                         matches!(
                             target,
                             FullyQualifiedName::Method(_, resolved_method)
-                                if resolved_method != method
+                                if *resolved_method != method
                         )
                     });
                 receiver_unknown || resolved_to_fallback

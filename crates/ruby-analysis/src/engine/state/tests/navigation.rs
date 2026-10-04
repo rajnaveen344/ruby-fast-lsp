@@ -457,7 +457,9 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
                     preferred_definition_range: Some(int_range),
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: reference_range,
-                        receiver_label: Some(owner.to_string()),
+                        receiver_label: Some(crate::core::MethodReceiverLabel::Written(
+                            owner.to_string(),
+                        )),
                         receiver_expression_range: None,
                         receiver_type: None,
                         diagnose_unresolved: false,
@@ -590,7 +592,9 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
                     preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: TextRange::new(ref_file, 5, 9),
-                        receiver_label: Some("User".to_string()),
+                        receiver_label: Some(crate::core::MethodReceiverLabel::Written(
+                            "User".to_string(),
+                        )),
                         receiver_expression_range: None,
                         receiver_type: None,
                         diagnose_unresolved: true,

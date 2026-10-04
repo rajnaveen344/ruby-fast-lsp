@@ -5,7 +5,6 @@ mod precedence;
 mod tests;
 
 use super::View;
-use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, ResolvedMethodCallee, RubyMethod, RubyType,
@@ -55,40 +54,17 @@ impl View<'_> {
             }
         }
         if let [candidate] = candidates.as_slice() {
-            if let StoredReferenceCandidateKind::Method {
-                owner,
-                owner_kind,
-                method,
-                is_super,
-                access,
-                caller,
-                call_expression_range,
-                preferred_definition_range,
-                diagnostics,
-            } = &candidate.kind
-            {
-                let candidate = StoredMethodReferenceCandidate {
-                    range: candidate.range,
-                    owner: *owner,
-                    owner_kind: *owner_kind,
-                    method: *method,
-                    is_super: *is_super,
-                    access: *access,
-                    caller: *caller,
-                    call_expression_range: *call_expression_range,
-                    preferred_definition_range: *preferred_definition_range,
-                    diagnostics: diagnostics.clone(),
-                };
+            if let StoredReferenceCandidateKind::Method(candidate) = &candidate.kind {
                 let mut lookup_chains = Vec::new();
                 let callees = self
-                    .method_candidate_callees_with_navigation(&candidate, Some(&mut lookup_chains));
+                    .method_candidate_callees_with_navigation(candidate, Some(&mut lookup_chains));
                 return self.rank_method_definitions(
                     callees
                         .into_iter()
-                        .filter(|callee| callee.method == candidate.method)
+                        .filter(|callee| callee.method == candidate.method())
                         .collect(),
                     &lookup_chains,
-                    candidate.preferred_definition_range,
+                    candidate.preferred_definition_range(),
                 );
             }
         }
@@ -104,7 +80,7 @@ impl View<'_> {
                         "intern the target before storing the candidate; keep the arena append-only",
                     )
                     .clone()],
-                StoredReferenceCandidateKind::Method { .. } => Vec::new(),
+                StoredReferenceCandidateKind::Method(_) => Vec::new(),
                 StoredReferenceCandidateKind::Constant { lookup } => {
                     let lookup = self.engine.names.const_lookup(lookup).expect_invariant(
                         "exact constant reference points to a missing lookup",

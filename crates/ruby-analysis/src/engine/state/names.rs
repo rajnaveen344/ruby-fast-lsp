@@ -9,8 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::core::names::fqn_id::{ConstLookupId, FqnId};
 use crate::core::storage::interner::SharedInterner;
 use crate::core::storage::memory_estimate::fqn_heap_bytes;
-use crate::core::storage::reference_store::ConstLookup;
-use crate::core::{ConstantPath, FullyQualifiedName, RubyConstant};
+use crate::core::storage::reference_store::{
+    ConstLookup, MethodCallDiagnostics, StoredReceiverLabel, StoredReceiverType,
+};
+use crate::core::{ConstantPath, FullyQualifiedName, RubyConstant, RubyType};
 
 #[derive(Debug, Default)]
 pub(in crate::engine) struct Names {
@@ -68,6 +70,33 @@ impl Names {
             "graph edges must only store interned FQN ids",
             "intern graph edge FQNs before inserting facts",
         )
+    }
+
+    /// Rebuild a method reference's stored receiver type.
+    pub(in crate::engine) fn receiver_type(&self, receiver: StoredReceiverType<'_>) -> RubyType {
+        receiver.expand(|id| self.expand_interned_fqn(id))
+    }
+
+    pub(in crate::engine) fn method_receiver_type(
+        &self,
+        diagnostics: MethodCallDiagnostics<'_>,
+    ) -> Option<RubyType> {
+        diagnostics
+            .receiver_type()
+            .map(|receiver| self.receiver_type(receiver))
+    }
+
+    /// The receiver text an unresolved-method message names.
+    pub(in crate::engine) fn method_receiver_label(
+        &self,
+        diagnostics: MethodCallDiagnostics<'_>,
+    ) -> Option<String> {
+        match diagnostics.receiver_label()? {
+            StoredReceiverLabel::Text(text) => Some(text.to_string()),
+            StoredReceiverLabel::ReceiverType => self
+                .method_receiver_type(diagnostics)
+                .map(|ruby_type| ruby_type.to_string()),
+        }
     }
 
     pub(in crate::engine) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {
