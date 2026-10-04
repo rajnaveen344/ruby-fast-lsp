@@ -29,9 +29,9 @@ fn new_orphan_project() -> ProjectHandle {
         crate::loader::file_processor::FileProcessor::new(),
         None,
     )
-    .index_core_runtime_constants(None, project.load_target())
+    .index_bundled_core_signatures(None, project.load_target())
     .expect_invariant(
-        "the orphan engine could not seed embedded Ruby core runtime constants",
+        "the orphan engine could not seed embedded Ruby core signatures",
         "loose files require the same universal constant facts as project engines",
         "keep the embedded core RBS overlay parseable and register it before orphan documents",
     );

@@ -23,6 +23,18 @@ impl<'a> Visitor<'a> {
                 "member" => {
                     self.visit_members(child, members, methods)?;
                 }
+                "class_decl"
+                | "module_decl"
+                | "interface_decl"
+                | "type_alias_decl"
+                | "const_decl"
+                | "class_declaration"
+                | "module_declaration"
+                | "interface_declaration"
+                | "type_alias_declaration"
+                | "constant_declaration" => {
+                    self.visit_declaration(child)?;
+                }
                 "method_definition" | "method_member" | "method" => {
                     let method = self.visit_method_definition(child)?;
                     methods.push(method);

@@ -23,6 +23,7 @@ function fixture(t) {
   const root = path.join(temporary, 'source');
   const destination = path.join(temporary, 'package');
   write(root, 'crates/rbs-parser/rbs_types/core/constants.rbs', 'RUBY_ENGINE: String\n');
+  write(root, 'crates/rbs-parser/rbs_types/core/rubygems/version.rbs', 'module Gem\nend\n');
   fs.cpSync(path.join(REPOSITORY_ROOT, 'support/jruby/decompiler'),
     path.join(root, 'support/jruby/decompiler'), { recursive: true });
   for (const series of STUB_SERIES) {
@@ -63,6 +64,13 @@ test('missing core constants are rejected before touching the package', t => {
   assert.equal(fs.existsSync(options.destination), false);
 });
 
+test('missing RubyGems signatures are rejected before touching the package', t => {
+  const options = fixture(t);
+  fs.rmSync(path.join(options.root, 'crates/rbs-parser/rbs_types/core/rubygems'), { recursive: true });
+  assert.throws(() => stagePackageAssets({ ...options, kind: 'npm' }), /rubygems/);
+  assert.equal(fs.existsSync(options.destination), false);
+});
+
 test('missing CFR license is rejected before touching the package', t => {
   const options = fixture(t);
   fs.rmSync(path.join(options.root, 'support/jruby/decompiler/LICENSE-CFR'));
@@ -89,7 +97,7 @@ test('npm stages exact core, CFR, and RSpec package bytes and preserves the plat
   const decompilerSource = path.join(options.root, 'support/jruby/decompiler');
   const decompilerFiles = files(decompilerSource);
   assert.deepEqual(files(options.destination), [
-    'bin/ruby-fast-lsp', 'core-rbs/constants.rbs',
+    'bin/ruby-fast-lsp', 'core-rbs/constants.rbs', 'core-rbs/rubygems/version.rbs',
     ...decompilerFiles.map(name => `jruby-decompiler/${name}`),
     ...['extension.toml', 'README.md', WASM_PATH].map(name => `extensions/rspec-ruby/${name}`),
   ].sort());
@@ -99,6 +107,8 @@ test('npm stages exact core, CFR, and RSpec package bytes and preserves the plat
   }
   assert.deepEqual(fs.readFileSync(path.join(options.destination, 'core-rbs/constants.rbs')),
     fs.readFileSync(path.join(options.root, 'crates/rbs-parser/rbs_types/core/constants.rbs')));
+  assert.deepEqual(fs.readFileSync(path.join(options.destination, 'core-rbs/rubygems/version.rbs')),
+    fs.readFileSync(path.join(options.root, 'crates/rbs-parser/rbs_types/core/rubygems/version.rbs')));
   for (const name of decompilerFiles) {
     assert.deepEqual(fs.readFileSync(path.join(options.destination, 'jruby-decompiler', name)),
       fs.readFileSync(path.join(decompilerSource, name)), name);
@@ -128,6 +138,7 @@ test('VSIX includes all required overlays and only manifest, README and declared
     }
   }
   assert.ok(fs.existsSync(path.join(options.destination, 'core-rbs/constants.rbs')));
+  assert.ok(fs.existsSync(path.join(options.destination, 'core-rbs/rubygems/version.rbs')));
   assert.ok(fs.existsSync(path.join(options.destination, 'jruby-decompiler/LICENSE-CFR')));
 });
 

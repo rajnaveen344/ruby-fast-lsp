@@ -20,13 +20,18 @@ impl<'a> Visitor<'a> {
                     self.visit_declaration(child)?;
                 }
             }
+            // Nested declarations are flattened after their enclosing one,
+            // so a namespace always precedes its members.
             "class_declaration" | "class_decl" => {
+                let position = self.declarations.len();
                 let decl = self.visit_class_declaration(node)?;
-                self.declarations.push(Declaration::Class(decl));
+                self.declarations.insert(position, Declaration::Class(decl));
             }
             "module_declaration" | "module_decl" => {
+                let position = self.declarations.len();
                 let decl = self.visit_module_declaration(node)?;
-                self.declarations.push(Declaration::Module(decl));
+                self.declarations
+                    .insert(position, Declaration::Module(decl));
             }
             "interface_declaration" | "interface_decl" => {
                 let decl = self.visit_interface_declaration(node)?;
@@ -59,12 +64,8 @@ impl<'a> Visitor<'a> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "class_name" => {
-                    // class_name contains a constant child
-                    class.name = self.extract_name(&child);
-                }
-                "namespace" => {
-                    class.name = self.node_text(&child).to_string();
+                "class_name" | "namespace" => {
+                    class.name = self.qualified_name(&child);
                 }
                 "type_parameters" | "module_type_parameters" => {
                     class.type_params = self.visit_type_parameters(child)?;
@@ -73,7 +74,10 @@ impl<'a> Visitor<'a> {
                     class.superclass = Some(self.visit_member_target(child)?);
                 }
                 "members" | "class_body" => {
-                    self.visit_members(child, &mut class.members, &mut class.methods)?;
+                    let outer = self.enter_namespace(&class.name);
+                    let visited = self.visit_members(child, &mut class.members, &mut class.methods);
+                    self.leave_namespace(outer);
+                    visited?;
                 }
                 _ => {}
             }
@@ -106,7 +110,7 @@ impl<'a> Visitor<'a> {
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "module_name" | "namespace" => {
-                    module.name = self.node_text(&child).to_string();
+                    module.name = self.qualified_name(&child);
                 }
                 "type_parameters" | "module_type_parameters" => {
                     module.type_params = self.visit_type_parameters(child)?;
@@ -115,7 +119,11 @@ impl<'a> Visitor<'a> {
                     module.self_types = self.visit_self_types(child)?;
                 }
                 "members" | "module_body" => {
-                    self.visit_members(child, &mut module.members, &mut module.methods)?;
+                    let outer = self.enter_namespace(&module.name);
+                    let visited =
+                        self.visit_members(child, &mut module.members, &mut module.methods);
+                    self.leave_namespace(outer);
+                    visited?;
                 }
                 _ => {}
             }
@@ -137,7 +145,7 @@ impl<'a> Visitor<'a> {
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "interface_name" => {
-                    interface.name = self.node_text(&child).to_string();
+                    interface.name = self.qualified_name(&child);
                 }
                 "type_parameters" => {
                     interface.type_params = self.visit_type_parameters(child)?;
@@ -166,7 +174,7 @@ impl<'a> Visitor<'a> {
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "alias_name" | "type_alias_name" => {
-                    alias.name = self.node_text(&child).to_string();
+                    alias.name = self.qualified_name(&child);
                 }
                 "type_parameters" => {
                     alias.type_params = self.visit_type_parameters(child)?;
@@ -195,7 +203,7 @@ impl<'a> Visitor<'a> {
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "constant" | "constant_name" | "const_name" => {
-                    constant.name = self.node_text(&child).to_string();
+                    constant.name = self.qualified_name(&child);
                 }
                 _ => {
                     if let Ok(t) = self.visit_type(child) {

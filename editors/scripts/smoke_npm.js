@@ -75,6 +75,10 @@ if (!fs.existsSync(cfrJar) || !fs.existsSync(cfrLicense)) {
 if (!fs.existsSync(coreRuntimeConstants)) {
     throw new Error(`npm platform package is missing core runtime RBS: ${coreRuntimeConstants}`);
 }
+const rubygemsSignatures = path.join(path.dirname(coreRuntimeConstants), 'rubygems', 'specification.rbs');
+if (!fs.existsSync(rubygemsSignatures)) {
+    throw new Error(`npm platform package is missing RubyGems core RBS: ${rubygemsSignatures}`);
+}
 const cfrSha256 = crypto.createHash('sha256').update(fs.readFileSync(cfrJar)).digest('hex');
 if (cfrSha256 !== 'f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2') {
     throw new Error(`npm platform CFR checksum mismatch: ${cfrSha256}`);

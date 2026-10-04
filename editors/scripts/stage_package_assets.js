@@ -109,6 +109,9 @@ function stagePackageAssets({ root, destination, kind }) {
     name: 'core-rbs/constants.rbs',
     bytes: readAsset(sourceRoot, 'crates/rbs-parser/rbs_types/core/constants.rbs'),
   }];
+  // RubyGems signatures are declared at boot; stage them as navigation targets.
+  assets.push(...readDirectory(sourceRoot, 'crates/rbs-parser/rbs_types/core/rubygems')
+    .map(file => ({ ...file, name: path.join('core-rbs', 'rubygems', file.name) })));
   const decompiler = readDirectory(sourceRoot, 'support/jruby/decompiler');
   // Validate required files explicitly, even if other files exist in this directory.
   readAsset(sourceRoot, 'support/jruby/decompiler/LICENSE-CFR');

@@ -26,6 +26,8 @@ mod runtime_paths;
 pub(crate) use runtime_paths::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
 
 const CORE_RUNTIME_CONSTANTS_RBS: &str = "constants.rbs";
+/// Embedded signatures for libraries Ruby loads before user code runs.
+const CORE_BOOT_SIGNATURES_PREFIX: &str = "rubygems/";
 
 // ============================================================================
 // IndexerStdlib
@@ -150,7 +152,7 @@ impl IndexerStdlib {
                 stub_files.sort();
                 if stub_files.is_empty() {
                     warn!("No stub files found in: {:?}", stubs_dir);
-                    self.index_core_runtime_constants(Some(&stubs_dir), analysis_engine.clone())?;
+                    self.index_bundled_core_signatures(Some(&stubs_dir), analysis_engine.clone())?;
                     analysis_engine.resolve();
                     return Ok(());
                 }
@@ -161,7 +163,7 @@ impl IndexerStdlib {
                     stubs_dir
                 );
 
-                self.index_core_runtime_constants(Some(&stubs_dir), analysis_engine.clone())?;
+                self.index_bundled_core_signatures(Some(&stubs_dir), analysis_engine.clone())?;
                 self.index_stub_files_deterministically(&stub_files, analysis_engine.clone())?;
                 self.index_jruby_overlay_stubs(analysis_engine.clone())?;
 
@@ -172,7 +174,7 @@ impl IndexerStdlib {
 
         // Fall back to finding stubs relative to executable (development path)
         let Some(stubs_path) = self.find_core_stubs_path(version) else {
-            self.index_core_runtime_constants(None, analysis_engine.clone())?;
+            self.index_bundled_core_signatures(None, analysis_engine.clone())?;
             analysis_engine.resolve();
             return Ok(());
         };
@@ -186,7 +188,7 @@ impl IndexerStdlib {
             return Ok(());
         }
 
-        self.index_core_runtime_constants(Some(&stubs_path), analysis_engine.clone())?;
+        self.index_bundled_core_signatures(Some(&stubs_path), analysis_engine.clone())?;
         self.index_stub_files_deterministically(&stub_files, analysis_engine.clone())?;
         self.index_jruby_overlay_stubs(analysis_engine.clone())?;
         info!("Indexed {} core stub files", stub_files.len());
@@ -194,29 +196,45 @@ impl IndexerStdlib {
         Ok(())
     }
 
-    pub(crate) fn index_core_runtime_constants(
+    /// Commit the embedded core signatures every Ruby process sees: runtime
+    /// constants and RubyGems, which Ruby loads at boot. They need no runtime,
+    /// so loose files and runtime-less projects keep the same declarations.
+    pub(crate) fn index_bundled_core_signatures(
         &self,
         stubs_path: Option<&Path>,
         analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
-        let content = rbs_parser::core_rbs_file(CORE_RUNTIME_CONSTANTS_RBS).ok_or_else(|| {
+        let constants = rbs_parser::core_rbs_file(CORE_RUNTIME_CONSTANTS_RBS).ok_or_else(|| {
             anyhow!(
                 "invariant violated: embedded Ruby core RBS lacks {CORE_RUNTIME_CONSTANTS_RBS} — bug: runtime constants need a version-independent proof source — fix: keep crates/rbs-parser/rbs_types/core/{CORE_RUNTIME_CONSTANTS_RBS} embedded and exported"
             )
         })?;
-        let path = self.core_runtime_constants_path(stubs_path);
-        analysis_engine.commit_signature_source(path, content, |file_id| {
-            ruby_analysis::indexer::index_rbs(file_id, content).map_err(|error| {
-                anyhow!(
-                    "invariant violated: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error} — bug: bundled language semantics must produce valid facts — fix: validate vendored RBS updates before embedding"
-                )
-            })
-        })
+        let boot_signatures = rbs_parser::core_rbs_files()
+            .filter(|(name, _)| name.starts_with(CORE_BOOT_SIGNATURES_PREFIX))
+            .collect::<Vec<_>>();
+        if boot_signatures.is_empty() {
+            return Err(anyhow!(
+                "invariant violated: embedded Ruby core RBS lacks {CORE_BOOT_SIGNATURES_PREFIX} signatures — bug: Ruby loads RubyGems at boot, so `Gem` would be unresolved everywhere — fix: keep crates/rbs-parser/rbs_types/core/{CORE_BOOT_SIGNATURES_PREFIX} embedded"
+            ));
+        }
+        for (name, content) in
+            std::iter::once((CORE_RUNTIME_CONSTANTS_RBS, constants)).chain(boot_signatures)
+        {
+            let path = self.bundled_core_signature_path(stubs_path, name);
+            analysis_engine.commit_signature_source(path, content, |file_id| {
+                ruby_analysis::indexer::index_rbs(file_id, content).map_err(|error| {
+                    anyhow!(
+                        "invariant violated: embedded Ruby core RBS {name} failed to parse: {error} — bug: bundled language semantics must produce valid facts — fix: validate vendored RBS updates before embedding"
+                    )
+                })
+            })?;
+        }
+        Ok(())
     }
 
-    fn core_runtime_constants_path(&self, stubs_path: Option<&Path>) -> PathBuf {
+    fn bundled_core_signature_path(&self, stubs_path: Option<&Path>, name: &str) -> PathBuf {
         if let Some(path) = stubs_path
-            .map(|path| path.join(CORE_RUNTIME_CONSTANTS_RBS))
+            .map(|path| path.join(name))
             .filter(|path| path.is_file())
         {
             return path;
@@ -225,7 +243,7 @@ impl IndexerStdlib {
         if let Some(path) = self
             .extension_path
             .as_ref()
-            .map(|path| path.join("core-rbs").join(CORE_RUNTIME_CONSTANTS_RBS))
+            .map(|path| path.join("core-rbs").join(name))
             .filter(|path| path.is_file())
         {
             return path;
@@ -236,7 +254,7 @@ impl IndexerStdlib {
             .join("rbs-parser")
             .join("rbs_types")
             .join("core")
-            .join(CORE_RUNTIME_CONSTANTS_RBS);
+            .join(name);
         if development_path.is_file() {
             return development_path;
         }
@@ -245,15 +263,13 @@ impl IndexerStdlib {
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| PathBuf::from("."));
-        let adjacent = executable_dir
-            .join("core-rbs")
-            .join(CORE_RUNTIME_CONSTANTS_RBS);
+        let adjacent = executable_dir.join("core-rbs").join(name);
         if adjacent.is_file() {
             return adjacent;
         }
         executable_dir
             .parent()
-            .map(|parent| parent.join("core-rbs").join(CORE_RUNTIME_CONSTANTS_RBS))
+            .map(|parent| parent.join("core-rbs").join(name))
             .filter(|path| path.is_file())
             .unwrap_or(adjacent)
     }
