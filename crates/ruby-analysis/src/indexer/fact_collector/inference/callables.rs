@@ -1,7 +1,7 @@
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason};
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::utf8_str;
-use crate::inference::higher_order::{block_parameter_names, KnownProcType};
+use crate::inference::higher_order::{block_parameter_names, call_site, KnownProcType};
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::type_tracker::TypeTracker;
@@ -22,27 +22,25 @@ impl FactCollector {
                 self.infer_type_from_value_with_locals(&receiver, local_types),
             )
         });
-        if receiver_type.as_ref().is_some_and(|receiver| {
-            receiver == &RubyType::Unknown || RubyType::contains_unknown(receiver)
-        }) {
-            return Err(UnknownReason::IncompleteBlockInput);
-        }
-        let argument_types = call_node
-            .arguments()
-            .map(|arguments| {
-                arguments
-                    .arguments()
-                    .iter()
-                    .map(|argument| self.infer_type_from_value_with_locals(&argument, local_types))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
-        self.semantics.project.prepare_higher_order_call(
+        call_site::prepare_call(
+            Some(self.semantics.project.as_ref()),
             receiver_type.as_ref(),
-            &namespace,
+            &FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack()),
             &method_name,
-            &argument_types,
+            || {
+                call_node
+                    .arguments()
+                    .map(|arguments| {
+                        arguments
+                            .arguments()
+                            .iter()
+                            .map(|argument| {
+                                self.infer_type_from_value_with_locals(&argument, local_types)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            },
         )
     }
 
@@ -71,28 +69,10 @@ impl FactCollector {
                 ));
             }
             let parameter_types = prepared.block_parameter_types().to_vec();
-            let parameter_names = block_parameter_names(&block);
+            let tracked_parameters =
+                prepared.block_parameter_bindings(&block_parameter_names(&block));
             let mut block_locals = local_types.clone();
-            for (index, name) in parameter_names.iter().enumerate() {
-                let parameter_type = parameter_types
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_else(RubyType::nil_class);
-                block_locals.insert(name.clone(), parameter_type);
-            }
-            let tracked_parameters = parameter_names
-                .iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    (
-                        name.clone(),
-                        parameter_types
-                            .get(index)
-                            .cloned()
-                            .unwrap_or_else(RubyType::nil_class),
-                    )
-                })
-                .collect::<Vec<_>>();
+            block_locals.extend(tracked_parameters.iter().cloned());
             let mut tracker = TypeTracker::new().with_semantics(self.semantics.project.clone());
             let namespace = self.scope_tracker.get_ns_stack();
             if !namespace.is_empty() {
@@ -116,50 +96,19 @@ impl FactCollector {
                 UnknownReason::UnsupportedCallable,
             ));
         };
-        let Some(expression) = block_argument.expression() else {
-            return Some(TypeInferenceOutcome::unknown(
-                UnknownReason::UnsupportedCallable,
-            ));
-        };
-        if let Some(symbol) = expression.as_symbol_node() {
-            let target = std::str::from_utf8(symbol.unescaped()).ok()?;
-            return Some(
-                prepared.finish_static_method(target, |receiver_type, target| {
-                    self.resolve_method_return_type_outcome_with_private(
-                        receiver_type,
-                        target,
-                        false,
-                    )
-                }),
-            );
-        }
-        let callable = if let Some(local) = expression.as_local_variable_read_node() {
-            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-            self.flow.local_callables.get(&name).cloned().map(Ok)
-        } else {
-            self.constant_callable_body_for_node(&expression)
-                .map(|result| result.map(KnownProcType::constant))
-        };
-        Some(callable.map_or_else(
-            || TypeInferenceOutcome::unknown(UnknownReason::UnsupportedCallable),
-            |callable| match callable {
-                Err(reason) => TypeInferenceOutcome::unknown(reason),
-                Ok(callable) => self.flow.local_callables.finish_block_argument(
-                    prepared,
-                    &callable,
-                    &|capture| {
-                        self.local_capture_type(capture, local_types, &expression.location())
-                    },
-                    &|receiver, method| {
-                        self.resolve_method_return_type_outcome_with_private(
-                            receiver,
-                            method.as_str(),
-                            false,
-                        )
-                    },
-                ),
+        let location = block_argument.expression().map_or_else(
+            || block_argument.location(),
+            |expression| expression.location(),
+        );
+        self.flow.local_callables.finish_block_argument_node(
+            prepared,
+            &block_argument,
+            |expression| self.constant_callable_body_for_node(expression),
+            &|capture| self.local_capture_type(capture, local_types, &location),
+            &|receiver, method| {
+                self.resolve_method_return_type_outcome_with_private(receiver, method, false)
             },
-        ))
+        )
     }
 
     pub(in crate::indexer::fact_collector) fn infer_yielding_block_return_type_for_call(
@@ -268,14 +217,13 @@ impl FactCollector {
             return None;
         }
         let receiver = call_node.receiver()?;
-        let callable = if let Some(local) = receiver.as_local_variable_read_node() {
-            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-            self.flow.local_callables.get(&name)?.clone()
-        } else {
-            match self.constant_callable_body_for_node(&receiver)? {
-                Ok(summary) => KnownProcType::constant(summary),
-                Err(reason) => return Some(TypeInferenceOutcome::unknown(reason)),
-            }
+        let callable = match self
+            .flow
+            .local_callables
+            .callable_for(&receiver, |node| self.constant_callable_body_for_node(node))?
+        {
+            Ok(callable) => callable,
+            Err(reason) => return Some(TypeInferenceOutcome::unknown(reason)),
         };
         let argument_types = call_node
             .arguments()

@@ -1,6 +1,6 @@
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
 use crate::inference::control_flow;
-use crate::inference::higher_order::{block_parameter_names, KnownProcType};
+use crate::inference::higher_order::{block_parameter_names, call_site};
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::TypeTracker;
@@ -63,45 +63,32 @@ impl TypeTracker {
         let receiver_type = call.receiver().map(|receiver| {
             project_immediate_hash_receiver_type(&receiver, self.infer_expression(&receiver))
         });
-        if receiver_type.as_ref().is_some_and(|receiver| {
-            receiver == &RubyType::Unknown || RubyType::contains_unknown(receiver)
-        }) {
-            return None;
-        }
-        let argument_types = call
-            .arguments()
-            .map(|arguments| {
-                arguments
-                    .arguments()
-                    .iter()
-                    .map(|argument| self.track_node(&argument))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let prepared_result = if let Some(project) = &self.analysis.project {
-            let namespace = FullyQualifiedName::namespace(
-                self.context
-                    .class
-                    .as_ref()
-                    .map(FullyQualifiedName::namespace_parts)
-                    .unwrap_or_default(),
-            );
-            project.prepare_higher_order_call(
-                receiver_type.as_ref(),
-                &namespace,
-                method_name,
-                &argument_types,
-            )
-        } else {
-            crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-                None::<&dyn crate::inference::semantics::Semantics>,
-                receiver_type.as_ref(),
-                None,
-                method_name,
-                &argument_types,
-            )
-        };
-        let prepared = prepared_result.ok()?;
+        let namespace = FullyQualifiedName::namespace(
+            self.context
+                .class
+                .as_ref()
+                .map(FullyQualifiedName::namespace_parts)
+                .unwrap_or_default(),
+        );
+        let project = self.analysis.project.clone();
+        let prepared = call_site::prepare_call(
+            project.as_deref(),
+            receiver_type.as_ref(),
+            &namespace,
+            method_name,
+            || {
+                call.arguments()
+                    .map(|arguments| {
+                        arguments
+                            .arguments()
+                            .iter()
+                            .map(|argument| self.track_node(&argument))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            },
+        )
+        .ok()?;
         if let Some(block) = block_expression.as_block_node() {
             if block
                 .body()
@@ -110,34 +97,31 @@ impl TypeTracker {
             {
                 return None;
             }
-            let parameter_types = prepared.block_parameter_types().to_vec();
-            let parameter_names = block_parameter_names(&block);
+            let parameter_bindings =
+                prepared.block_parameter_bindings(&block_parameter_names(&block));
             let environment_before = self.environment.clone();
             let explicit_return_count = self.returns.explicit_values.len();
-            for (index, name) in parameter_names.iter().enumerate() {
-                let parameter_type = parameter_types
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_else(RubyType::nil_class);
-                if type_is_shape_only(&parameter_type) {
+            for (name, parameter_type) in &parameter_bindings {
+                if type_is_shape_only(parameter_type) {
                     let identity = self.allocate_shape_identity(parameter_type.clone());
                     self.environment.bind_shape_identities(
                         name.clone(),
-                        parameter_type,
+                        parameter_type.clone(),
                         BTreeSet::from([identity]),
                     );
                 } else {
-                    self.environment.insert(name.clone(), parameter_type);
+                    self.environment
+                        .insert(name.clone(), parameter_type.clone());
                 }
             }
             let block_return_type = block
                 .body()
                 .map(|body| self.track_node(&body))
                 .unwrap_or_else(RubyType::nil_class);
-            let post_block_parameter_types = parameter_names
+            let post_block_parameter_types = parameter_bindings
                 .iter()
-                .zip(&parameter_types)
-                .map(|(name, original)| {
+                .zip(prepared.block_parameter_types())
+                .map(|((name, _), original)| {
                     let identities = self.environment.shape_identities(name);
                     if identities.is_empty() {
                         original.clone()
@@ -155,34 +139,15 @@ impl TypeTracker {
         }
 
         let block_argument = block_expression.as_block_argument_node()?;
-        let expression = block_argument.expression()?;
-        if let Some(symbol) = expression.as_symbol_node() {
-            let target = std::str::from_utf8(symbol.unescaped()).ok()?;
-            return prepared
-                .finish_static_method(target, |receiver_type, target| {
-                    self.resolve_static_method_return_outcome(receiver_type, target)
-                })
-                .into_proven_type();
-        }
-        let callable = if let Some(local) = expression.as_local_variable_read_node() {
-            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-            self.environment.callables.get(&name)?.clone()
-        } else {
-            match self.constant_callable_body_for_node(&expression)? {
-                Ok(summary) => KnownProcType::constant(summary),
-                Err(_) => return None,
-            }
-        };
         self.environment
             .callables
-            .finish_block_argument(
+            .finish_block_argument_node(
                 prepared,
-                &callable,
+                &block_argument,
+                |expression| self.constant_callable_body_for_node(expression),
                 &|capture| self.environment.types.get(capture).cloned(),
-                &|receiver, method| {
-                    self.resolve_static_method_return_outcome(receiver, method.as_str())
-                },
-            )
+                &|receiver, method| self.resolve_static_method_return_outcome(receiver, method),
+            )?
             .into_proven_type()
     }
 
@@ -195,15 +160,11 @@ impl TypeTracker {
             return None;
         }
         let receiver = call.receiver()?;
-        let callable = if let Some(local) = receiver.as_local_variable_read_node() {
-            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-            self.environment.callables.get(&name)?.clone()
-        } else {
-            match self.constant_callable_body_for_node(&receiver)? {
-                Ok(summary) => KnownProcType::constant(summary),
-                Err(_) => return None,
-            }
-        };
+        let callable = self
+            .environment
+            .callables
+            .callable_for(&receiver, |node| self.constant_callable_body_for_node(node))?
+            .ok()?;
         let argument_types = call
             .arguments()
             .map(|arguments| {

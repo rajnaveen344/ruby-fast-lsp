@@ -5,6 +5,7 @@
 //! argument types, infers one block body using the returned parameter types,
 //! and then supplies the exhaustive block result to finish substitution.
 
+pub(crate) mod call_site;
 mod local_callables;
 
 pub(crate) use local_callables::{block_parameter_names, LocalCallables};

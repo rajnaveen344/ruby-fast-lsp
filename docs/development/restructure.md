@@ -997,9 +997,19 @@ Delete this file when the last task is done. Git history keeps the record.
         in-progress file facts (visibility overrides, local superclass
         edges), the tracker the solved snapshot; both fall through to the
         shared `receiver_method_return_type`.
-  - [ ] D2e. Evaluate the collector consuming expression evidence the
-        tracker recorded instead of re-deriving it. Land only if dependency
-        collection and core indexing do not regress beyond noise.
+  - [x] D2e. One higher-order call site in
+        `higher_order::call_site`: signature preparation (an unproven
+        receiver stops before the arguments are typed), block parameter
+        binding, and `&expression` finishing (`&:method`, local or constant
+        callables). Each walk keeps its own block-body evaluation: the
+        collector runs an isolated tracker, the tracker binds into its live
+        environment.
+  - [ ] D2f. Evaluated, not landed: the collector consuming expression
+        evidence the tracker recorded instead of re-deriving it. Dependency
+        sources run without the tracker and declarations (constant and ivar
+        values) are typed outside method bodies, so the collector's
+        derivation stays; reading recorded evidence would add a second path
+        and per-call storage without removing code.
 - [ ] D3. Rewrite `src/ARCHITECTURE.md`, the analysis README, and `AGENTS.md`
       ownership tables to match the final layout. Remove this plan.
 
