@@ -16,9 +16,9 @@ pub enum ConstantTypeProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConstantTypeDependency {
-    pub parts: Vec<RubyConstant>,
+    pub parts: Box<[RubyConstant]>,
     pub absolute: bool,
-    pub lexical_context: Vec<RubyConstant>,
+    pub lexical_context: Box<[RubyConstant]>,
     projection: ConstantTypeProjection,
 }
 
@@ -35,9 +35,9 @@ impl ConstantTypeDependency {
             fix = "construct dependencies only from validated Prism constant nodes",
         );
         Self {
-            parts,
+            parts: parts.into_boxed_slice(),
             absolute,
-            lexical_context,
+            lexical_context: lexical_context.into_boxed_slice(),
             projection: ConstantTypeProjection::Value,
         }
     }
@@ -73,14 +73,15 @@ pub enum ConstantTypeTarget {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ConstantTypeEquation {
     target: ConstantTypeTarget,
-    dependencies: BTreeSet<ConstantTypeDependency>,
+    /// Sorted and unique.
+    dependencies: Box<[ConstantTypeDependency]>,
 }
 
 impl ConstantTypeEquation {
     pub fn dependency(target: ConstantTypeTarget, dependency: ConstantTypeDependency) -> Self {
         Self {
             target,
-            dependencies: BTreeSet::from([dependency]),
+            dependencies: Box::new([dependency]),
         }
     }
 
@@ -96,7 +97,7 @@ impl ConstantTypeEquation {
         );
         Self {
             target,
-            dependencies,
+            dependencies: dependencies.into_iter().collect(),
         }
     }
 
@@ -104,7 +105,7 @@ impl ConstantTypeEquation {
         &self.target
     }
 
-    pub fn dependencies(&self) -> &BTreeSet<ConstantTypeDependency> {
+    pub fn dependencies(&self) -> &[ConstantTypeDependency] {
         &self.dependencies
     }
 }

@@ -33,7 +33,7 @@ fn resolve_constant_dependency(
     let context = if dependency.absolute {
         &[][..]
     } else {
-        dependency.lexical_context.as_slice()
+        &dependency.lexical_context
     };
     let resolved = query.resolve_constant_in_context(&dependency.parts, context)?;
     let constant = FullyQualifiedName::constant(resolved.namespace_parts());

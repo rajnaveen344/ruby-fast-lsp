@@ -9,7 +9,8 @@ use std::mem::size_of;
 
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, ruby_type_heap_bytes};
 use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, RubyType, TypeInferenceOutcome, UnknownReason,
+    ConstantTypeDependency, FullyQualifiedName, RubyConstant, RubyType, TypeInferenceOutcome,
+    UnknownReason,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,8 +28,10 @@ pub(crate) enum MethodReturnBase {
 pub struct MethodReturnEquation {
     method: FullyQualifiedName,
     base: MethodReturnBase,
-    dependencies: BTreeSet<FullyQualifiedName>,
-    constant_dependencies: BTreeSet<ConstantTypeDependency>,
+    /// Sorted and unique.
+    dependencies: Box<[FullyQualifiedName]>,
+    /// Sorted and unique.
+    constant_dependencies: Box<[ConstantTypeDependency]>,
 }
 
 impl MethodReturnEquation {
@@ -40,8 +43,8 @@ impl MethodReturnEquation {
         Self {
             method,
             base,
-            dependencies,
-            constant_dependencies: BTreeSet::new(),
+            dependencies: dependencies.into_iter().collect(),
+            constant_dependencies: Box::default(),
         }
     }
 
@@ -49,7 +52,7 @@ impl MethodReturnEquation {
         mut self,
         dependencies: BTreeSet<ConstantTypeDependency>,
     ) -> Self {
-        self.constant_dependencies = dependencies;
+        self.constant_dependencies = dependencies.into_iter().collect();
         self
     }
 
@@ -87,11 +90,11 @@ impl MethodReturnEquation {
         &self.base
     }
 
-    pub(crate) fn dependencies(&self) -> &BTreeSet<FullyQualifiedName> {
+    pub(crate) fn dependencies(&self) -> &[FullyQualifiedName] {
         &self.dependencies
     }
 
-    pub fn constant_dependencies(&self) -> &BTreeSet<ConstantTypeDependency> {
+    pub fn constant_dependencies(&self) -> &[ConstantTypeDependency] {
         &self.constant_dependencies
     }
 
@@ -109,7 +112,7 @@ impl MethodReturnEquation {
             MethodReturnBase::Unknown(reason) => {
                 let mut equation = self.clone();
                 equation.base = MethodReturnBase::Unknown(*reason);
-                equation.constant_dependencies.clear();
+                equation.constant_dependencies = Box::default();
                 return equation;
             }
         }
@@ -117,13 +120,13 @@ impl MethodReturnEquation {
             let Some(ruby_type) = ruby_type else {
                 let mut equation = self.clone();
                 equation.base = MethodReturnBase::Unknown(UnknownReason::UnresolvedAssignmentValue);
-                equation.constant_dependencies.clear();
+                equation.constant_dependencies = Box::default();
                 return equation;
             };
             if RubyType::union_members_contain_unknown(&ruby_type) {
                 let mut equation = self.clone();
                 equation.base = MethodReturnBase::Unknown(UnknownReason::UnresolvedAssignmentValue);
-                equation.constant_dependencies.clear();
+                equation.constant_dependencies = Box::default();
                 return equation;
             }
             members.push(ruby_type);
@@ -134,7 +137,7 @@ impl MethodReturnEquation {
         } else {
             MethodReturnBase::Proven(RubyType::union(members))
         };
-        equation.constant_dependencies.clear();
+        equation.constant_dependencies = Box::default();
         equation
     }
 
@@ -165,9 +168,16 @@ impl MethodReturnEquation {
                 MethodReturnBase::Bottom | MethodReturnBase::Unknown(_) => 0,
                 MethodReturnBase::Proven(ruby_type) => ruby_type_heap_bytes(ruby_type),
             }
-            + self.dependencies.len() * (size_of::<FullyQualifiedName>() + 3 * size_of::<usize>())
+            + self.dependencies.len() * size_of::<FullyQualifiedName>()
             + self.dependencies.iter().map(fqn_heap_bytes).sum::<usize>()
-            + self.constant_dependencies.len()
-                * (size_of::<ConstantTypeDependency>() + 3 * size_of::<usize>())
+            + self.constant_dependencies.len() * size_of::<ConstantTypeDependency>()
+            + self
+                .constant_dependencies
+                .iter()
+                .map(|dependency| {
+                    (dependency.parts.len() + dependency.lexical_context.len())
+                        * size_of::<RubyConstant>()
+                })
+                .sum::<usize>()
     }
 }
