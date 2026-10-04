@@ -23,16 +23,19 @@ over old status reports. Update the nearest guide when its contract changes.
 
 ## Ownership
 
-| Location                            | Owns                                                                                          |
-| ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `src/`                              | LSP transport, editor projections, documents, runtime/workspace lifecycle, resource admission |
-| `ruby-analysis::core`               | Domain names, ranges, types, facts, source identities                                         |
-| `ruby-analysis::indexer`            | Parsing, AST traversal, source mapping, file-fact production                                  |
-| `ruby-analysis::engine`             | Semantic state, file replacement, graph/MRO resolution, query and diagnostic policy           |
-| `ruby-analysis::inference`          | Type derivation, local flow, signature substitution, bounded equation solving                 |
-| `crates/extension-*`, `extensions/` | Extension contracts, hosts, and framework-specific fact producers                             |
-| `editors/`                          | Editor UX, distribution packaging, installed-artifact validation                              |
-| `crates/devtools`                   | Profilers, benchmarks, AST dump, and extension validation; never shipped                      |
+| Location                                      | Owns                                                                                          |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/`                                        | LSP transport, editor projections, documents, runtime/workspace lifecycle, resource admission |
+| `ruby-analysis::core`                         | Domain names, ranges, types, facts, source identities                                         |
+| `ruby-analysis::indexer`                      | Parsing, AST traversal, source mapping, file-fact production                                  |
+| `ruby-analysis::engine`                       | Semantic state, file replacement, graph/MRO resolution, query and diagnostic policy           |
+| `ruby-analysis::inference`                    | Type derivation, local flow, signature substitution, bounded equation solving                 |
+| `crates/extension-*`, `extensions/`           | Extension contracts, hosts, and framework-specific fact producers                             |
+| `crates/rbs-parser`                           | RBS signature parsing                                                                         |
+| `crates/jruby-support`, `crates/jvm-metadata` | JRuby/Java DSL syntax semantics and bounded JVM class metadata                                |
+| `crates/lsp-test-harness`                     | Black-box LSP process harness for tests                                                       |
+| `editors/`                                    | Editor UX, distribution packaging, installed-artifact validation                              |
+| `crates/devtools`                             | Profilers, benchmarks, AST dump, and extension validation; never shipped                      |
 
 Keep reusable analysis independent of LSP types. `src/features/` adapts cursor and
 document context to `View` and converts domain ranges to
@@ -41,7 +44,10 @@ policy in feature adapters. Engine resolution may coordinate inference solvers;
 inference and the indexer read project state only through
 `inference::semantics::Semantics` and never name the engine (an architecture
 test enforces core <- inference <- indexer <- engine). Engine ownership of solved state remains
-singular. Expose domain operations and views, never mutable stores or arena IDs.
+singular. Declaration walks share `ScopeTracker` and
+`indexer/documents/scope_rules.rs`; the collector and `TypeTracker` share flow
+rules through `inference` owners. Add a rule to its owner, never to one walk.
+Expose domain operations and views, never mutable stores or arena IDs.
 
 ## Correctness contracts
 

@@ -80,6 +80,10 @@ folder does not make it visible to the whole crate or to external consumers.
 Declaration recording lives in `collection/declarations.rs`; higher-order call
 and proc inference lives in `inference/callables.rs`; byte-range and source-comment
 helpers live in `context/source.rs`. Literal analysis needs no collector field.
+The collector's inference modules call the flow rules `TypeTracker` also
+applies from shared `inference` owners, passing only collector-side capture
+lookup and method resolution; see
+[one set of rules](../../../README.md#one-set-of-rules-several-walks).
 
 Each extension call frame owns its handled and tracked decisions together.
 An untracked nested call leaves its tracked parent in the enclosing-call list;

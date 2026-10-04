@@ -71,8 +71,13 @@ describe supported forms and limits.
 
 ## Next priorities
 
-- Restructure the code into small modules with plain-value interfaces, following
-  the [restructure plan](docs/development/restructure.md). No features are removed.
+- Collect dependency sources in one traversal: the declaration seed and the
+  collector still walk each project file separately, and dependencies take the
+  collector's declarations. A seed beside the collector cost about 20% of
+  dependency collection, so the merge waits for a design where the seed's
+  declarations come from inside the collector walk.
+- Revisit a dedicated per-project writer task only if `writer_wait` p95
+  approaches its 50 ms budget; named handle operations are the writer today.
 - Improve proof coverage for user-defined yielding methods and additional RBS
   forms, guided by reduced real-world regressions.
 - Consolidate repeated argument/type binding logic and make unexplained

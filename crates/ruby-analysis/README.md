@@ -7,8 +7,8 @@ the module that owns it.
 | Module | Responsibility | Main entry points |
 | --- | --- | --- |
 | `core` | Names, source identities, byte ranges, types, semantic facts, and the per-file analysis value | `FileAnalysis`, `RubyType`, `TextRange`, `SourceFileId`, `MethodFact` |
-| `indexer` | Parse source and collect file-owned facts | `AnalysisIndexer`, `fact_collector::FactCollector`, `index_rbs` |
-| `inference` | Derive types from expressions, flow, calls, and signatures | `type_tracker::TypeTracker`, `method`, `rbs` |
+| `indexer` | Parse source and collect file-owned facts: the declaration seed, the body pass, RBS/YARD lowering, the cursor walk, and syntax queries | `AnalysisIndexer`, `fact_collector::FactCollector`, `index_rbs` |
+| `inference` | Derive types from expressions, flow, calls, and signatures; own the flow rules both walks share | `type_tracker::TypeTracker`, `method`, `rbs`, `higher_order`, `type` |
 | `engine` | Own project state, resolve facts, and answer semantic queries | `Project`, `View` |
 | `stats` | Named counters and timers for profiler, log, and test evidence | `stat_set!`, `StatsRegistry`, `StatsSnapshot` |
 
@@ -49,6 +49,36 @@ owners and explains how observations return to the collector.
 
 The server selects projects, schedules work, supplies extension/runtime facts,
 and converts domain byte ranges to editor positions outside this library.
+
+## One set of rules, several walks
+
+Each walk exists because it reads something the others do not: the seed
+records declarations before body inference, `FactCollector` also serves
+dependency sources where `TypeTracker` does not run, the cursor walk stops at
+the cursor, and document symbols keep their own outline. They share rules, not
+copies:
+
+- Scope: every declaration walk keeps its scope in `ScopeTracker` and applies
+  `indexer/documents/scope_rules.rs` (lexical lookup, alias reopening,
+  receiver namespaces, eval and dynamic-definition blocks, visibility calls).
+  A walk passes in only which namespaces it knows.
+- Flow: the collector's expression typing and `TypeTracker` call the same
+  `inference` owners, each passing its own capture lookup and method
+  resolution.
+
+| Rule | Owner |
+| --- | --- |
+| Flow-local proc bindings, escape, branch merge | `higher_order::LocalCallables` |
+| Higher-order call preparation, block parameters, `&expression` | `higher_order::call_site` |
+| `case`/`in` pattern captures | `type::pattern` |
+| Hash shape reads (`[]`, `fetch`, `dig`, predicates, iteration) | `type::shape::CallRead` |
+| RBS method return for a receiver, with element substitution | `method::return_type::receiver_rbs_return_type` |
+| Branch-value join | `control_flow::join_non_diverging_types` |
+| Nested collection literals | `type::literal::infer_collection_literal_type` |
+
+Per-walk code remains only where the sources differ: the collector reads the
+in-progress file facts, `TypeTracker` the solved project and its live branch
+environment. Add a new rule to its owner, never to one walk.
 
 ## Register, collect, replace, query
 
