@@ -22,6 +22,10 @@ impl TypeTracker {
             return result.unwrap_or(RubyType::Unknown);
         }
 
+        if let Some(lambda) = node.as_lambda_node() {
+            self.release_closure_captured_writes(lambda.body());
+        }
+
         // Try literal analysis first
         if let Some(ty) = LiteralAnalyzer::new().analyze_literal(node) {
             return ty;

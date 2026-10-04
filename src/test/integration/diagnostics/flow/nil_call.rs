@@ -212,3 +212,72 @@ x&.<warn none>upcase</warn>&.<warn none>reverse</warn>
     )
     .await;
 }
+
+#[tokio::test]
+async fn block_assignment_to_a_captured_local_is_not_definitely_nil() {
+    // The block may run, so the outer local is nil or the block's value.
+    check(
+        r#"
+def fetch_value(source)
+  value = nil
+  source.each do |item|
+    value = item.to_s
+  end
+  <warn none code="nil-call">value.to_s</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn block_with_rescue_assignment_to_a_captured_local_is_not_definitely_nil() {
+    // A block-level `rescue` keeps both assignments as possible outcomes.
+    check(
+        r#"
+def fetch_value(source)
+  value = nil
+  source.each do |item|
+    value = item.to_s
+  rescue ArgumentError
+    value = item.inspect
+  end
+  <warn none code="nil-call">value.to_s</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn lambda_assignment_to_a_captured_local_is_not_definitely_nil() {
+    // The lambda may be called before the read.
+    check(
+        r#"
+def fetch_value(source)
+  value = nil
+  load = -> { value = source.to_s }
+  load.call
+  <warn none code="nil-call">value.to_s</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn block_parameter_shadowing_keeps_the_outer_local_nil() {
+    // Assigning a block parameter does not write the outer local.
+    check(
+        r#"
+def fetch_value(source)
+  value = nil
+  source.each do |value|
+    value = value.to_s
+  end
+  value.<warn code="nil-call">to_s</warn>
+end
+"#,
+    )
+    .await;
+}

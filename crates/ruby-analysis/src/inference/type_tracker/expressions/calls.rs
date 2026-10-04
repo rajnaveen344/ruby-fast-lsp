@@ -13,8 +13,17 @@ use crate::inference::type_tracker::TypeTracker;
 use ruby_prism::*;
 
 impl TypeTracker {
-    /// Infer the return type of a method call
+    /// Infer the return type of a method call, then release the enclosing
+    /// locals its literal block may have assigned.
     pub(in crate::inference::type_tracker) fn infer_call(&mut self, call: &CallNode) -> RubyType {
+        let result = self.infer_call_result(call);
+        if let Some(block) = call.block().and_then(|block| block.as_block_node()) {
+            self.release_closure_captured_writes(block.body());
+        }
+        result
+    }
+
+    fn infer_call_result(&mut self, call: &CallNode) -> RubyType {
         self.environment.callables.invalidate_escaped_in_call(call);
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
 

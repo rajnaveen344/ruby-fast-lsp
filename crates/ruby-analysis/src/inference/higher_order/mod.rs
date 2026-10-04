@@ -6,8 +6,10 @@
 //! and then supplies the exhaustive block result to finish substitution.
 
 pub(crate) mod call_site;
+mod captured_writes;
 mod local_callables;
 
+pub(crate) use captured_writes::captured_local_writes;
 pub(crate) use local_callables::{block_parameter_names, LocalCallables};
 
 use crate::invariant::ExpectInvariant;

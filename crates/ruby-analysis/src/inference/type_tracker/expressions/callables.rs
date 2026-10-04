@@ -1,6 +1,6 @@
-use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
+use crate::core::{FullyQualifiedName, RubyMethod, RubyType, UnknownReason};
 use crate::inference::control_flow;
-use crate::inference::higher_order::{block_parameter_names, call_site};
+use crate::inference::higher_order::{block_parameter_names, call_site, captured_local_writes};
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::TypeTracker;
@@ -8,6 +8,25 @@ use ruby_prism::*;
 use std::collections::{BTreeSet, HashMap};
 
 impl TypeTracker {
+    /// A closure may run any number of times, now or later, so an enclosing
+    /// local it assigns no longer has one reaching assignment. Its pre-closure
+    /// type stays only a possibility, never the proven value.
+    pub(in crate::inference::type_tracker) fn release_closure_captured_writes(
+        &mut self,
+        body: Option<Node<'_>>,
+    ) {
+        let Some(body) = body else {
+            return;
+        };
+        for name in captured_local_writes(&body) {
+            if !self.control_flow.rescue_entries.is_empty() {
+                self.observe_rescue_entry_type(&name, &RubyType::Unknown);
+            }
+            self.environment
+                .insert_unknown(name, UnknownReason::AmbiguousReachingAssignment);
+        }
+    }
+
     /// Infer one block body from an explicit environment and return the
     /// post-body value of each tracked parameter only when the same bounded
     /// mutable identity remains proven. This is the shared bridge used by the
