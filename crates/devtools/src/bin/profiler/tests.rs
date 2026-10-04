@@ -66,7 +66,12 @@ fn scheduler_concurrency_is_explicit_and_positive() {
         "1",
     ]);
 
-    assert_eq!(config.scheduler_concurrency, 1);
+    assert_eq!(config.scheduler_concurrency, Some(1));
+    assert_eq!(
+        parse_args_from(["profiler"]).scheduler_concurrency,
+        None,
+        "without the flag the server derives concurrency from its task budget"
+    );
 }
 
 #[test]

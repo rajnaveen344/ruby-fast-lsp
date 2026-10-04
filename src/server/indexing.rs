@@ -136,9 +136,12 @@ pub(super) struct IndexingStatusPublisher {
 
 impl Default for IndexingServices {
     fn default() -> Self {
+        let resources = IndexingResourceGovernor::default();
         Self {
-            scheduler: IndexingScheduler::default(),
-            resources: IndexingResourceGovernor::default(),
+            // Every active project needs at least one top-level task, so the
+            // task budget bounds how many projects can make progress at once.
+            scheduler: IndexingScheduler::new(resources.policy().top_level_tasks()),
+            resources,
             status: IndexingStatusPublisher {
                 sequence: Arc::new(AtomicU64::new(0)),
                 publication: Arc::new(tokio::sync::Mutex::new(

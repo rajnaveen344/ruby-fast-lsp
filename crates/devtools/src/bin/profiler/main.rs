@@ -134,7 +134,6 @@ fn main() -> anyhow::Result<()> {
 
     let benchmark_result = rt.block_on(async {
         let mut server = Server::default();
-        server.set_indexing_concurrency(config.scheduler_concurrency);
         if config.resource_cpu_lanes.is_some()
             || config.resource_task_limit.is_some()
             || config.resource_memory_mib.is_some()
@@ -164,6 +163,11 @@ fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(|| default_policy.io_slots()),
             ));
         }
+        server.set_indexing_concurrency(
+            config
+                .scheduler_concurrency
+                .unwrap_or_else(|| server.indexing_resource_policy().top_level_tasks()),
+        );
         let extension_load = configure_server(
             &mut server,
             config.config_path.as_ref(),

@@ -18,7 +18,7 @@ pub(crate) struct Config {
     pub(crate) phase: Phase,
     pub(crate) hold_seconds: u64,
     pub(crate) benchmark_iterations: Option<usize>,
-    pub(crate) scheduler_concurrency: usize,
+    pub(crate) scheduler_concurrency: Option<usize>,
     pub(crate) resource_cpu_lanes: Option<usize>,
     pub(crate) resource_task_limit: Option<usize>,
     pub(crate) resource_memory_mib: Option<usize>,
@@ -56,7 +56,7 @@ where
         phase: Phase::All,
         hold_seconds: 0,
         benchmark_iterations: None,
-        scheduler_concurrency: 2,
+        scheduler_concurrency: None,
         resource_cpu_lanes: None,
         resource_task_limit: None,
         resource_memory_mib: None,
@@ -166,7 +166,7 @@ where
                     why = "no project could be admitted",
                     fix = "pass a positive worker count",
                 );
-                config.scheduler_concurrency = concurrency;
+                config.scheduler_concurrency = Some(concurrency);
                 i += 1;
             }
             "--resource-cpu-lanes" => {
@@ -400,6 +400,8 @@ OPTIONS:
     --hold-seconds <N>       Keep process alive after profiling for external memory tools
     --benchmark-iterations <N>
                              Measure edit and query p95 latency after indexing
+    --scheduler-concurrency <N>
+                             Override concurrently indexed projects (default: the task limit)
     --resource-cpu-lanes <N>
                              Override the server-owned indexing CPU pool width for evidence
     --resource-task-limit <N>

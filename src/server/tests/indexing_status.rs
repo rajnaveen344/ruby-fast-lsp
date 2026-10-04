@@ -122,3 +122,14 @@ async fn indexing_status_request_prioritizes_active_document_and_sequences_exact
         "an already navigation-ready active project must not block sibling source passes"
     );
 }
+
+#[test]
+fn default_project_concurrency_follows_the_top_level_task_budget() {
+    let server = Server::default();
+
+    assert_eq!(
+        server.indexing_scheduler_snapshot().concurrency_limit,
+        server.indexing_resource_policy().top_level_tasks(),
+        "admitting more projects than top-level tasks only queues them in the governor"
+    );
+}

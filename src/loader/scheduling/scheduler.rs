@@ -278,15 +278,6 @@ fn effective_priority(
     }
 }
 
-impl Default for IndexingScheduler {
-    fn default() -> Self {
-        // M0 profiling will replace this conservative internal policy with a
-        // measured CPU/memory/disk-derived limit. It is intentionally not a
-        // user-facing setting.
-        Self::new(2)
-    }
-}
-
 fn best_admissible_entry_index(
     entries: &[QueueEntry],
     active_projects: &BTreeSet<PathBuf>,
