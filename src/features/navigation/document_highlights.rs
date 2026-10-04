@@ -16,6 +16,7 @@ pub async fn handle(
 ) -> LspResult<Option<Vec<DocumentHighlight>>> {
     let uri = &params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
+    server.await_document_semantic_commit(uri).await;
     Ok(find_document_highlights(server, uri, position))
 }
 

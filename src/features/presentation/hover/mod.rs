@@ -27,6 +27,9 @@ use crate::utils::parser::position_to_offset;
 
 /// Handle `textDocument/hover`.
 pub async fn handle(server: &Server, params: HoverParams) -> LspResult<Option<Hover>> {
+    server
+        .await_document_semantic_commit(&params.text_document_position_params.text_document.uri)
+        .await;
     Ok(hover(server, params))
 }
 

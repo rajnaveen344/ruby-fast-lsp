@@ -34,6 +34,7 @@ use crate::utils::parser::position_to_offset;
 pub async fn handle(server: &Server, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
+    server.await_document_semantic_commit(&uri).await;
     Ok(find_references_at_position(server, &uri, position).await)
 }
 

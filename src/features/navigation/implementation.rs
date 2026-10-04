@@ -23,6 +23,7 @@ pub async fn handle(
 ) -> LspResult<Option<GotoDefinitionResponse>> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
+    server.await_document_semantic_commit(&uri).await;
 
     let doc_arc = server.open_document(&uri);
     let implementations = doc_arc.and_then(|doc_arc| {

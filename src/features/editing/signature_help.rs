@@ -22,6 +22,9 @@ pub async fn handle(
     server: &Server,
     params: SignatureHelpParams,
 ) -> LspResult<Option<SignatureHelp>> {
+    server
+        .await_document_semantic_commit(&params.text_document_position_params.text_document.uri)
+        .await;
     Ok(signature_help(server, params))
 }
 

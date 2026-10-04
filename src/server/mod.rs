@@ -137,6 +137,14 @@ impl Server {
         self.documents.semantic_lock(uri)
     }
 
+    /// Wait until no open, edit, or refresh is replacing `uri`'s facts, so a
+    /// position query observes one complete commit. The lock is released
+    /// before the query runs: a query may wait on indexing demand and must not
+    /// hold back the document's next edit.
+    pub(crate) async fn await_document_semantic_commit(&self, uri: &Url) {
+        drop(self.document_semantic_lock(uri).lock().await);
+    }
+
     pub fn get_doc(&self, uri: &Url) -> Option<RubyDocument> {
         self.documents
             .read()

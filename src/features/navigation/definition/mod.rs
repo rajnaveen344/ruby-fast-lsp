@@ -33,6 +33,7 @@ pub async fn handle(
 ) -> LspResult<Option<GotoDefinitionResponse>> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
+    server.await_document_semantic_commit(&uri).await;
 
     let project = server.analysis_workspace_for_uri(&uri);
     let mut definition = find_definition_at_position(server, uri.clone(), position).await;
