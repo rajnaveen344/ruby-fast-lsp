@@ -50,6 +50,7 @@ use crate::indexer::documents::scope_rules::{
 };
 use crate::indexer::yard::types::YardMethodDoc;
 use crate::indexer::{is_framework_instance_block_call_name, LocalScopeKind};
+use ustr::Ustr;
 
 impl AnalysisIndexer<'_> {
     /// Visit a call's receiver, arguments, and block. A receiverless
@@ -646,7 +647,7 @@ impl Visit<'_> for AnalysisIndexer<'_> {
 
     fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode<'_>) {
         self.push_local_variable_fact(node.name().as_slice(), node.name_loc());
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let name = Ustr::from(&*String::from_utf8_lossy(node.name().as_slice()));
         self.push_type_fact(
             TypeSubject::Local { scope_id: 0, name },
             literal_type(&node.value()),
@@ -680,7 +681,7 @@ impl Visit<'_> for AnalysisIndexer<'_> {
 
     fn visit_instance_variable_write_node(&mut self, node: &InstanceVariableWriteNode<'_>) {
         self.push_instance_variable_fact(node.name().as_slice(), node.name_loc());
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let name = Ustr::from(&*String::from_utf8_lossy(node.name().as_slice()));
         self.push_type_fact(
             TypeSubject::InstanceVariable {
                 owner: self.current_owner_fqn(),
@@ -717,7 +718,7 @@ impl Visit<'_> for AnalysisIndexer<'_> {
 
     fn visit_class_variable_write_node(&mut self, node: &ClassVariableWriteNode<'_>) {
         self.push_class_variable_fact(node.name().as_slice(), node.name_loc());
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let name = Ustr::from(&*String::from_utf8_lossy(node.name().as_slice()));
         self.push_type_fact(
             TypeSubject::ClassVariable {
                 owner: self.current_owner_fqn(),
@@ -754,7 +755,7 @@ impl Visit<'_> for AnalysisIndexer<'_> {
 
     fn visit_global_variable_write_node(&mut self, node: &GlobalVariableWriteNode<'_>) {
         self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let name = Ustr::from(&*String::from_utf8_lossy(node.name().as_slice()));
         self.push_type_fact(
             TypeSubject::GlobalVariable(name),
             literal_type(&node.value()),

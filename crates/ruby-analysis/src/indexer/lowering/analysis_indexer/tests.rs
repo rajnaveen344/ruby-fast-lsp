@@ -172,7 +172,7 @@ fn indexes_literal_assignment_type_facts() {
         fact.subject
             == TypeSubject::Local {
                 scope_id: 0,
-                name: "name".to_string(),
+                name: "name".into(),
             }
             && fact.ruby_type == RubyType::string()
     }));
@@ -189,7 +189,7 @@ fn indexes_literal_assignment_type_facts() {
         ) && fact.ruby_type == RubyType::integer()
     }));
     assert!(index.types.iter().any(|fact| {
-        fact.subject == TypeSubject::GlobalVariable("$debug".to_string())
+        fact.subject == TypeSubject::GlobalVariable("$debug".into())
             && fact.ruby_type == RubyType::false_class()
     }));
 }
@@ -225,7 +225,7 @@ fn unresolved_collection_members_do_not_publish_partial_types() {
         fact.subject
             == TypeSubject::Local {
                 scope_id: 0,
-                name: "values".to_string(),
+                name: "values".into(),
             }
             && fact.ruby_type == RubyType::Array(vec![RubyType::Unknown])
     }));
@@ -233,7 +233,7 @@ fn unresolved_collection_members_do_not_publish_partial_types() {
         fact.subject
             == TypeSubject::Local {
                 scope_id: 0,
-                name: "mapping".to_string(),
+                name: "mapping".into(),
             }
             && fact.ruby_type == RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown])
     }));

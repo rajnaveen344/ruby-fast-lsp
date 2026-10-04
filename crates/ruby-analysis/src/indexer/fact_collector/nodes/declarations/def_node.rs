@@ -479,7 +479,7 @@ impl FactCollector {
             self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::Parameter {
                     method: fqn.clone(),
-                    name: param_name.clone(),
+                    name: param_name.into(),
                 },
                 param_type.clone(),
                 *param_range,

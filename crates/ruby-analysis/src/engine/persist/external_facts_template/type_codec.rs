@@ -1,5 +1,7 @@
 //! Snapshot encoding and restoration of ranges, names, types, and type subjects.
 
+use ustr::Ustr;
+
 use super::{
     SnapshotFqn, SnapshotLiteral, SnapshotRange, SnapshotRubyType, SnapshotShapeExactness,
     SnapshotShapeField, SnapshotShapeFieldPresence, SnapshotShapeRest, SnapshotShapeStability,
@@ -302,25 +304,25 @@ pub(super) fn snapshot_type_subject(subject: &TypeSubject) -> Result<SnapshotTyp
         },
         TypeSubject::Local { scope_id, name } => SnapshotTypeSubject::Local {
             scope_id: *scope_id,
-            name: name.clone(),
+            name: name.to_string(),
         },
         TypeSubject::InstanceVariable { owner, name } => SnapshotTypeSubject::InstanceVariable {
             owner: snapshot_fqn(owner)?,
-            name: name.clone(),
+            name: name.to_string(),
         },
         TypeSubject::ClassVariable { owner, name } => SnapshotTypeSubject::ClassVariable {
             owner: snapshot_fqn(owner)?,
-            name: name.clone(),
+            name: name.to_string(),
         },
-        TypeSubject::GlobalVariable(name) => {
-            SnapshotTypeSubject::GlobalVariable { name: name.clone() }
-        }
+        TypeSubject::GlobalVariable(name) => SnapshotTypeSubject::GlobalVariable {
+            name: name.to_string(),
+        },
         TypeSubject::MethodReturn(fqn) => SnapshotTypeSubject::MethodReturn {
             fqn: snapshot_fqn(fqn)?,
         },
         TypeSubject::Parameter { method, name } => SnapshotTypeSubject::Parameter {
             method: snapshot_fqn(method)?,
-            name: name.clone(),
+            name: name.to_string(),
         },
         TypeSubject::Expression(range) => SnapshotTypeSubject::Expression {
             range: snapshot_range(*range),
@@ -334,20 +336,25 @@ pub(super) fn restore_type_subject(
 ) -> Result<TypeSubject, String> {
     Ok(match subject {
         SnapshotTypeSubject::Constant { fqn } => TypeSubject::Constant(restore_fqn(fqn)?),
-        SnapshotTypeSubject::Local { scope_id, name } => TypeSubject::Local { scope_id, name },
+        SnapshotTypeSubject::Local { scope_id, name } => TypeSubject::Local {
+            scope_id,
+            name: Ustr::from(name.as_str()),
+        },
         SnapshotTypeSubject::InstanceVariable { owner, name } => TypeSubject::InstanceVariable {
             owner: restore_fqn(owner)?,
-            name,
+            name: Ustr::from(name.as_str()),
         },
         SnapshotTypeSubject::ClassVariable { owner, name } => TypeSubject::ClassVariable {
             owner: restore_fqn(owner)?,
-            name,
+            name: Ustr::from(name.as_str()),
         },
-        SnapshotTypeSubject::GlobalVariable { name } => TypeSubject::GlobalVariable(name),
+        SnapshotTypeSubject::GlobalVariable { name } => {
+            TypeSubject::GlobalVariable(Ustr::from(name.as_str()))
+        }
         SnapshotTypeSubject::MethodReturn { fqn } => TypeSubject::MethodReturn(restore_fqn(fqn)?),
         SnapshotTypeSubject::Parameter { method, name } => TypeSubject::Parameter {
             method: restore_fqn(method)?,
-            name,
+            name: Ustr::from(name.as_str()),
         },
         SnapshotTypeSubject::Expression { range } => {
             TypeSubject::Expression(restore_range(range, file_id)?)

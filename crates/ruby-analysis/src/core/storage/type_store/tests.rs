@@ -540,7 +540,7 @@ fn expression_type_at_selects_exact_range_among_many_file_facts() {
     facts.push(TypeFact::new(
         TypeSubject::Local {
             scope_id: 0,
-            name: "value".to_string(),
+            name: "value".into(),
         },
         RubyType::boolean(),
         overlapping_local,

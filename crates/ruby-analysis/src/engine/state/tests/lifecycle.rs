@@ -512,7 +512,7 @@ fn revision_types(file_id: SourceFileId, revision: usize) -> FileAnalysis {
     };
     FileAnalysis {
         types: vec![TypeFact {
-            subject: TypeSubject::GlobalVariable(format!("$value_{revision}")),
+            subject: TypeSubject::GlobalVariable(format!("$value_{revision}").into()),
             ruby_type: symbol("fact"),
             range: TextRange::new(file_id, 0, 4),
             provenance: TypeProvenance::Assignment,
@@ -578,7 +578,7 @@ fn compaction_reclaims_types_and_subjects_of_replaced_revisions() {
     assert_eq!(
         engine
             .view()
-            .type_facts_for(&TypeSubject::GlobalVariable("$value_31".to_string())),
+            .type_facts_for(&TypeSubject::GlobalVariable("$value_31".into())),
         engine.view().type_facts_in_file(file_id),
         "renumbered subjects must still find their facts"
     );

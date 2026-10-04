@@ -150,7 +150,7 @@ pub fn index_rbs(
                 ));
                 push_type_fact(
                     &mut facts,
-                    TypeSubject::GlobalVariable(global.name),
+                    TypeSubject::GlobalVariable(global.name.into()),
                     &global.r#type,
                     range,
                 );
@@ -255,7 +255,7 @@ fn push_method(
         facts.types.push(TypeFact::new(
             TypeSubject::Parameter {
                 method: fqn.clone(),
-                name,
+                name: name.into(),
             },
             ruby_type,
             range,

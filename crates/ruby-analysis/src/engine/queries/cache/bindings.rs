@@ -351,7 +351,7 @@ impl<'a> View<'a> {
         match self.engine.type_store().type_at(
             &TypeSubject::Local {
                 scope_id,
-                name: name.to_string(),
+                name: name.into(),
             },
             file_id,
             byte_offset,

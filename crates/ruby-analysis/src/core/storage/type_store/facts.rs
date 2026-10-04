@@ -1,6 +1,7 @@
 //! Public type-fact model: file ids, byte ranges, subjects, provenance, and resolutions.
 
 use crate::core::{FullyQualifiedName, RubyType};
+use ustr::Ustr;
 
 /// Stable file identifier owned by the analysis layer.
 ///
@@ -46,21 +47,21 @@ pub enum TypeSubject {
     Constant(FullyQualifiedName),
     Local {
         scope_id: u32,
-        name: String,
+        name: Ustr,
     },
     InstanceVariable {
         owner: FullyQualifiedName,
-        name: String,
+        name: Ustr,
     },
     ClassVariable {
         owner: FullyQualifiedName,
-        name: String,
+        name: Ustr,
     },
-    GlobalVariable(String),
+    GlobalVariable(Ustr),
     MethodReturn(FullyQualifiedName),
     Parameter {
         method: FullyQualifiedName,
-        name: String,
+        name: Ustr,
     },
     Expression(TextRange),
 }

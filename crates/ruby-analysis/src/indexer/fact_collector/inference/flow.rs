@@ -65,7 +65,7 @@ impl FactCollector {
         self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Local {
                 scope_id,
-                name: param_name.to_string(),
+                name: param_name.into(),
             },
             param_type,
             range,

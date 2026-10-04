@@ -150,7 +150,7 @@ impl FactCollector {
             .current_method_fqn()
             .map(|method| TypeSubject::Parameter {
                 method: method.clone(),
-                name: param_name.to_string(),
+                name: param_name.into(),
             })
             .map(|subject| {
                 self.facts.flow_types.type_at(

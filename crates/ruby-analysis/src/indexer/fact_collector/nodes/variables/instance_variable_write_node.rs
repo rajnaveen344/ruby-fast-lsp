@@ -37,7 +37,7 @@ impl FactCollector {
         );
         TypeSubject::InstanceVariable {
             owner,
-            name: variable_name,
+            name: variable_name.into(),
         }
     }
 

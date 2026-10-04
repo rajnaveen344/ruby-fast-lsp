@@ -34,7 +34,7 @@ impl FactCollector {
         if let Ok(fqn) = FullyQualifiedName::global_variable(variable_name.clone()) {
             self.direct_push_variable_symbol(fqn, SymbolKind::GlobalVariable, &name_loc);
         }
-        let subject = TypeSubject::GlobalVariable(variable_name);
+        let subject = TypeSubject::GlobalVariable(variable_name.into());
         let range = self.document.prism_location_to_text_range(&name_loc);
         self.begin_nonlocal_write(subject, range);
     }
@@ -53,7 +53,7 @@ impl FactCollector {
         } else {
             RubyType::Unknown
         };
-        let subject = TypeSubject::GlobalVariable(variable_name);
+        let subject = TypeSubject::GlobalVariable(variable_name.into());
         let range = self.document.prism_location_to_text_range(&name_loc);
         self.direct_push_assignment_type(subject.clone(), inferred_type.clone(), &name_loc);
 

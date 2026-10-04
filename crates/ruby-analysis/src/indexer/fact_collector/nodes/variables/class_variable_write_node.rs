@@ -33,7 +33,7 @@ impl FactCollector {
         );
         TypeSubject::ClassVariable {
             owner,
-            name: variable_name,
+            name: variable_name.into(),
         }
     }
 

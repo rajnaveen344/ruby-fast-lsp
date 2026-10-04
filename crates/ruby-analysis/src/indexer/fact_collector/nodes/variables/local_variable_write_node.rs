@@ -112,7 +112,7 @@ impl FactCollector {
         }
         let root_subject = TypeSubject::Local {
             scope_id: 0,
-            name: variable_name.clone(),
+            name: variable_name.as_str().into(),
         };
         if inferred_type == RubyType::Unknown && constant_dependency.is_some() {
             self.facts.analysis.types.push(TypeFact::new(
@@ -139,7 +139,7 @@ impl FactCollector {
             );
             let subject = TypeSubject::Local {
                 scope_id,
-                name: variable_name.clone(),
+                name: variable_name.as_str().into(),
             };
             self.facts.flow_types.add(TypeFact::new(
                 subject,

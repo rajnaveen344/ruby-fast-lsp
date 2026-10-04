@@ -460,7 +460,7 @@ fn solved_types_in_file(
         }
         let (kind, subject) = match fact.subject {
             TypeSubject::Constant(fqn) => (CheckTypeSubjectKind::Constant, fqn.to_string()),
-            TypeSubject::Local { name, .. } => (CheckTypeSubjectKind::Local, name),
+            TypeSubject::Local { name, .. } => (CheckTypeSubjectKind::Local, name.to_string()),
             TypeSubject::InstanceVariable { owner, name } => (
                 CheckTypeSubjectKind::InstanceVariable,
                 format!("{owner}::{name}"),
@@ -469,7 +469,9 @@ fn solved_types_in_file(
                 CheckTypeSubjectKind::ClassVariable,
                 format!("{owner}::{name}"),
             ),
-            TypeSubject::GlobalVariable(name) => (CheckTypeSubjectKind::GlobalVariable, name),
+            TypeSubject::GlobalVariable(name) => {
+                (CheckTypeSubjectKind::GlobalVariable, name.to_string())
+            }
             TypeSubject::Parameter { method, name } => {
                 (CheckTypeSubjectKind::Parameter, format!("{method}({name})"))
             }

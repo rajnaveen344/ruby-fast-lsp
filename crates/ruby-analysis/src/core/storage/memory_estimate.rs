@@ -83,15 +83,11 @@ fn shape_type_heap_bytes(shape: &ShapeType) -> usize {
 pub fn type_subject_heap_bytes(subject: &TypeSubject) -> usize {
     match subject {
         TypeSubject::Constant(fqn) | TypeSubject::MethodReturn(fqn) => fqn_heap_bytes(fqn),
-        TypeSubject::Local { name, .. } | TypeSubject::GlobalVariable(name) => {
-            string_heap_bytes(name)
-        }
-        TypeSubject::InstanceVariable { owner, name }
-        | TypeSubject::ClassVariable { owner, name }
-        | TypeSubject::Parameter {
-            method: owner,
-            name,
-        } => fqn_heap_bytes(owner) + string_heap_bytes(name),
+        // Names are interned once process-wide, so a subject owns no name heap.
+        TypeSubject::Local { .. } | TypeSubject::GlobalVariable(_) => 0,
+        TypeSubject::InstanceVariable { owner, .. }
+        | TypeSubject::ClassVariable { owner, .. }
+        | TypeSubject::Parameter { method: owner, .. } => fqn_heap_bytes(owner),
         TypeSubject::Expression(_) => 0,
     }
 }

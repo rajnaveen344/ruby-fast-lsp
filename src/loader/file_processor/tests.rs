@@ -156,7 +156,7 @@ fn later_unknown_visitor_assignment_is_retained_as_a_proof_kill() {
     );
     let subject = TypeSubject::InstanceVariable {
         owner,
-        name: "@value".to_string(),
+        name: "@value".into(),
     };
     let mut merged = vec![TypeFact::new(
         subject.clone(),
@@ -297,11 +297,11 @@ fn inferred_method_return_replace_keeps_unrelated_neighbors() {
     let method_subject = TypeSubject::MethodReturn(method);
     let first_local = TypeSubject::Local {
         scope_id: 1,
-        name: "before".to_string(),
+        name: "before".into(),
     };
     let last_local = TypeSubject::Local {
         scope_id: 1,
-        name: "after".to_string(),
+        name: "after".into(),
     };
     let seed_range = TextRange::new(file_id, 10, 40);
     let visitor_range = TextRange::new(file_id, 12, 38);
