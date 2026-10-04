@@ -227,6 +227,15 @@ impl Project {
         self.diagnostics.shrink_to_fit();
         self.solver.shrink_to_fit();
     }
+
+    /// Compact this project and move its interned names and types into
+    /// storage that clones share. Call before publishing a project as a
+    /// template that other projects are seeded from.
+    pub fn freeze_shared(&mut self) {
+        self.shrink_to_fit();
+        self.names.freeze();
+        self.types.freeze();
+    }
 }
 
 impl<'a> View<'a> {

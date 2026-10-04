@@ -454,16 +454,16 @@ fn index_jruby_runtime_sources_blocking(
             ruby_analysis::core::SourceKind::Stdlib,
         )?;
     }
-    Ok(Arc::new(
-        Arc::try_unwrap(dependency_seed_engine)
-            .ok()
-            .expect_invariant(
-                "JRuby runtime source indexing retained the dependency seed",
-                "collection borrows the seed only for each file",
-                "release every indexing handle before publishing the seed",
-            )
-            .into_inner(),
-    ))
+    let mut seed = Arc::try_unwrap(dependency_seed_engine)
+        .ok()
+        .expect_invariant(
+            "JRuby runtime source indexing retained the dependency seed",
+            "collection borrows the seed only for each file",
+            "release every indexing handle before publishing the seed",
+        )
+        .into_inner();
+    seed.freeze_shared();
+    Ok(Arc::new(seed))
 }
 
 impl IndexingCoordinator {

@@ -431,6 +431,10 @@ impl TypeTable {
                 .sum::<usize>()
     }
 
+    pub(in crate::engine) fn freeze(&mut self) {
+        self.store.freeze();
+    }
+
     pub(in crate::engine) fn shrink_to_fit(&mut self) {
         self.store.shrink_to_fit();
         self.call_expression_outcomes_by_file.shrink_to_fit();

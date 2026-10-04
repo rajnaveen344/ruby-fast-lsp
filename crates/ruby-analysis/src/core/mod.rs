@@ -30,10 +30,10 @@ pub use source::execution_context::{ExecutionContextFact, ExecutionScopeMode};
 pub use source::file_analysis::FileAnalysis;
 pub use source::source_file::{LibraryPackageId, SourceKind};
 pub use source::source_position::{SourcePosition, SourceRange};
-pub use storage::diagnostic_candidate_store::{
+pub use storage::diagnostics::candidates::{
     DiagnosticCandidate, DiagnosticCandidateKind, RaiseArgCandidate,
 };
-pub use storage::diagnostic_store::{DiagnosticFact, DiagnosticSeverity};
+pub use storage::diagnostics::resolved::{DiagnosticFact, DiagnosticSeverity};
 pub use storage::graph_store::{
     GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind,
     UnresolvedGraphEdgeFact,

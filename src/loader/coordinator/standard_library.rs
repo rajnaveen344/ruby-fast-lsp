@@ -130,7 +130,7 @@ impl IndexingCoordinator {
                                 .index_core_stubs_blocking(template_engine.clone())
                                 .map_err(|error| error.to_string())?;
                             drop(indexer);
-                            Ok(Arc::try_unwrap(template_engine)
+                            let mut template = Arc::try_unwrap(template_engine)
                                 .ok()
                                 .expect_invariant(
                                     "core stub indexing retained its template engine",
@@ -138,7 +138,9 @@ impl IndexingCoordinator {
                                      indexing returns",
                                     "release every indexing handle before publishing the template",
                                 )
-                                .into_inner())
+                                .into_inner();
+                            template.freeze_shared();
+                            Ok(template)
                         },
                     )
                     .await

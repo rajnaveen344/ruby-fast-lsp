@@ -453,3 +453,51 @@ fn shrink_to_fit_compacts_visibility_overrides_and_execution_contexts() {
         "compaction must release emptied execution-context capacity"
     );
 }
+
+#[test]
+fn frozen_template_clones_share_storage_and_stay_isolated() {
+    fn module_facts(file_id: SourceFileId, name: &FullyQualifiedName) -> FileAnalysis {
+        FileAnalysis {
+            graph_nodes: vec![GraphNodeFact::new(
+                name.clone(),
+                GraphNodeKind::Module,
+                TextRange::new(file_id, 0, 6),
+            )],
+            ..Default::default()
+        }
+    }
+    let utility = FullyQualifiedName::namespace(vec![RubyConstant::new("Utility").unwrap()]);
+    let app = FullyQualifiedName::namespace(vec![RubyConstant::new("App").unwrap()]);
+    let mut template = Project::new();
+    let core = register_project_file(&mut template, "lib/utility.rb", "module Utility; end");
+    template.update(core, module_facts(core, &utility), ResolveMode::Immediate);
+    template.freeze_shared();
+
+    let mut seeded = template.clone();
+    let utility_id = template.names.fqn_id(&utility).unwrap();
+    assert!(
+        std::ptr::eq(
+            template.files.get(core).unwrap(),
+            seeded.files.get(core).unwrap()
+        ),
+        "a seeded engine must share template source files"
+    );
+    assert!(
+        std::ptr::eq(
+            template.names.fqn(utility_id).unwrap(),
+            seeded.names.fqn(utility_id).unwrap()
+        ),
+        "a seeded engine must share frozen template names"
+    );
+
+    let user = register_project_file(&mut seeded, "app/app.rb", "module App; end");
+    seeded.update(user, module_facts(user, &app), ResolveMode::Immediate);
+    seeded.update(core, FileAnalysis::default(), ResolveMode::Immediate);
+
+    assert!(seeded.view().namespace_exists(&app));
+    assert!(!seeded.view().namespace_exists(&utility));
+    assert!(template.view().namespace_exists(&utility));
+    assert!(!template.view().namespace_exists(&app));
+    assert_eq!(template.names.fqn_id(&app), None);
+    assert_eq!(seeded.names.fqn_id(&utility), Some(utility_id));
+}

@@ -1,7 +1,7 @@
-pub(crate) mod diagnostic_candidate_store;
-pub(crate) mod diagnostic_store;
+pub(crate) mod diagnostics;
 pub(in crate::core) mod file_owned;
 pub(crate) mod graph_store;
+pub(crate) mod interner;
 pub(crate) mod memory_estimate;
 pub(crate) mod method_store;
 pub(crate) mod reference_store;

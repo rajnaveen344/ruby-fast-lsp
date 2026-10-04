@@ -7,15 +7,15 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::names::fqn_id::{ConstLookupId, FqnId};
+use crate::core::storage::interner::SharedInterner;
 use crate::core::storage::memory_estimate::fqn_heap_bytes;
 use crate::core::storage::reference_store::ConstLookup;
 use crate::core::{ConstantPath, FullyQualifiedName, RubyConstant};
-use indexmap::IndexSet;
 
 #[derive(Debug, Default)]
 pub(in crate::engine) struct Names {
-    fqns: IndexSet<FullyQualifiedName>,
-    const_lookups: IndexSet<ConstLookup>,
+    fqns: SharedInterner<FullyQualifiedName>,
+    const_lookups: SharedInterner<ConstLookup>,
     #[cfg(test)]
     fqn_lookup_count: AtomicUsize,
 }
@@ -33,7 +33,7 @@ impl Clone for Names {
 
 impl Names {
     pub(in crate::engine) fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
-        let (index, _) = self.fqns.insert_full(fqn);
+        let index = self.fqns.intern(fqn);
         FqnId(u32::try_from(index).expect_invariant(
             "FQN interner exceeded u32 ids",
             "FqnId stores u32",
@@ -69,7 +69,7 @@ impl Names {
     }
 
     pub(in crate::engine) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {
-        let (index, _) = self.const_lookups.insert_full(lookup);
+        let index = self.const_lookups.intern(lookup);
         ConstLookupId(u32::try_from(index).expect_invariant(
             "constant lookup interner exceeded u32 ids",
             "ConstLookupId stores u32",
@@ -92,19 +92,21 @@ impl Names {
     }
 
     pub(super) fn estimated_heap_bytes(&self) -> usize {
-        self.fqns.capacity() * (size_of::<FullyQualifiedName>() + size_of::<usize>() + 1)
-            + self.fqns.iter().map(fqn_heap_bytes).sum::<usize>()
-            + self.const_lookups.capacity() * (size_of::<ConstLookup>() + size_of::<usize>() + 1)
+        self.fqns.estimated_heap_bytes(fqn_heap_bytes)
             + self
                 .const_lookups
-                .iter()
-                .map(const_lookup_heap_bytes)
-                .sum::<usize>()
+                .estimated_heap_bytes(const_lookup_heap_bytes)
     }
 
     pub(super) fn shrink_to_fit(&mut self) {
         self.fqns.shrink_to_fit();
         self.const_lookups.shrink_to_fit();
+    }
+
+    /// Share every interned name with engines cloned from this one.
+    pub(super) fn freeze(&mut self) {
+        self.fqns.freeze();
+        self.const_lookups.freeze();
     }
 }
 

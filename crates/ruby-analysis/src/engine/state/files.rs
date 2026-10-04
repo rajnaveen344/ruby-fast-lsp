@@ -1,13 +1,15 @@
 //! `Files`: the engine's registered sources. It allocates stable file ids,
 //! keeps each file's line index (and non-ASCII text), issues revision
 //! snapshots for background commits, and records each file's semantic export
-//! fingerprint.
+//! fingerprint. Each registered file is immutable and shared, so cloned
+//! engines share every file they have not re-registered.
 
 use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::core::storage::memory_estimate::vec_payload_bytes;
 use crate::core::{LibraryPackageId, SourceFileId, SourceKind, TextRange};
@@ -85,10 +87,6 @@ impl SourceLineIndex {
     pub fn is_ascii(&self) -> bool {
         self.ascii
     }
-
-    fn shrink_to_fit(&mut self) {
-        self.line_offsets.shrink_to_fit();
-    }
 }
 
 impl SourceFile {
@@ -148,7 +146,7 @@ pub struct SourceFileInput {
 pub(in crate::engine) struct Files {
     ids_by_path: HashMap<PathBuf, SourceFileId>,
     next_id: u32,
-    files: HashMap<SourceFileId, SourceFile>,
+    files: HashMap<SourceFileId, Arc<SourceFile>>,
     next_revision: u64,
     export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
 }
@@ -161,7 +159,7 @@ impl Files {
     }
 
     pub(in crate::engine) fn get(&self, id: SourceFileId) -> Option<&SourceFile> {
-        self.files.get(&id)
+        self.files.get(&id).map(|file| &**file)
     }
 
     pub(in crate::engine) fn ids(&self) -> impl Iterator<Item = SourceFileId> + '_ {
@@ -169,7 +167,7 @@ impl Files {
     }
 
     pub(super) fn iter(&self) -> impl Iterator<Item = &SourceFile> {
-        self.files.values()
+        self.files.values().map(|file| &**file)
     }
 
     pub(super) fn len(&self) -> usize {
@@ -277,18 +275,25 @@ impl Files {
             "stale background commits need monotonic source identity",
             "widen the source snapshot revision",
         );
+        let mut path = normalize_path(&path);
+        path.shrink_to_fit();
+        let mut line_index = line_index;
+        line_index.line_offsets.shrink_to_fit();
         self.files.insert(
             id,
-            SourceFile {
+            Arc::new(SourceFile {
                 id,
-                path: path.components().collect(),
-                source,
+                path,
+                source: source.map(|mut source| {
+                    source.shrink_to_fit();
+                    source
+                }),
                 line_index,
                 content_hash,
                 kind,
                 revision: self.next_revision,
                 library_package,
-            },
+            }),
         );
         id
     }
@@ -396,7 +401,8 @@ impl Files {
                 .keys()
                 .map(|path| path.as_os_str().len())
                 .sum::<usize>()
-            + self.files.capacity() * (size_of::<SourceFileId>() + size_of::<SourceFile>() + 1)
+            + self.files.capacity() * (size_of::<SourceFileId>() + size_of::<Arc<SourceFile>>() + 1)
+            + self.files.len() * size_of::<SourceFile>()
             + self
                 .files
                 .values()
@@ -414,13 +420,6 @@ impl Files {
         self.ids_by_path.shrink_to_fit();
         self.export_fingerprints.shrink_to_fit();
         self.files.shrink_to_fit();
-        for file in self.files.values_mut() {
-            file.path.shrink_to_fit();
-            if let Some(source) = &mut file.source {
-                source.shrink_to_fit();
-            }
-            file.line_index.shrink_to_fit();
-        }
     }
 }
 

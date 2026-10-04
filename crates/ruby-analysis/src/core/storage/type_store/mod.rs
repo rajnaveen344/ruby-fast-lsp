@@ -13,9 +13,8 @@ pub(crate) use facts::NamedTypeResolution;
 pub use facts::{SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeSubject};
 
 use std::collections::HashMap;
-use std::mem::size_of;
 
-use indexmap::IndexSet;
+use crate::core::storage::interner::SharedInterner;
 
 use crate::core::storage::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, type_subject_heap_bytes, vec_payload_bytes,
@@ -27,8 +26,8 @@ use crate::core::{FullyQualifiedName, RubyType};
 pub struct TypeStore {
     facts: Vec<Option<StoredTypeFact>>,
     free_facts: Vec<TypeFactId>,
-    subjects: IndexSet<TypeSubject>,
-    ruby_types: IndexSet<RubyType>,
+    subjects: SharedInterner<TypeSubject>,
+    ruby_types: SharedInterner<RubyType>,
     facts_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
     facts_by_file: HashMap<SourceFileId, Vec<TypeFactId>>,
     file_owned_indexes_ordered: bool,
@@ -39,8 +38,8 @@ impl Default for TypeStore {
         Self {
             facts: Vec::new(),
             free_facts: Vec::new(),
-            subjects: IndexSet::new(),
-            ruby_types: IndexSet::new(),
+            subjects: SharedInterner::default(),
+            ruby_types: SharedInterner::default(),
             facts_by_subject: HashMap::new(),
             facts_by_file: HashMap::new(),
             file_owned_indexes_ordered: true,
@@ -289,18 +288,8 @@ impl TypeStore {
     pub fn estimated_heap_bytes(&self) -> usize {
         vec_payload_bytes(&self.facts)
             + vec_payload_bytes(&self.free_facts)
-            + self.subjects.capacity() * (size_of::<TypeSubject>() + size_of::<usize>() + 1)
-            + self
-                .subjects
-                .iter()
-                .map(type_subject_heap_bytes)
-                .sum::<usize>()
-            + self.ruby_types.capacity() * (size_of::<RubyType>() + size_of::<usize>() + 1)
-            + self
-                .ruby_types
-                .iter()
-                .map(ruby_type_heap_bytes)
-                .sum::<usize>()
+            + self.subjects.estimated_heap_bytes(type_subject_heap_bytes)
+            + self.ruby_types.estimated_heap_bytes(ruby_type_heap_bytes)
             + map_table_bytes(&self.facts_by_subject)
             + map_table_bytes(&self.facts_by_file)
             + self
@@ -313,6 +302,12 @@ impl TypeStore {
                 .values()
                 .map(vec_payload_bytes)
                 .sum::<usize>()
+    }
+
+    /// Share interned subjects and types with every clone of this store.
+    pub(crate) fn freeze(&mut self) {
+        self.subjects.freeze();
+        self.ruby_types.freeze();
     }
 
     pub fn shrink_to_fit(&mut self) {
@@ -481,7 +476,7 @@ impl TypeStore {
             | TypeSubject::GlobalVariable(_)
             | TypeSubject::MethodReturn(_)
             | TypeSubject::Parameter { .. } => {
-                let (index, _) = self.subjects.insert_full(subject);
+                let index = self.subjects.intern(subject);
                 StoredTypeSubject::interned(TypeSubjectId::from_index(index))
             }
         }
@@ -535,7 +530,7 @@ impl TypeStore {
     }
 
     pub(crate) fn intern_ruby_type(&mut self, ruby_type: RubyType) -> RubyTypeId {
-        let (index, _) = self.ruby_types.insert_full(ruby_type);
+        let index = self.ruby_types.intern(ruby_type);
         RubyTypeId::from_index(index)
     }
 

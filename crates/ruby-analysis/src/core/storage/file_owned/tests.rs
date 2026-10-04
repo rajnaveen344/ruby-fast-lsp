@@ -31,7 +31,7 @@ fn replace_orders_rows_and_touches_only_the_target_file() {
 
     let previous = owned.replace(SourceFileId(1), [row(1, 9), row(1, 4)], by_value);
 
-    assert_eq!(previous, Some(vec![row(1, 1), row(1, 3)]));
+    assert_eq!(previous.as_deref(), Some(&[row(1, 1), row(1, 3)][..]));
     assert_eq!(owned.rows(SourceFileId(1)), [row(1, 4), row(1, 9)]);
     assert_eq!(owned.rows(SourceFileId(2)), [row(2, 7)]);
     assert_eq!(owned.len(), 3);
@@ -64,10 +64,10 @@ fn empty_replacement_leaves_no_entry() {
     owned.replace(SourceFileId(1), [row(1, 1)], by_value);
 
     assert_eq!(
-        owned.replace(SourceFileId(1), [], by_value),
-        Some(vec![row(1, 1)])
+        owned.replace(SourceFileId(1), [], by_value).as_deref(),
+        Some(&[row(1, 1)][..])
     );
-    assert_eq!(owned.replace(SourceFileId(3), [], by_value), None);
+    assert!(owned.replace(SourceFileId(3), [], by_value).is_none());
 
     assert!(owned.rows(SourceFileId(1)).is_empty());
     assert_eq!(owned.iter().count(), 0);
@@ -75,6 +75,23 @@ fn empty_replacement_leaves_no_entry() {
         owned.estimated_heap_bytes(|_| 0),
         map_table_bytes(&owned.files)
     );
+}
+
+#[test]
+fn clone_shares_rows_until_a_file_is_replaced() {
+    let mut owned = FileOwned::default();
+    owned.replace(SourceFileId(1), [row(1, 1)], by_value);
+    owned.replace(SourceFileId(2), [row(2, 2)], by_value);
+
+    let mut copy = owned.clone();
+    copy.replace(SourceFileId(2), [row(2, 5)], by_value);
+
+    assert!(
+        std::ptr::eq(owned.rows(SourceFileId(1)), copy.rows(SourceFileId(1))),
+        "a clone must share an untouched file's rows instead of copying them"
+    );
+    assert_eq!(owned.rows(SourceFileId(2)), [row(2, 2)]);
+    assert_eq!(copy.rows(SourceFileId(2)), [row(2, 5)]);
 }
 
 #[test]
@@ -164,8 +181,33 @@ mod arena {
 
         store.replace(1, &[]);
         assert_eq!(store.with_digit(1), [row(2, 11)]);
-        assert!(store.rows.ids_in_file(SourceFileId(1)).is_empty());
+        assert!(store.rows.rows_in_file(SourceFileId(1)).next().is_none());
         assert_eq!(store.rows.len(), 1);
+    }
+
+    #[test]
+    fn clone_shares_rows_and_indexes_stay_independent() {
+        let mut store = Indexed::default();
+        store.replace(1, &[row(1, 1)]);
+        store.replace(2, &[row(2, 11)]);
+
+        let mut copy = Indexed {
+            rows: store.rows.clone(),
+            by_digit: store.by_digit.clone(),
+        };
+        copy.replace(2, &[row(2, 21), row(2, 2)]);
+
+        assert!(
+            std::ptr::eq(
+                store.rows.rows_in_file(SourceFileId(1)).next().unwrap(),
+                copy.rows.rows_in_file(SourceFileId(1)).next().unwrap(),
+            ),
+            "a clone must share an untouched file's rows instead of copying them"
+        );
+        assert_eq!(store.with_digit(1), [row(1, 1), row(2, 11)]);
+        assert_eq!(copy.with_digit(1), [row(1, 1), row(2, 21)]);
+        assert_eq!(copy.with_digit(2), [row(2, 2)]);
+        assert_eq!((store.rows.len(), copy.rows.len()), (2, 3));
     }
 
     #[test]

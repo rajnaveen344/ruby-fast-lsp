@@ -3,8 +3,8 @@
 //! diagnostics; indexer and require diagnostics survive the rebuild.
 
 use super::policy::{is_resolve_derived, UNRESOLVED_REQUIRE_CODE};
-use crate::core::storage::diagnostic_candidate_store::DiagnosticCandidateStore;
-use crate::core::storage::diagnostic_store::DiagnosticStore;
+use crate::core::storage::diagnostics::candidates::DiagnosticCandidateStore;
+use crate::core::storage::diagnostics::resolved::DiagnosticStore;
 use crate::core::{DiagnosticCandidate, DiagnosticFact, SourceFileId};
 use crate::engine::View;
 
