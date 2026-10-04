@@ -120,13 +120,19 @@ fn extract_cached_gem_archive(
     locked: &LockedGemIdentity,
     project_digest: &str,
 ) -> Result<GemInfo> {
-    let archive_size = std::fs::metadata(archive_path)
-        .with_context(|| format!("failed to inspect {}", archive_path.display()))?
-        .len();
+    let archive_metadata = std::fs::metadata(archive_path)
+        .with_context(|| format!("failed to inspect {}", archive_path.display()))?;
+    let archive_size = archive_metadata.len();
     if archive_size > MAX_CACHED_GEM_ARCHIVE_BYTES {
         return Err(anyhow!(
             "archive is {archive_size} bytes, exceeding the {MAX_CACHED_GEM_ARCHIVE_BYTES}-byte limit"
         ));
+    }
+    let gem_root = extraction_root.join(format!("{}-{}", locked.name, locked.locked_version));
+    let archive_stat = ArchiveStat::of(&archive_metadata);
+    if let Some(stamp) = ExtractionStamp::read_matching(&gem_root, &archive_stat) {
+        bind_cached_gem_project_digest(extraction_root, project_digest)?;
+        return extracted_gem_info(gem_root, locked, stamp.metadata);
     }
     let archive_bytes = std::fs::read(archive_path)
         .with_context(|| format!("failed to read {}", archive_path.display()))?;
@@ -149,7 +155,6 @@ fn extract_cached_gem_archive(
     }
 
     let checksum = format!("{:x}", Sha256::digest(&archive_bytes));
-    let gem_root = extraction_root.join(format!("{}-{}", locked.name, locked.locked_version));
     let completion_marker = gem_root.join(".complete");
     let marker_matches =
         std::fs::read_to_string(&completion_marker).is_ok_and(|contents| contents == checksum);
@@ -163,7 +168,20 @@ fn extract_cached_gem_archive(
         )?;
     }
     bind_cached_gem_project_digest(extraction_root, project_digest)?;
+    let stamp = ExtractionStamp {
+        stat: archive_stat,
+        checksum,
+        metadata,
+    };
+    stamp.write(&gem_root)?;
+    extracted_gem_info(gem_root, locked, stamp.metadata)
+}
 
+fn extracted_gem_info(
+    gem_root: PathBuf,
+    locked: &LockedGemIdentity,
+    metadata: CachedGemMetadata,
+) -> Result<GemInfo> {
     let lib_paths = metadata
         .require_paths
         .iter()
@@ -188,6 +206,135 @@ fn extract_cached_gem_archive(
         dependencies: locked.dependencies.clone(),
         is_default: false,
     })
+}
+
+const EXTRACTION_STAMP: &str = ".archive-stamp";
+const EXTRACTION_STAMP_SCHEMA: &str = "rflsp-gem-stamp-v1";
+
+/// The file-system identity of an archive. A changed size, modification time,
+/// or inode means the archive must be read and hashed again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArchiveStat {
+    size: u64,
+    modified_nanos: Option<u128>,
+    inode: Option<(u64, u64)>,
+}
+
+impl ArchiveStat {
+    fn of(metadata: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt;
+            Some((metadata.dev(), metadata.ino()))
+        };
+        #[cfg(not(unix))]
+        let inode = None;
+        Self {
+            size: metadata.len(),
+            modified_nanos: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|elapsed| elapsed.as_nanos()),
+            inode,
+        }
+    }
+
+    /// Without a modification time and inode, size alone cannot identify the
+    /// archive, so it is always read again.
+    fn is_identifying(&self) -> bool {
+        self.modified_nanos.is_some() && self.inode.is_some()
+    }
+}
+
+/// What a verified extraction recorded about its archive, so a later start
+/// with the same archive skips reading and hashing it.
+struct ExtractionStamp {
+    stat: ArchiveStat,
+    checksum: String,
+    metadata: CachedGemMetadata,
+}
+
+impl ExtractionStamp {
+    fn read_matching(gem_root: &Path, stat: &ArchiveStat) -> Option<Self> {
+        if !stat.is_identifying() {
+            return None;
+        }
+        let text = std::fs::read_to_string(gem_root.join(EXTRACTION_STAMP)).ok()?;
+        let stamp = Self::parse(&text)?;
+        let completed = std::fs::read_to_string(gem_root.join(".complete")).ok()?;
+        (stamp.stat == *stat && completed == stamp.checksum).then_some(stamp)
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        let mut lines = text.lines();
+        if lines.next()? != EXTRACTION_STAMP_SCHEMA {
+            return None;
+        }
+        let mut field = |key: &str| lines.next()?.strip_prefix(key)?.strip_prefix('=');
+        let size = field("size")?.parse().ok()?;
+        let modified_nanos = Some(field("modified")?.parse().ok()?);
+        let (dev, ino) = field("inode")?.split_once(':')?;
+        let inode = Some((dev.parse().ok()?, ino.parse().ok()?));
+        let checksum = field("checksum")?.to_owned();
+        let name = field("name")?.to_owned();
+        let version = field("version")?.to_owned();
+        let platform = field("platform")?.to_owned();
+        let locked_version = field("locked")?.to_owned();
+        let require_paths = lines
+            .map(|line| line.strip_prefix("require=").map(PathBuf::from))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            stat: ArchiveStat {
+                size,
+                modified_nanos,
+                inode,
+            },
+            checksum,
+            metadata: CachedGemMetadata {
+                name,
+                version,
+                platform,
+                locked_version,
+                require_paths,
+            },
+        })
+    }
+
+    /// Publish the stamp atomically; a reader sees the old stamp or this one.
+    fn write(&self, gem_root: &Path) -> Result<()> {
+        let (Some(modified), Some((dev, ino))) = (self.stat.modified_nanos, self.stat.inode) else {
+            return Ok(());
+        };
+        let metadata = &self.metadata;
+        let mut text = format!(
+            "{EXTRACTION_STAMP_SCHEMA}\nsize={}\nmodified={modified}\ninode={dev}:{ino}\n\
+             checksum={}\nname={}\nversion={}\nplatform={}\nlocked={}\n",
+            self.stat.size,
+            self.checksum,
+            metadata.name,
+            metadata.version,
+            metadata.platform,
+            metadata.locked_version,
+        );
+        for path in &metadata.require_paths {
+            let path = path
+                .to_str()
+                .ok_or_else(|| anyhow!("gem require path {} is not valid UTF-8", path.display()))?;
+            text.push_str("require=");
+            text.push_str(path);
+            text.push('\n');
+        }
+        let temporary = gem_root.join(format!("{EXTRACTION_STAMP}.tmp-{}", std::process::id()));
+        std::fs::write(&temporary, text)
+            .and_then(|()| std::fs::rename(&temporary, gem_root.join(EXTRACTION_STAMP)))
+            .with_context(|| {
+                format!(
+                    "failed to record cached gem extraction stamp in {}",
+                    gem_root.display()
+                )
+            })
+    }
 }
 
 fn read_gem_package_member(

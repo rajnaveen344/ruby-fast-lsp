@@ -55,6 +55,24 @@ fn create_cached_gem_with_require_path(
     platform: &str,
     require_path: &str,
 ) {
+    create_cached_gem_with_source(
+        path,
+        name,
+        version,
+        platform,
+        require_path,
+        b"module Example; class Cached; end; end\n",
+    );
+}
+
+fn create_cached_gem_with_source(
+    path: &Path,
+    name: &str,
+    version: &str,
+    platform: &str,
+    require_path: &str,
+    source: &[u8],
+) {
     let metadata = format!(
         "--- !ruby/object:Gem::Specification\n\
              name: {name}\n\
@@ -65,11 +83,7 @@ fn create_cached_gem_with_require_path(
              - {require_path}\n"
     );
     let mut data = Builder::new(Vec::new());
-    append_tar_file(
-        &mut data,
-        "lib/example.rb",
-        b"module Example; class Cached; end; end\n",
-    );
+    append_tar_file(&mut data, "lib/example.rb", source);
     let data = data.into_inner().unwrap();
 
     let mut package = Builder::new(Vec::new());
@@ -164,6 +178,77 @@ fn locked_registry_gem_uses_project_local_vendor_cache_archive() {
             .len(),
         64,
         "archive checksum belongs in the completion marker, not the displayed path"
+    );
+}
+
+#[test]
+fn vendor_archive_extraction_is_reused_until_the_archive_changes() {
+    let workspace = TempDir::new().unwrap();
+    let extraction_cache = TempDir::new().unwrap();
+    std::fs::write(
+        workspace.path().join("Gemfile.lock"),
+        "GEM\n  remote: https://rubygems.org/\n  specs:\n    example (1.2.3)\n\nPLATFORMS\n  ruby\n",
+    )
+    .unwrap();
+    let archive = workspace.path().join("vendor/cache/example-1.2.3.gem");
+    let discover = || {
+        let mut indexer = create_cached_gem_indexer(workspace.path(), extraction_cache.path());
+        indexer.discover_cached_gem_archives().unwrap();
+        indexer
+            .discovered_gems
+            .remove("example")
+            .unwrap_or_default()
+    };
+    create_cached_gem(&archive, "example", "1.2.3", "ruby");
+    let first = discover();
+    assert_eq!(
+        first.len(),
+        1,
+        "the archive is extracted on first discovery"
+    );
+
+    // Same-length bytes at the same inode and modification time: discovery
+    // trusts the recorded extraction and does not read the archive again.
+    let original = std::fs::read(&archive).unwrap();
+    let modified = std::fs::metadata(&archive).unwrap().modified().unwrap();
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&archive)
+        .unwrap();
+    std::io::Write::write_all(&mut &file, &vec![0; original.len()]).unwrap();
+    file.set_modified(modified).unwrap();
+    drop(file);
+    let reused = discover();
+    assert_eq!(
+        reused.len(),
+        1,
+        "an unchanged archive stat reuses the extraction"
+    );
+    assert_eq!(reused[0].path, first[0].path);
+    assert_eq!(reused[0].lib_paths, first[0].lib_paths);
+    assert_eq!(reused[0].version, "1.2.3");
+    assert_eq!(reused[0].platform, "ruby");
+
+    // A replaced archive is read, verified, and extracted again.
+    create_cached_gem_with_source(
+        &archive,
+        "example",
+        "1.2.3",
+        "ruby",
+        "lib",
+        b"module Example; class Replaced; end; end\n",
+    );
+    std::fs::File::options()
+        .write(true)
+        .open(&archive)
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(1))
+        .unwrap();
+    let replaced = discover();
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(replaced[0].path.join("lib/example.rb")).unwrap(),
+        "module Example; class Replaced; end; end\n"
     );
 }
 
