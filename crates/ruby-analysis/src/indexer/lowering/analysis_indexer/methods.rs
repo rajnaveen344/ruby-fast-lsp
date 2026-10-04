@@ -19,7 +19,7 @@ use crate::indexer::documents::scope_rules::{
     implicit_singleton_namespace, receiverless_definition_kind, sent_definition_kind,
 };
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     fn push_method_fact(
         &mut self,
         namespace: Vec<RubyConstant>,

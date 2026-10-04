@@ -120,6 +120,30 @@ impl TypeStore {
             .map(|fact| (self.ruby_type(fact.ruby_type), fact.range))
     }
 
+    /// The one type every fact for `subject` outside `excluded` agrees on,
+    /// read from the subject index without expanding unrelated facts.
+    pub fn agreed_type_outside_file(
+        &self,
+        subject: &TypeSubject,
+        excluded: SourceFileId,
+    ) -> Option<&RubyType> {
+        let mut agreed = None;
+        for fact in self
+            .fact_ids_for_subject(subject)?
+            .iter()
+            .filter_map(|id| self.fact(*id))
+            .filter(|fact| fact.range.file_id != excluded)
+            .filter(|fact| self.stored_subject_matches(fact, subject))
+        {
+            match agreed {
+                None => agreed = Some(fact.ruby_type),
+                Some(ruby_type) if ruby_type == fact.ruby_type => {}
+                Some(_) => return None,
+            }
+        }
+        agreed.map(|ruby_type| self.ruby_type(ruby_type))
+    }
+
     pub fn all_facts(&self) -> Vec<TypeFact> {
         self.facts
             .iter()

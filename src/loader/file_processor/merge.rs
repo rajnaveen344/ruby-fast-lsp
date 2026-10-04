@@ -6,7 +6,7 @@ use ruby_analysis::core::{
     FullyQualifiedName, RubyType, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact,
     TypeProvenance, TypeSubject,
 };
-use ruby_analysis::indexer::AnalysisIndexer;
+use ruby_analysis::indexer::{AnalysisIndexer, KnownSemantics};
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn collect_direct_facts(
@@ -19,8 +19,11 @@ pub(super) fn collect_direct_facts(
     let known_namespaces = known_namespaces
         .cloned()
         .unwrap_or_else(|| collect_known_namespaces(analysis_engine));
-    let known_constant_types = collect_known_constant_types(analysis_engine, file_id);
-    AnalysisIndexer::with_known_semantics(file_id, known_namespaces, known_constant_types)
+    let known = EngineKnownSemantics {
+        engine: analysis_engine,
+        current_file: file_id,
+    };
+    AnalysisIndexer::with_known_semantics(file_id, known_namespaces, &known)
         .index_node_with_source(node, content)
 }
 
@@ -466,32 +469,15 @@ pub(super) fn collect_known_namespaces(
     analysis_engine.view(|view| view.known_namespace_fqns())
 }
 
-fn collect_known_constant_types(
-    analysis_engine: &dyn LoadTarget,
+/// Other files' facts, read from the engine's indexes as the walk needs them.
+struct EngineKnownSemantics<'a> {
+    engine: &'a dyn LoadTarget,
     current_file: ruby_analysis::core::SourceFileId,
-) -> HashMap<FullyQualifiedName, RubyType> {
-    let type_facts = analysis_engine.view(|view| view.all_type_facts());
-    let mut candidates = HashMap::<FullyQualifiedName, Option<RubyType>>::new();
-    for fact in type_facts
-        .into_iter()
-        .filter(|fact| fact.range.file_id != current_file)
-    {
-        let TypeSubject::Constant(constant) = fact.subject else {
-            continue;
-        };
-        match candidates.entry(constant) {
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(Some(fact.ruby_type));
-            }
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                if entry.get().as_ref() != Some(&fact.ruby_type) {
-                    entry.insert(None);
-                }
-            }
-        }
+}
+
+impl KnownSemantics for EngineKnownSemantics<'_> {
+    fn constant_type(&self, constant: &FullyQualifiedName) -> Option<RubyType> {
+        self.engine
+            .view(|view| view.agreed_constant_type_outside_file(constant, self.current_file))
     }
-    candidates
-        .into_iter()
-        .filter_map(|(constant, ruby_type)| ruby_type.map(|ruby_type| (constant, ruby_type)))
-        .collect()
 }

@@ -18,7 +18,7 @@ pub(super) struct DeferredEvalBlock {
     scope: ScopeTracker,
 }
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     /// Skip an eval call with a constant receiver in a method body, to
     /// replay it after the main walk.
     pub(super) fn defer_eval_block(&mut self, node: &CallNode<'_>) -> bool {
@@ -65,12 +65,12 @@ impl AnalysisIndexer {
     }
 }
 
-struct Replay<'a> {
-    indexer: &'a mut AnalysisIndexer,
+struct Replay<'a, 'k> {
+    indexer: &'a mut AnalysisIndexer<'k>,
     pending: Vec<DeferredEvalBlock>,
 }
 
-impl<'pr> Visit<'pr> for Replay<'_> {
+impl<'pr> Visit<'pr> for Replay<'_, '_> {
     fn visit_call_node(&mut self, node: &CallNode<'pr>) {
         let location = node.location();
         let found = self.pending.iter().position(|deferred| {

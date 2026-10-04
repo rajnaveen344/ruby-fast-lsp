@@ -4,7 +4,7 @@ use crate::core::{FullyQualifiedName, SymbolFact, SymbolKind};
 
 use super::AnalysisIndexer;
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     pub(super) fn push_local_variable_fact(
         &mut self,
         name: &[u8],

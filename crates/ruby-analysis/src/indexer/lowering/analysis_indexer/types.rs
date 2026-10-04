@@ -12,7 +12,7 @@ use crate::indexer::documents::scope_rules::lexical_candidates;
 use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::{infer_array_literal_type, infer_hash_literal_type};
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     fn resolve_constant_value_type_from(
         &self,
         parts: &[RubyConstant],
@@ -41,7 +41,7 @@ impl AnalysisIndexer {
             .rev()
             .find(|fact| fact.subject == subject)
             .map(|fact| fact.ruby_type.clone())
-            .or_else(|| self.known_constant_types.get(&constant).cloned())
+            .or_else(|| self.known.constant_type(&constant))
     }
 
     pub(super) fn assignment_type(&self, node: &Node<'_>) -> Option<RubyType> {

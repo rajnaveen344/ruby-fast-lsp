@@ -9,7 +9,7 @@ use ruby_prism::{Location, Node};
 use super::syntax::terminal_name_range;
 use super::AnalysisIndexer;
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     /// Declare `NAME` in the current lexical namespace.
     pub(super) fn push_constant_declaration(
         &mut self,

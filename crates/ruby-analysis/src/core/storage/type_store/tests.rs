@@ -635,3 +635,34 @@ fn append_only_expression_lookup_survives_unsorted_file_index() {
 fn invalid_range_panics() {
     let _ = TextRange::new(file(), 10, 9);
 }
+
+#[test]
+fn agreed_type_outside_a_file_ignores_that_file_and_rejects_disagreement() {
+    let subject = constant_subject("LIMIT");
+    let fact = |ruby_type: RubyType, file_id: u32| {
+        TypeFact::new(
+            subject.clone(),
+            ruby_type,
+            TextRange::new(SourceFileId(file_id), 0, 5),
+            TypeProvenance::Literal,
+        )
+    };
+    let mut store = TypeStore::default();
+    store.add(fact(RubyType::integer(), 1));
+    store.add(fact(RubyType::integer(), 2));
+    store.add(fact(RubyType::string(), 3));
+
+    assert_eq!(
+        store.agreed_type_outside_file(&subject, SourceFileId(3)),
+        Some(&RubyType::integer()),
+        "the excluded file's own fact must not count"
+    );
+    assert_eq!(
+        store.agreed_type_outside_file(&subject, SourceFileId(1)),
+        None
+    );
+    assert_eq!(
+        store.agreed_type_outside_file(&constant_subject("MISSING"), SourceFileId(1)),
+        None
+    );
+}

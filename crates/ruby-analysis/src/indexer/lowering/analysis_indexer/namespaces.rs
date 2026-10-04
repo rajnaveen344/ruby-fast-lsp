@@ -15,7 +15,7 @@ use crate::indexer::documents::scope_rules::{
     resolve_receiver_namespace, BlockExecution, EdgeAdmission,
 };
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     pub(super) fn push_namespace_facts(
         &mut self,
         fqn: FullyQualifiedName,

@@ -32,7 +32,7 @@ pub use documents::variable_scopes::{
 };
 pub use identifiers::types::Identifier;
 pub use identifiers::{IdentifierType, IdentifierVisitor};
-pub use lowering::analysis_indexer::AnalysisIndexer;
+pub use lowering::analysis_indexer::{AnalysisIndexer, KnownSemantics};
 pub use lowering::rbs_indexer::index_rbs;
 pub use queries::code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use queries::document_symbols::{

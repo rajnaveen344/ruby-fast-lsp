@@ -27,15 +27,35 @@ mod types;
 mod variables;
 mod visitor;
 
-#[derive(Debug)]
-pub struct AnalysisIndexer {
+/// Project facts outside the file being indexed, read on demand.
+pub trait KnownSemantics {
+    /// The one value type every other file agrees on for `constant`.
+    fn constant_type(&self, constant: &FullyQualifiedName) -> Option<RubyType>;
+}
+
+/// A file indexed on its own knows no other file's facts.
+struct NoKnownSemantics;
+
+impl KnownSemantics for NoKnownSemantics {
+    fn constant_type(&self, _constant: &FullyQualifiedName) -> Option<RubyType> {
+        None
+    }
+}
+
+impl KnownSemantics for HashMap<FullyQualifiedName, RubyType> {
+    fn constant_type(&self, constant: &FullyQualifiedName) -> Option<RubyType> {
+        self.get(constant).cloned()
+    }
+}
+
+pub struct AnalysisIndexer<'k> {
     file_id: SourceFileId,
     /// Lexical frames (`Module.nesting`) for constant writes and lookup, and
     /// execution contexts for where definitions land: a static eval block's
     /// receiver, or the enclosing owner inside a method body.
     scope: ScopeTracker,
     known_namespaces: HashSet<FullyQualifiedName>,
-    known_constant_types: HashMap<FullyQualifiedName, RubyType>,
+    known: &'k dyn KnownSemantics,
     source: Option<String>,
     /// Byte offsets of the source's newlines, for the zero-based line of a
     /// definition without rescanning the file at each one.
@@ -46,7 +66,7 @@ pub struct AnalysisIndexer {
     replaying_deferred: bool,
 }
 
-impl AnalysisIndexer {
+impl<'k> AnalysisIndexer<'k> {
     /// Whether the direct declaration pass can emit a value-constant symbol.
     /// Keep this aligned with the constant-write visitors in `visitor.rs`. Callers can
     /// reuse an existing parse before preparing the more expensive semantic
@@ -83,19 +103,19 @@ impl AnalysisIndexer {
         file_id: SourceFileId,
         known_namespaces: HashSet<FullyQualifiedName>,
     ) -> Self {
-        Self::with_known_semantics(file_id, known_namespaces, HashMap::new())
+        Self::with_known_semantics(file_id, known_namespaces, &NoKnownSemantics)
     }
 
     pub fn with_known_semantics(
         file_id: SourceFileId,
         known_namespaces: HashSet<FullyQualifiedName>,
-        known_constant_types: HashMap<FullyQualifiedName, RubyType>,
+        known: &'k dyn KnownSemantics,
     ) -> Self {
         Self {
             file_id,
             scope: ScopeTracker::new(),
             known_namespaces,
-            known_constant_types,
+            known,
             source: None,
             newline_offsets: Vec::new(),
             facts: FileAnalysis::default(),

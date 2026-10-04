@@ -459,6 +459,20 @@ impl View<'_> {
         self.engine.types.store().facts_for(subject)
     }
 
+    /// The value type every file other than `excluded` agrees on for
+    /// `constant`, or None when they disagree or none declares one.
+    pub fn agreed_constant_type_outside_file(
+        &self,
+        constant: &FullyQualifiedName,
+        excluded: SourceFileId,
+    ) -> Option<RubyType> {
+        self.engine
+            .types
+            .store()
+            .agreed_type_outside_file(&TypeSubject::Constant(constant.clone()), excluded)
+            .cloned()
+    }
+
     /// All stored type facts, detached from the engine's internal indexes.
     pub fn all_type_facts(&self) -> Vec<TypeFact> {
         self.engine.types.store().all_facts()

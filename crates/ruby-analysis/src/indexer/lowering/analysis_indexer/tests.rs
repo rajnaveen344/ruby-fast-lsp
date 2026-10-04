@@ -344,7 +344,7 @@ fn class_reopening_through_a_known_cross_file_alias_keeps_the_original_owner_ide
     let known_constant_types = HashMap::from([(alias_fqn, RubyType::ClassReference(original_fqn))]);
 
     let index =
-        AnalysisIndexer::with_known_semantics(file(), known_namespaces, known_constant_types)
+        AnalysisIndexer::with_known_semantics(file(), known_namespaces, &known_constant_types)
             .index_source(
                 "module Types\n\
              \x20 class Alias\n\
@@ -384,7 +384,7 @@ fn nested_class_declaration_does_not_reopen_a_same_named_lexical_ancestor() {
     )]);
 
     let index =
-        AnalysisIndexer::with_known_semantics(file(), known_namespaces, known_constant_types)
+        AnalysisIndexer::with_known_semantics(file(), known_namespaces, &known_constant_types)
             .index_source(
                 "module IOStreams\n\
                      \x20 module Gzip\n\

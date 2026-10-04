@@ -51,7 +51,7 @@ use crate::indexer::documents::scope_rules::{
 use crate::indexer::yard::types::YardMethodDoc;
 use crate::indexer::{is_framework_instance_block_call_name, LocalScopeKind};
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     /// Visit a call's receiver, arguments, and block. A receiverless
     /// framework block such as `included do … end` runs on the class.
     fn visit_call_children(&mut self, node: &CallNode<'_>) {
@@ -73,7 +73,7 @@ impl AnalysisIndexer {
     }
 }
 
-impl AnalysisIndexer {
+impl AnalysisIndexer<'_> {
     /// Declare the constant a `Parent::NAME` write site names.
     fn push_constant_path_write(
         &mut self,
@@ -93,7 +93,7 @@ impl AnalysisIndexer {
     }
 }
 
-impl Visit<'_> for AnalysisIndexer {
+impl Visit<'_> for AnalysisIndexer<'_> {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
         let lexical_context = self.scope.get_ns_stack();
         let has_explicit_superclass = node.superclass().is_some();
