@@ -415,12 +415,13 @@ fn append_top_level_instance_fallback(
             let mut fallback = Vec::new();
             let mut fallback_visited = std::collections::HashSet::new();
             compute_top_level_instance_fallback(engine, &mut fallback, &mut fallback_visited);
+            let fallback: std::sync::Arc<[FullyQualifiedName]> = fallback.into();
             engine.cache_top_level_method_lookup_chain(fallback.clone());
             fallback
         });
-    for fqn in fallback {
+    for fqn in fallback.iter() {
         if visited.insert(fqn.clone()) {
-            chain.push(fqn);
+            chain.push(fqn.clone());
         }
     }
 }
@@ -430,14 +431,16 @@ fn append_universal_object_fallback(
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
-    for fqn in compute_universal_object_fallback(engine) {
+    for fqn in compute_universal_object_fallback(engine).iter() {
         if visited.insert(fqn.clone()) {
-            chain.push(fqn);
+            chain.push(fqn.clone());
         }
     }
 }
 
-fn compute_universal_object_fallback(engine: &crate::engine::Project) -> Vec<FullyQualifiedName> {
+fn compute_universal_object_fallback(
+    engine: &crate::engine::Project,
+) -> std::sync::Arc<[FullyQualifiedName]> {
     if let Some(cached) = engine.cached_universal_object_method_lookup_chain() {
         return cached;
     }
@@ -447,6 +450,7 @@ fn compute_universal_object_fallback(engine: &crate::engine::Project) -> Vec<Ful
     if engine.view().has_graph_node(&object) {
         build_mro(engine, &object, &mut fallback, &mut visited, false);
     }
+    let fallback: std::sync::Arc<[FullyQualifiedName]> = fallback.into();
     engine.cache_universal_object_method_lookup_chain(fallback.clone());
     fallback
 }

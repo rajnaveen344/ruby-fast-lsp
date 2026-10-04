@@ -1,9 +1,9 @@
 use crate::invariant::ExpectInvariant;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::core::names::fqn_id::ConstLookupId;
 use crate::core::names::fqn_id::FqnId;
-use crate::core::storage::memory_estimate::{map_table_bytes, set_table_bytes, vec_payload_bytes};
+use crate::core::storage::memory_estimate::{map_table_bytes, vec_payload_bytes};
 use crate::core::{FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -189,7 +189,7 @@ impl StoredGraphEdgeFact {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GraphEdgeId(usize);
+pub struct GraphEdgeId(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GraphNodeDefinition {
@@ -197,19 +197,21 @@ struct GraphNodeDefinition {
     range: TextRange,
 }
 
+/// One edge endpoint on a node: the edge, its kind, and whether the node is
+/// the edge's source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GraphLink {
+    edge: GraphEdgeId,
+    kind: GraphEdgeKind,
+    outgoing: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GraphNode {
     definitions: Vec<GraphNodeDefinition>,
-    superclasses: Vec<GraphEdgeId>,
-    includes: Vec<GraphEdgeId>,
-    prepends: Vec<GraphEdgeId>,
-    extends: Vec<GraphEdgeId>,
-    execution_context_applications: Vec<GraphEdgeId>,
-    children: Vec<GraphEdgeId>,
-    included_by: Vec<GraphEdgeId>,
-    prepended_by: Vec<GraphEdgeId>,
-    extended_by: Vec<GraphEdgeId>,
-    execution_context_templates: Vec<GraphEdgeId>,
+    /// Incoming links first, then outgoing links, so hub nodes with many
+    /// incoming edges answer outgoing queries without scanning them.
+    links: Vec<GraphLink>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,7 +247,8 @@ pub struct SemanticGraph {
     nodes: HashMap<FqnId, GraphNode>,
     edges: Vec<Option<GraphEdge>>,
     free_edges: Vec<GraphEdgeId>,
-    node_definition_files: HashSet<SourceFileId>,
+    /// Nodes with at least one definition in each file.
+    nodes_by_file: HashMap<SourceFileId, Vec<FqnId>>,
     edges_by_file: HashMap<SourceFileId, Vec<GraphEdgeId>>,
     unresolved_by_file: HashMap<SourceFileId, Vec<StoredUnresolvedGraphEdgeFact>>,
     unresolved_explicit_superclasses_by_source: HashMap<FqnId, usize>,
@@ -254,13 +257,23 @@ pub struct SemanticGraph {
 
 impl SemanticGraph {
     pub fn add_node(&mut self, fact: StoredGraphNodeFact) {
-        self.node_definition_files.insert(fact.range.file_id);
+        let file_id = fact.range.file_id;
         let node = self.nodes.entry(fact.fqn).or_default();
+        let first_in_file = !node
+            .definitions
+            .iter()
+            .any(|definition| definition.range.file_id == file_id);
         node.definitions.push(GraphNodeDefinition {
             kind: fact.kind,
             range: fact.range,
         });
         sort_node_definitions(&mut node.definitions);
+        if first_in_file {
+            self.nodes_by_file
+                .entry(file_id)
+                .or_default()
+                .push(fact.fqn);
+        }
     }
 
     pub fn add_edge(&mut self, fact: StoredGraphEdgeFact) {
@@ -342,58 +355,38 @@ impl SemanticGraph {
     }
 
     pub fn edges_from(&self, source: FqnId) -> Vec<StoredGraphEdgeFact> {
-        let Some(node) = self.nodes.get(&source) else {
-            return Vec::new();
-        };
-        let mut ids = Vec::new();
-        ids.extend(node.superclasses.iter().copied());
-        ids.extend(node.includes.iter().copied());
-        ids.extend(node.prepends.iter().copied());
-        ids.extend(node.extends.iter().copied());
-        ids.extend(node.execution_context_applications.iter().copied());
-        self.edges_by_ids(&ids)
+        self.linked_edges(source, true, |_| true)
     }
 
     /// Outgoing edges of one kind, sorted by the same source-range key as
     /// [`Self::edges_from`]. Callers that only need include/prepend/extend
     /// must not clone every other outgoing kind.
     pub fn edges_from_kind(&self, source: FqnId, kind: GraphEdgeKind) -> Vec<StoredGraphEdgeFact> {
-        let Some(node) = self.nodes.get(&source) else {
-            return Vec::new();
-        };
-        self.edges_by_ids(outgoing_ids(node, kind))
+        self.linked_edges(source, true, |link_kind| link_kind == kind)
     }
 
     /// Superclass, include, prepend, and extend edges only. Execution-context
     /// applications are not Ruby ancestry and must not enter this list.
     pub fn ancestry_edges_from(&self, source: FqnId) -> Vec<StoredGraphEdgeFact> {
-        let Some(node) = self.nodes.get(&source) else {
-            return Vec::new();
-        };
-        let mut ids = Vec::with_capacity(
-            node.superclasses.len()
-                + node.includes.len()
-                + node.prepends.len()
-                + node.extends.len(),
-        );
-        ids.extend(node.superclasses.iter().copied());
-        ids.extend(node.includes.iter().copied());
-        ids.extend(node.prepends.iter().copied());
-        ids.extend(node.extends.iter().copied());
-        self.edges_by_ids(&ids)
+        self.linked_edges(source, true, |kind| {
+            kind != GraphEdgeKind::ExecutionContextApplication
+        })
     }
 
     pub fn superclass_resolution(&self, source: FqnId) -> StoredSuperclassResolution {
         let Some(node) = self.nodes.get(&source) else {
             return StoredSuperclassResolution::Missing;
         };
-        let has_explicit = node
-            .superclasses
-            .iter()
-            .filter_map(|id| self.edge(*id))
-            .any(|edge| edge.provenance == GraphEdgeProvenance::Explicit);
+        let superclasses = || {
+            node.outgoing()
+                .iter()
+                .filter(|link| link.kind == GraphEdgeKind::Superclass)
+                .filter_map(|link| self.edge(link.edge))
+        };
+        let has_explicit =
+            superclasses().any(|edge| edge.provenance == GraphEdgeProvenance::Explicit);
         let mut chosen: Option<StoredGraphEdgeFact> = None;
-        for edge in node.superclasses.iter().filter_map(|id| self.edge(*id)) {
+        for edge in superclasses() {
             if has_explicit && edge.provenance != GraphEdgeProvenance::Explicit {
                 continue;
             }
@@ -426,22 +419,13 @@ impl SemanticGraph {
     }
 
     pub fn edges_to(&self, target: FqnId) -> Vec<StoredGraphEdgeFact> {
-        let Some(node) = self.nodes.get(&target) else {
-            return Vec::new();
-        };
-        let mut ids = Vec::new();
-        ids.extend(node.children.iter().copied());
-        ids.extend(node.included_by.iter().copied());
-        ids.extend(node.prepended_by.iter().copied());
-        ids.extend(node.extended_by.iter().copied());
-        ids.extend(node.execution_context_templates.iter().copied());
-        self.edges_by_ids(&ids)
+        self.linked_edges(target, false, |_| true)
     }
 
     pub fn nodes_in_file(&self, file_id: SourceFileId) -> Vec<StoredGraphNodeFact> {
         let mut facts = Vec::new();
-        for (fqn, node) in &self.nodes {
-            for definition in &node.definitions {
+        for fqn in self.nodes_by_file.get(&file_id).into_iter().flatten() {
+            for definition in &self.indexed_node(*fqn).definitions {
                 if definition.range.file_id == file_id {
                     facts.push(StoredGraphNodeFact::new(
                         *fqn,
@@ -458,7 +442,7 @@ impl SemanticGraph {
     pub fn edges_in_file(&self, file_id: SourceFileId) -> Vec<StoredGraphEdgeFact> {
         self.edges_by_file
             .get(&file_id)
-            .map(|ids| self.edges_by_ids(ids))
+            .map(|ids| self.edges_by_ids(ids.iter().copied()))
             .unwrap_or_default()
     }
 
@@ -501,20 +485,19 @@ impl SemanticGraph {
 
     /// Whether any node definition currently belongs to `file_id`.
     pub fn defines_nodes_in(&self, file_id: SourceFileId) -> bool {
-        self.node_definition_files.contains(&file_id)
+        self.nodes_by_file.contains_key(&file_id)
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
-        if self.node_definition_files.remove(&file_id) {
-            let mut empty_nodes = Vec::new();
-            for (fqn, node) in &mut self.nodes {
-                node.definitions
-                    .retain(|definition| definition.range.file_id != file_id);
-                if node.definitions.is_empty() && node_has_no_edges(node) {
-                    empty_nodes.push(*fqn);
-                }
-            }
-            for fqn in empty_nodes {
+        for fqn in self.nodes_by_file.remove(&file_id).unwrap_or_default() {
+            let node = self.nodes.get_mut(&fqn).expect_invariant(
+                "graph file node index points to a missing node",
+                "a node keeps its entry while any file still defines it",
+                "remove a node only after its last definition leaves nodes_by_file",
+            );
+            node.definitions
+                .retain(|definition| definition.range.file_id != file_id);
+            if node.is_empty() {
                 self.nodes.remove(&fqn);
             }
         }
@@ -531,7 +514,6 @@ impl SemanticGraph {
         for edge_id in stale_edges {
             self.remove_edge(edge_id);
         }
-        self.unresolved_by_file.remove(&file_id);
     }
 
     pub fn replace_file(
@@ -571,11 +553,10 @@ impl SemanticGraph {
         }
     }
 
-    pub fn unresolved_edges(&self) -> Vec<StoredUnresolvedGraphEdgeFact> {
+    pub fn unresolved_edges(&self) -> impl Iterator<Item = StoredUnresolvedGraphEdgeFact> + '_ {
         self.unresolved_by_file
             .values()
             .flat_map(|edges| edges.iter().copied())
-            .collect()
     }
 
     pub fn unresolved_edge_count(&self) -> usize {
@@ -640,24 +621,19 @@ impl SemanticGraph {
         map_table_bytes(&self.nodes)
             + vec_payload_bytes(&self.edges)
             + vec_payload_bytes(&self.free_edges)
-            + set_table_bytes(&self.node_definition_files)
+            + map_table_bytes(&self.nodes_by_file)
             + map_table_bytes(&self.edges_by_file)
             + map_table_bytes(&self.unresolved_explicit_superclasses_by_source)
             + map_table_bytes(&self.unresolved_explicit_sources_by_source)
             + self
                 .nodes
                 .values()
-                .map(|node| {
-                    vec_payload_bytes(&node.definitions)
-                        + vec_payload_bytes(&node.superclasses)
-                        + vec_payload_bytes(&node.includes)
-                        + vec_payload_bytes(&node.prepends)
-                        + vec_payload_bytes(&node.extends)
-                        + vec_payload_bytes(&node.children)
-                        + vec_payload_bytes(&node.included_by)
-                        + vec_payload_bytes(&node.prepended_by)
-                        + vec_payload_bytes(&node.extended_by)
-                })
+                .map(|node| vec_payload_bytes(&node.definitions) + vec_payload_bytes(&node.links))
+                .sum::<usize>()
+            + self
+                .nodes_by_file
+                .values()
+                .map(vec_payload_bytes)
                 .sum::<usize>()
             + self
                 .edges_by_file
@@ -679,7 +655,7 @@ impl SemanticGraph {
         self.nodes.shrink_to_fit();
         self.edges.shrink_to_fit();
         self.free_edges.shrink_to_fit();
-        self.node_definition_files.shrink_to_fit();
+        self.nodes_by_file.shrink_to_fit();
         self.edges_by_file.shrink_to_fit();
         self.unresolved_by_file.shrink_to_fit();
         self.unresolved_explicit_superclasses_by_source
@@ -687,14 +663,10 @@ impl SemanticGraph {
         self.unresolved_explicit_sources_by_source.shrink_to_fit();
         for node in self.nodes.values_mut() {
             node.definitions.shrink_to_fit();
-            node.superclasses.shrink_to_fit();
-            node.includes.shrink_to_fit();
-            node.prepends.shrink_to_fit();
-            node.extends.shrink_to_fit();
-            node.children.shrink_to_fit();
-            node.included_by.shrink_to_fit();
-            node.prepended_by.shrink_to_fit();
-            node.extended_by.shrink_to_fit();
+            node.links.shrink_to_fit();
+        }
+        for fqns in self.nodes_by_file.values_mut() {
+            fqns.shrink_to_fit();
         }
         for edges in self.edges_by_file.values_mut() {
             edges.shrink_to_fit();
@@ -710,7 +682,7 @@ impl SemanticGraph {
         let target = edge.target;
         let kind = edge.kind;
         let id = if let Some(id) = self.free_edges.pop() {
-            let slot = self.edges.get_mut(id.0).expect_invariant(
+            let slot = self.edges.get_mut(id.0 as usize).expect_invariant(
                 "graph edge free list points outside edge arena",
                 "free ids must come from previous arena slots",
                 "only push ids returned by SemanticGraph::remove_edge",
@@ -724,19 +696,22 @@ impl SemanticGraph {
             *slot = Some(edge);
             id
         } else {
-            let id = GraphEdgeId(self.edges.len());
+            let id = GraphEdgeId(u32::try_from(self.edges.len()).expect_invariant(
+                "graph edge arena exceeded u32 ids",
+                "GraphEdgeId stores u32",
+                "widen GraphEdgeId before storing more than u32::MAX edges",
+            ));
             self.edges.push(Some(edge));
             id
         };
 
-        self.nodes
-            .entry(source)
-            .or_default()
-            .push_outgoing(kind, id);
-        self.nodes
-            .entry(target)
-            .or_default()
-            .push_incoming(kind, id);
+        for (fqn, outgoing) in [(source, true), (target, false)] {
+            self.nodes.entry(fqn).or_default().link(GraphLink {
+                edge: id,
+                kind,
+                outgoing,
+            });
+        }
         self.edges_by_file.entry(file_id).or_default().push(id);
         id
     }
@@ -744,30 +719,60 @@ impl SemanticGraph {
     fn remove_edge(&mut self, id: GraphEdgeId) {
         let edge = self
             .edges
-            .get_mut(id.0)
+            .get_mut(id.0 as usize)
             .and_then(Option::take)
             .expect_invariant(
                 "graph edge file index points to missing edge",
                 "edge ids in edges_by_file must reference live edges",
                 "remove stale edge ids from edges_by_file when deleting edges",
             );
-        if let Some(source) = self.nodes.get_mut(&edge.source) {
-            source.retain_outgoing(edge.kind, id);
-        }
-        if let Some(target) = self.nodes.get_mut(&edge.target) {
-            target.retain_incoming(edge.kind, id);
+        for (fqn, outgoing) in [(edge.source, true), (edge.target, false)] {
+            if let Some(node) = self.nodes.get_mut(&fqn) {
+                node.unlink(id, outgoing);
+            }
         }
         self.free_edges.push(id);
     }
 
     fn edge(&self, id: GraphEdgeId) -> Option<GraphEdge> {
-        self.edges.get(id.0).and_then(|edge| *edge)
+        self.edges.get(id.0 as usize).and_then(|edge| *edge)
     }
 
-    fn edges_by_ids(&self, ids: &[GraphEdgeId]) -> Vec<StoredGraphEdgeFact> {
+    fn indexed_node(&self, fqn: FqnId) -> &GraphNode {
+        self.nodes.get(&fqn).expect_invariant(
+            "graph file node index points to a missing node",
+            "a node keeps its entry while any file still defines it",
+            "remove a node only after its last definition leaves nodes_by_file",
+        )
+    }
+
+    /// The edges in one direction of `fqn` whose kind `selected` keeps, in
+    /// source order.
+    fn linked_edges(
+        &self,
+        fqn: FqnId,
+        outgoing: bool,
+        selected: impl Fn(GraphEdgeKind) -> bool,
+    ) -> Vec<StoredGraphEdgeFact> {
+        let Some(node) = self.nodes.get(&fqn) else {
+            return Vec::new();
+        };
+        let links = if outgoing {
+            node.outgoing()
+        } else {
+            node.incoming()
+        };
+        self.edges_by_ids(
+            links
+                .iter()
+                .filter(|link| selected(link.kind))
+                .map(|link| link.edge),
+        )
+    }
+
+    fn edges_by_ids(&self, ids: impl Iterator<Item = GraphEdgeId>) -> Vec<StoredGraphEdgeFact> {
         let mut facts: Vec<_> = ids
-            .iter()
-            .filter_map(|id| self.edge(*id).map(StoredGraphEdgeFact::from))
+            .filter_map(|id| self.edge(id).map(StoredGraphEdgeFact::from))
             .collect();
         sort_graph_edges(&mut facts);
         facts
@@ -775,76 +780,57 @@ impl SemanticGraph {
 }
 
 impl GraphNode {
-    fn push_outgoing(&mut self, kind: GraphEdgeKind, id: GraphEdgeId) {
-        match kind {
-            GraphEdgeKind::Superclass => self.superclasses.push(id),
-            GraphEdgeKind::Include => self.includes.push(id),
-            GraphEdgeKind::Prepend => self.prepends.push(id),
-            GraphEdgeKind::Extend => self.extends.push(id),
-            GraphEdgeKind::ExecutionContextApplication => {
-                self.execution_context_applications.push(id)
-            }
+    fn is_empty(&self) -> bool {
+        self.definitions.is_empty() && self.links.is_empty()
+    }
+
+    fn outgoing_start(&self) -> usize {
+        self.links.partition_point(|link| !link.outgoing)
+    }
+
+    fn incoming(&self) -> &[GraphLink] {
+        &self.links[..self.outgoing_start()]
+    }
+
+    fn outgoing(&self) -> &[GraphLink] {
+        &self.links[self.outgoing_start()..]
+    }
+
+    /// Add one endpoint, keeping incoming links before outgoing ones.
+    fn link(&mut self, link: GraphLink) {
+        let outgoing_start = self.outgoing_start();
+        self.links.push(link);
+        if !link.outgoing {
+            let last = self.links.len() - 1;
+            self.links.swap(outgoing_start, last);
         }
     }
 
-    fn push_incoming(&mut self, kind: GraphEdgeKind, id: GraphEdgeId) {
-        match kind {
-            GraphEdgeKind::Superclass => self.children.push(id),
-            GraphEdgeKind::Include => self.included_by.push(id),
-            GraphEdgeKind::Prepend => self.prepended_by.push(id),
-            GraphEdgeKind::Extend => self.extended_by.push(id),
-            GraphEdgeKind::ExecutionContextApplication => self.execution_context_templates.push(id),
+    /// Drop the endpoint of `edge` on this side. A self-loop keeps its other
+    /// endpoint.
+    fn unlink(&mut self, edge: GraphEdgeId, outgoing: bool) {
+        let outgoing_start = self.outgoing_start();
+        let side = if outgoing {
+            outgoing_start..self.links.len()
+        } else {
+            0..outgoing_start
+        };
+        let Some(offset) = self.links[side.clone()]
+            .iter()
+            .position(|link| link.edge == edge)
+        else {
+            return;
+        };
+        let position = side.start + offset;
+        if !outgoing {
+            // Move the hole to the end of the incoming run so the swap below
+            // only moves an outgoing link across the boundary.
+            self.links.swap(position, outgoing_start - 1);
+            self.links.swap_remove(outgoing_start - 1);
+        } else {
+            self.links.swap_remove(position);
         }
     }
-
-    fn retain_outgoing(&mut self, kind: GraphEdgeKind, stale: GraphEdgeId) {
-        match kind {
-            GraphEdgeKind::Superclass => self.superclasses.retain(|id| *id != stale),
-            GraphEdgeKind::Include => self.includes.retain(|id| *id != stale),
-            GraphEdgeKind::Prepend => self.prepends.retain(|id| *id != stale),
-            GraphEdgeKind::Extend => self.extends.retain(|id| *id != stale),
-            GraphEdgeKind::ExecutionContextApplication => self
-                .execution_context_applications
-                .retain(|id| *id != stale),
-        }
-    }
-
-    fn retain_incoming(&mut self, kind: GraphEdgeKind, stale: GraphEdgeId) {
-        match kind {
-            GraphEdgeKind::Superclass => self.children.retain(|id| *id != stale),
-            GraphEdgeKind::Include => self.included_by.retain(|id| *id != stale),
-            GraphEdgeKind::Prepend => self.prepended_by.retain(|id| *id != stale),
-            GraphEdgeKind::Extend => self.extended_by.retain(|id| *id != stale),
-            GraphEdgeKind::ExecutionContextApplication => {
-                self.execution_context_templates.retain(|id| *id != stale)
-            }
-        }
-    }
-}
-
-fn outgoing_ids(node: &GraphNode, kind: GraphEdgeKind) -> &[GraphEdgeId] {
-    match kind {
-        GraphEdgeKind::Superclass => node.superclasses.as_slice(),
-        GraphEdgeKind::Include => node.includes.as_slice(),
-        GraphEdgeKind::Prepend => node.prepends.as_slice(),
-        GraphEdgeKind::Extend => node.extends.as_slice(),
-        GraphEdgeKind::ExecutionContextApplication => {
-            node.execution_context_applications.as_slice()
-        }
-    }
-}
-
-fn node_has_no_edges(node: &GraphNode) -> bool {
-    node.superclasses.is_empty()
-        && node.includes.is_empty()
-        && node.prepends.is_empty()
-        && node.extends.is_empty()
-        && node.execution_context_applications.is_empty()
-        && node.children.is_empty()
-        && node.included_by.is_empty()
-        && node.prepended_by.is_empty()
-        && node.extended_by.is_empty()
-        && node.execution_context_templates.is_empty()
 }
 
 fn sort_node_definitions(definitions: &mut [GraphNodeDefinition]) {

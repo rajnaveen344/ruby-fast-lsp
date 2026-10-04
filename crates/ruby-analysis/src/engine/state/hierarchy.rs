@@ -3,6 +3,7 @@
 //! method lookup chain caches that graph replacement invalidates.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 
@@ -11,9 +12,7 @@ use crate::core::storage::graph_store::{
     SemanticGraph, StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
     StoredUnresolvedGraphEdgeFact,
 };
-use crate::core::storage::memory_estimate::{
-    fqn_heap_bytes, map_table_bytes, set_table_bytes, vec_payload_bytes,
-};
+use crate::core::storage::memory_estimate::{fqn_heap_bytes, map_table_bytes, vec_payload_bytes};
 use crate::core::storage::reference_store::ConstLookup;
 use crate::core::{
     ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
@@ -30,9 +29,12 @@ use crate::engine::View;
 pub(in crate::engine) struct Hierarchy {
     graph: SemanticGraph,
     retried: RetriedEdges,
-    top_level_method_lookup_chain: Mutex<Option<Vec<FullyQualifiedName>>>,
-    universal_object_method_lookup_chain: Mutex<Option<Vec<FullyQualifiedName>>>,
+    top_level_method_lookup_chain: Mutex<Option<MethodLookupChain>>,
+    universal_object_method_lookup_chain: Mutex<Option<MethodLookupChain>>,
 }
+
+/// A cached lookup chain; readers share it instead of copying its names.
+pub(in crate::engine) type MethodLookupChain = Arc<[FullyQualifiedName]>;
 
 /// A clone shares no query cache with its source engine.
 impl Clone for Hierarchy {
@@ -61,17 +63,17 @@ struct RetriedEdge {
 struct RetriedEdges {
     /// Records keyed by the file that owns the origin edge.
     by_file: HashMap<SourceFileId, Vec<RetriedEdge>>,
-    /// Origin files of the records resolved to each target.
-    files_by_target: HashMap<FqnId, HashSet<SourceFileId>>,
+    /// Sorted origin files of the records resolved to each target.
+    files_by_target: HashMap<FqnId, Vec<SourceFileId>>,
 }
 
 impl RetriedEdges {
     fn record(&mut self, retried: RetriedEdge) {
         let file_id = retried.origin.range.file_id;
-        self.files_by_target
-            .entry(retried.target)
-            .or_default()
-            .insert(file_id);
+        let files = self.files_by_target.entry(retried.target).or_default();
+        if let Err(position) = files.binary_search(&file_id) {
+            files.insert(position, file_id);
+        }
         self.by_file.entry(file_id).or_default().push(retried);
     }
 
@@ -83,7 +85,9 @@ impl RetriedEdges {
         };
         for record in records {
             if let Some(files) = self.files_by_target.get_mut(&record.target) {
-                files.remove(&file_id);
+                if let Ok(position) = files.binary_search(&file_id) {
+                    files.remove(position);
+                }
                 if files.is_empty() {
                     self.files_by_target.remove(&record.target);
                 }
@@ -137,7 +141,7 @@ impl RetriedEdges {
             + self
                 .files_by_target
                 .values()
-                .map(set_table_bytes)
+                .map(vec_payload_bytes)
                 .sum::<usize>()
     }
 
@@ -250,7 +254,6 @@ impl Hierarchy {
     ) -> HashSet<Vec<RubyConstant>> {
         self.graph
             .unresolved_edges()
-            .into_iter()
             .filter(|edge| {
                 let lookup = names.const_lookup(edge.target).expect_invariant(
                     "unresolved graph edge points to a missing constant lookup",
@@ -262,11 +265,10 @@ impl Hierarchy {
                     && lookup.path.len() == 1
                     && lookup.path[0].as_str() == "Object")
             })
-            .filter_map(|edge| {
-                names
-                    .fqn(edge.source)
-                    .map(FullyQualifiedName::namespace_parts)
-            })
+            .map(|edge| edge.source)
+            .collect::<HashSet<FqnId>>()
+            .into_iter()
+            .filter_map(|source| names.fqn(source).map(FullyQualifiedName::namespace_parts))
             .collect()
     }
 
@@ -423,26 +425,23 @@ impl Hierarchy {
 
     pub(in crate::engine) fn cached_top_level_method_lookup_chain(
         &self,
-    ) -> Option<Vec<FullyQualifiedName>> {
+    ) -> Option<MethodLookupChain> {
         self.top_level_method_lookup_chain.lock().clone()
     }
 
-    pub(in crate::engine) fn cache_top_level_method_lookup_chain(
-        &self,
-        chain: Vec<FullyQualifiedName>,
-    ) {
+    pub(in crate::engine) fn cache_top_level_method_lookup_chain(&self, chain: MethodLookupChain) {
         *self.top_level_method_lookup_chain.lock() = Some(chain);
     }
 
     pub(in crate::engine) fn cached_universal_object_method_lookup_chain(
         &self,
-    ) -> Option<Vec<FullyQualifiedName>> {
+    ) -> Option<MethodLookupChain> {
         self.universal_object_method_lookup_chain.lock().clone()
     }
 
     pub(in crate::engine) fn cache_universal_object_method_lookup_chain(
         &self,
-        chain: Vec<FullyQualifiedName>,
+        chain: MethodLookupChain,
     ) {
         *self.universal_object_method_lookup_chain.lock() = Some(chain);
     }
@@ -454,8 +453,9 @@ impl Hierarchy {
     }
 
     pub(in crate::engine) fn method_lookup_chain_heap_bytes(&self) -> usize {
-        let chain_bytes = |chain: &Vec<FullyQualifiedName>| {
-            vec_payload_bytes(chain) + chain.iter().map(fqn_heap_bytes).sum::<usize>()
+        let chain_bytes = |chain: &MethodLookupChain| {
+            std::mem::size_of_val::<[FullyQualifiedName]>(chain)
+                + chain.iter().map(fqn_heap_bytes).sum::<usize>()
         };
         self.top_level_method_lookup_chain
             .lock()
@@ -499,26 +499,23 @@ impl Hierarchy {
 impl Project {
     pub(in crate::engine) fn cached_top_level_method_lookup_chain(
         &self,
-    ) -> Option<Vec<FullyQualifiedName>> {
+    ) -> Option<MethodLookupChain> {
         self.hierarchy.cached_top_level_method_lookup_chain()
     }
 
-    pub(in crate::engine) fn cache_top_level_method_lookup_chain(
-        &self,
-        chain: Vec<FullyQualifiedName>,
-    ) {
+    pub(in crate::engine) fn cache_top_level_method_lookup_chain(&self, chain: MethodLookupChain) {
         self.hierarchy.cache_top_level_method_lookup_chain(chain);
     }
 
     pub(in crate::engine) fn cached_universal_object_method_lookup_chain(
         &self,
-    ) -> Option<Vec<FullyQualifiedName>> {
+    ) -> Option<MethodLookupChain> {
         self.hierarchy.cached_universal_object_method_lookup_chain()
     }
 
     pub(in crate::engine) fn cache_universal_object_method_lookup_chain(
         &self,
-        chain: Vec<FullyQualifiedName>,
+        chain: MethodLookupChain,
     ) {
         self.hierarchy
             .cache_universal_object_method_lookup_chain(chain);

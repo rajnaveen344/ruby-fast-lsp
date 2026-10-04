@@ -193,14 +193,14 @@ fn node_definition_file_index_tracks_only_files_that_require_node_cleanup() {
         TextRange::new(edge_only_file, 0, 10),
     ));
 
-    assert!(store.node_definition_files.contains(&node_file));
+    assert!(store.defines_nodes_in(node_file));
     assert!(
-        !store.node_definition_files.contains(&edge_only_file),
+        !store.defines_nodes_in(edge_only_file),
         "edge endpoint nodes must not trigger a global definition cleanup scan"
     );
 
     store.replace_file(node_file, [], [], []);
-    assert!(!store.node_definition_files.contains(&node_file));
+    assert!(!store.defines_nodes_in(node_file));
     assert!(store.nodes_for(source).is_empty());
 }
 
@@ -422,4 +422,47 @@ fn remove_edge_fact_removes_one_matching_edge_and_its_file_index() {
     assert!(store.remove_edge_fact(&second));
     assert!(store.edges_in_file(file()).is_empty());
     assert_eq!(store.edge_count(), 0);
+}
+
+#[test]
+fn hub_node_keeps_both_directions_through_mixed_removals() {
+    let hub = FqnId(1);
+    let parent = FqnId(2);
+    let children = [FqnId(3), FqnId(4), FqnId(5)];
+    let range = |start| TextRange::new(file(), start, start + 5);
+    let outgoing = StoredGraphEdgeFact::new(hub, parent, GraphEdgeKind::Superclass, range(0));
+    let looped = StoredGraphEdgeFact::new(hub, hub, GraphEdgeKind::Extend, range(10));
+    let incoming = children.map(|child| {
+        StoredGraphEdgeFact::new(
+            child,
+            hub,
+            GraphEdgeKind::Superclass,
+            range(20 + child.0 * 10),
+        )
+    });
+    let mut store = SemanticGraph::default();
+    store.add_edge(outgoing);
+    store.add_edge(incoming[0]);
+    store.add_edge(looped);
+    store.add_edge(incoming[1]);
+    store.add_edge(incoming[2]);
+
+    assert_eq!(store.edges_from(hub), vec![outgoing, looped]);
+    assert_eq!(
+        store.edges_to(hub),
+        vec![looped, incoming[0], incoming[1], incoming[2]]
+    );
+
+    assert!(store.remove_edge_fact(&incoming[0]));
+    assert_eq!(store.edges_from(hub), vec![outgoing, looped]);
+    assert_eq!(store.edges_to(hub), vec![looped, incoming[1], incoming[2]]);
+
+    assert!(store.remove_edge_fact(&looped));
+    assert!(store.remove_edge_fact(&incoming[2]));
+    assert_eq!(store.edges_from(hub), vec![outgoing]);
+    assert_eq!(store.edges_to(hub), vec![incoming[1]]);
+    assert_eq!(
+        store.superclass_resolution(hub),
+        StoredSuperclassResolution::Unique(outgoing)
+    );
 }
