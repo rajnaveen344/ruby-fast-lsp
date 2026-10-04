@@ -666,9 +666,17 @@ impl FileProcessor {
         );
         let assembly_elapsed = assembly_started.elapsed();
         let replacement_started = Instant::now();
+        let mut analysis = analysis;
         let template = if capture_project_neutral_template {
+            // Capture never retains, so the template takes the facts unless
+            // the engine also needs its own copy.
+            let template_facts = if insert_collected_facts {
+                analysis.clone()
+            } else {
+                std::mem::take(&mut analysis)
+            };
             Some(
-                ProjectNeutralFileFactsTemplate::try_new(analysis_file_id, analysis.clone())
+                ProjectNeutralFileFactsTemplate::try_new(analysis_file_id, template_facts)
                     .with_context(|| {
                         format!(
                             "facts for {} are not safe for project-neutral dependency reuse",

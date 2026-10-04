@@ -696,11 +696,8 @@ mod tests {
             kind: SourceKind::Stub,
         });
         let auth_file = engine.register_gem_file(
-            SourceFileInput {
-                path: "/tmp/gems/auth.rb".into(),
-                content: "module Auth; end".into(),
-                kind: SourceKind::Gem,
-            },
+            "/tmp/gems/auth.rb".into(),
+            "module Auth; end",
             LibraryPackageId::new("auth", "1.0.0"),
         );
         let user = FullyQualifiedName::namespace(vec![constant("User")]);
@@ -767,11 +764,8 @@ mod tests {
             kind: SourceKind::Stub,
         });
         let as_string = engine.register_gem_file(
-            SourceFileInput {
-                path: "/tmp/gems/activesupport-7.1.0/lib/active_support/core_ext/string.rb".into(),
-                content: "class String; def blank?; end; end".into(),
-                kind: SourceKind::Gem,
-            },
+            "/tmp/gems/activesupport-7.1.0/lib/active_support/core_ext/string.rb".into(),
+            "class String; def blank?; end; end",
             LibraryPackageId::new("activesupport", "7.1.0"),
         );
         let string = FullyQualifiedName::namespace(vec![constant("String")]);

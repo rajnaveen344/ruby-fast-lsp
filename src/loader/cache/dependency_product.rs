@@ -1,10 +1,9 @@
 use crate::invariant::ExpectInvariant;
 use crate::utils::persistent_cache::{PersistentProduct, PersistentProductKind};
 use anyhow::{anyhow, Result};
-use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{
     Project, ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate, ResolveMode,
-    SemanticExportFingerprint, SourceFileInput,
+    SemanticExportFingerprint,
 };
 use ruby_analysis::stats::{self, StatsRegistry};
 use serde::{Deserialize, Serialize};
@@ -439,11 +438,8 @@ impl GemDependencyProduct {
         let mut uris = Vec::with_capacity(prepared.len());
         for (source, template, uri) in prepared {
             let file_id = engine.register_gem_file(
-                SourceFileInput {
-                    path: source.physical_path.clone(),
-                    content: source.content.to_string(),
-                    kind: SourceKind::Gem,
-                },
+                source.physical_path.clone(),
+                &source.content,
                 source.library_package(),
             );
             engine.update(
@@ -522,16 +518,7 @@ impl GemDependencyProduct {
         let mut uris = Vec::with_capacity(prepared.len());
         for (source, template, uri) in prepared {
             let package = source.library_package();
-            let content =
-                Arc::try_unwrap(source.content).unwrap_or_else(|shared| shared.as_ref().clone());
-            let file_id = engine.register_gem_file(
-                SourceFileInput {
-                    path: source.physical_path,
-                    content,
-                    kind: SourceKind::Gem,
-                },
-                package,
-            );
+            let file_id = engine.register_gem_file(source.physical_path, &source.content, package);
             engine.update(
                 file_id,
                 template.facts.instantiate(file_id),
@@ -682,9 +669,9 @@ mod tests {
     use super::*;
     use ruby_analysis::core::{
         FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId,
-        SymbolFact, SymbolKind, TextRange,
+        SourceKind, SymbolFact, SymbolKind, TextRange,
     };
-    use ruby_analysis::engine::ProjectNeutralFileFactsTemplate;
+    use ruby_analysis::engine::{ProjectNeutralFileFactsTemplate, SourceFileInput};
 
     fn empty_seed() -> SemanticExportFingerprint {
         Project::new().view().semantic_context_fingerprint()

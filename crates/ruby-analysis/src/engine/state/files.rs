@@ -239,6 +239,7 @@ impl Files {
         path: PathBuf,
         content: &str,
         kind: SourceKind,
+        library_package: Option<LibraryPackageId>,
     ) -> SourceFileId {
         let line_index = SourceLineIndex::new(content);
         let content_hash = source_hash(content);
@@ -247,7 +248,14 @@ impl Files {
         } else {
             Some(content.to_string())
         };
-        self.register_indexed(path, kind, line_index, content_hash, source, None)
+        self.register_indexed(
+            path,
+            kind,
+            line_index,
+            content_hash,
+            source,
+            library_package,
+        )
     }
 
     fn register_indexed(
@@ -332,7 +340,7 @@ impl Files {
         if self.snapshot_for_path(&path, engine_instance_id) != expected_snapshot {
             return None;
         }
-        let file_id = self.register_borrowed(path, content, kind);
+        let file_id = self.register_borrowed(path, content, kind, None);
         let file = self.get(file_id).unwrap_or_else(|| {
             unreachable_invariant!(
                 what = "conditional source registration lost file id {:?}",
@@ -438,20 +446,17 @@ impl Project {
         self.files.register_owned(file, None)
     }
 
-    /// Register a locked gem source with explicit package identity for library-tree grouping.
+    /// Register a locked gem source with explicit package identity for
+    /// library-tree grouping. The caller keeps the source buffer; see
+    /// [`Self::register_file_borrowed`] for what the engine retains.
     pub fn register_gem_file(
         &mut self,
-        file: SourceFileInput,
+        path: PathBuf,
+        content: &str,
         package: LibraryPackageId,
     ) -> SourceFileId {
-        invariant!(
-            file.kind == SourceKind::Gem,
-            what = "register_gem_file received SourceKind::{:?}",
-            why = "only Gem sources carry locked package identity",
-            fix = "use register_file for non-gem sources or pass SourceKind::Gem",
-            file.kind,
-        );
-        self.files.register_owned(file, Some(package))
+        self.files
+            .register_borrowed(path, content, SourceKind::Gem, Some(package))
     }
 
     /// Register source whose caller retains the owned buffer. ASCII files need
@@ -463,7 +468,7 @@ impl Project {
         content: &str,
         kind: SourceKind,
     ) -> SourceFileId {
-        self.files.register_borrowed(path, content, kind)
+        self.files.register_borrowed(path, content, kind, None)
     }
 
     /// Register a source only if no newer registration occurred after the
