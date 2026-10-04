@@ -1,5 +1,6 @@
 //! Installed, Bundler, global, and navigation gem discovery through the selected runtime.
 
+use super::discovery_cache::BundlerDiscoveryCache;
 use super::lockfile::locked_version_for;
 use super::GemDiscoveryRecord;
 use super::GemDiscoveryStage;
@@ -7,7 +8,7 @@ use super::GemInfo;
 use super::GemSource;
 use super::IndexerGem;
 use anyhow::{anyhow, Context, Result};
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
@@ -221,6 +222,11 @@ impl IndexerGem {
     /// second runtime startup before fallback.
     pub(super) fn discover_auto_gems(&mut self) -> Result<()> {
         let gemfile = self.find_gemfile()?;
+        let saved = self.bundler_discovery_cache(&gemfile);
+        if let Some(gems) = saved.as_ref().and_then(BundlerDiscoveryCache::load) {
+            debug!("Reusing saved Bundler gems for unchanged inputs");
+            return self.process_gem_json(&gems, "Bundler", GemSource::BundlerInstalled);
+        }
         let script = r#"
             require 'json'
             project = lambda do |specs|
@@ -295,6 +301,11 @@ impl IndexerGem {
         match source {
             "bundler" => {
                 debug!("Using Bundler gems from Gemfile");
+                if let Some(saved) = &saved {
+                    if let Err(error) = saved.store(&encoded) {
+                        warn!("Bundler discovery result was not saved for reuse: {error:#}");
+                    }
+                }
                 self.process_gem_json(&encoded, "Bundler", GemSource::BundlerInstalled)
             }
             "global" => {
@@ -305,6 +316,25 @@ impl IndexerGem {
                 "automatic gem discovery returned unknown source `{other}`"
             )),
         }
+    }
+
+    /// The saved-result slot for this project, when reuse is enabled and the
+    /// project's inputs can be read.
+    fn bundler_discovery_cache(&self, gemfile: &Path) -> Option<BundlerDiscoveryCache> {
+        let cache_root = self.discovery_cache_root.as_deref()?;
+        let project_root = self.workspace_root.as_deref()?;
+        let ruby_executable = self.ruby_executable.as_deref()?;
+        BundlerDiscoveryCache::open(
+            cache_root,
+            project_root,
+            gemfile,
+            ruby_executable,
+            self.java_home.as_deref(),
+        )
+        .unwrap_or_else(|error| {
+            warn!("Bundler discovery reuse is unavailable for this project: {error:#}");
+            None
+        })
     }
 
     /// Discover all global gems

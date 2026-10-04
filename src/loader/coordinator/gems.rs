@@ -64,6 +64,9 @@ impl IndexingCoordinator {
                 .as_ref()
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
+        if let Some(cache_root) = &self.cache_root {
+            gem_indexer.set_discovery_cache_root(cache_root.clone());
+        }
         if let Some(runtime) = self.effective_runtime.clone() {
             gem_indexer.set_selected_runtime(
                 runtime.executable,

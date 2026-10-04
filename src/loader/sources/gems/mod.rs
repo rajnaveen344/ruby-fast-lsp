@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod discovery;
+mod discovery_cache;
 mod java;
 mod lockfile;
 mod products;
@@ -114,6 +115,8 @@ pub struct IndexerGem {
     ruby_executable: Option<PathBuf>,
     java_home: Option<PathBuf>,
     cached_gem_root_override: Option<PathBuf>,
+    /// Where Bundler discovery results are saved for reuse; unset disables it.
+    discovery_cache_root: Option<PathBuf>,
     file_processor: Option<FileProcessor>,
     /// The immutable core/runtime seed and its semantic identity, computed
     /// once because every gem manifest keys on it.
@@ -143,6 +146,7 @@ impl IndexerGem {
             ruby_executable: None,
             java_home: None,
             cached_gem_root_override: None,
+            discovery_cache_root: None,
             file_processor: None,
             dependency_seed: None,
             runtime_provider_fingerprint: None,
@@ -153,6 +157,12 @@ impl IndexerGem {
     #[cfg(test)]
     fn set_cached_gem_root_for_test(&mut self, root: PathBuf) {
         self.cached_gem_root_override = Some(root);
+    }
+
+    /// Save Bundler discovery results under `root` and reuse them while every
+    /// input that selects them is unchanged.
+    pub(crate) fn set_discovery_cache_root(&mut self, root: PathBuf) {
+        self.discovery_cache_root = Some(root);
     }
 
     /// Set the file processor for indexing
