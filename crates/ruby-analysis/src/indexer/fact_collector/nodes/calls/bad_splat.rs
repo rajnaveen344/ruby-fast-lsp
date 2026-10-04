@@ -2,14 +2,14 @@ use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
 use crate::core::RubyType;
+use crate::core::SplatOperator;
 use crate::core::TextRange;
 use crate::indexer::{utf8_str, RubyDocument};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadSplatCandidate {
-    pub operator: String,
-    pub arg_repr: String,
-    pub expected: String,
+    pub operator: SplatOperator,
+    pub arg_repr: Box<str>,
     pub location: TextRange,
 }
 
@@ -28,12 +28,11 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<BadSplatCandidate>
         if let Some(splat) = arg.as_splat_node() {
             if let Some(expr) = splat.expression() {
                 if is_definitely_non_array(&expr, document) {
-                    let arg_repr = String::from_utf8_lossy(expr.location().as_slice()).to_string();
+                    let arg_repr = String::from_utf8_lossy(expr.location().as_slice()).into();
                     let loc = document.prism_location_to_text_range(&splat.location());
                     entries.push(BadSplatCandidate {
-                        operator: "*".to_string(),
+                        operator: SplatOperator::Positional,
                         arg_repr,
-                        expected: "Array".to_string(),
                         location: loc,
                     });
                 }
@@ -46,13 +45,12 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<BadSplatCandidate>
                     if let Some(expr) = assoc_splat.value() {
                         if is_definitely_non_hash(&expr, document) {
                             let arg_repr =
-                                String::from_utf8_lossy(expr.location().as_slice()).to_string();
+                                String::from_utf8_lossy(expr.location().as_slice()).into();
                             let loc =
                                 document.prism_location_to_text_range(&assoc_splat.location());
                             entries.push(BadSplatCandidate {
-                                operator: "**".to_string(),
+                                operator: SplatOperator::Keyword,
                                 arg_repr,
-                                expected: "Hash".to_string(),
                                 location: loc,
                             });
                         }

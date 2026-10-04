@@ -215,9 +215,8 @@ fn template_rejects_project_specific_candidates() {
             diagnostic_candidates: vec![DiagnosticCandidate::new(
                 TextRange::new(source, 0, 1),
                 DiagnosticCandidateKind::BadSplat {
-                    operator: "*".to_string(),
-                    arg_repr: "value".to_string(),
-                    expected: "Array".to_string(),
+                    operator: crate::core::SplatOperator::Positional,
+                    arg_repr: "value".into(),
                 },
             )],
             ..FileAnalysis::default()

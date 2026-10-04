@@ -31,7 +31,7 @@ pub use source::file_analysis::FileAnalysis;
 pub use source::source_file::{LibraryPackageId, SourceKind};
 pub use source::source_position::{SourcePosition, SourceRange};
 pub use storage::diagnostics::candidates::{
-    DiagnosticCandidate, DiagnosticCandidateKind, RaiseArgCandidate,
+    DiagnosticCandidate, DiagnosticCandidateKind, RaiseArgCandidate, RaiseCandidate, SplatOperator,
 };
 pub use storage::diagnostics::resolved::{DiagnosticFact, DiagnosticSeverity};
 pub use storage::graph_store::{

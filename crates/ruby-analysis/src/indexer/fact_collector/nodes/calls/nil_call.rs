@@ -1,5 +1,6 @@
 use crate::core::{DiagnosticCandidate, DiagnosticCandidateKind};
 use ruby_prism::CallNode;
+use ustr::Ustr;
 
 use crate::indexer::fact_collector::FactCollector;
 
@@ -31,8 +32,8 @@ impl FactCollector {
                     local_read: self
                         .document
                         .prism_location_to_text_range(&local.location()),
-                    variable: crate::indexer::utf8_str(local.name().as_slice()).to_string(),
-                    method: crate::indexer::utf8_str(node.name().as_slice()).to_string(),
+                    variable: Ustr::from(crate::indexer::utf8_str(local.name().as_slice())),
+                    method: Ustr::from(crate::indexer::utf8_str(node.name().as_slice())),
                 },
             ));
     }

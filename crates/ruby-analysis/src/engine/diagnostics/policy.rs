@@ -32,7 +32,7 @@ impl DiagnosticRule {
     pub(in crate::engine) fn fact(
         self,
         range: TextRange,
-        message: impl Into<String>,
+        message: impl Into<Box<str>>,
     ) -> DiagnosticFact {
         DiagnosticFact::new(range, self.severity, self.code, message)
     }

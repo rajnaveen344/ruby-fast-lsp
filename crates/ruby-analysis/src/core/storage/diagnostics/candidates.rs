@@ -1,3 +1,7 @@
+use std::mem::size_of;
+
+use ustr::Ustr;
+
 use crate::core::storage::file_owned::{FileOwned, FileRow};
 use crate::core::storage::memory_estimate::{
     ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
@@ -16,23 +20,53 @@ impl DiagnosticCandidate {
     }
 }
 
+/// Candidates are kept for every indexed file, and nil-call candidates are
+/// emitted for every local-receiver call, so the common variant stays inline
+/// and the rarer `raise` payload lives behind one box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiagnosticCandidateKind {
-    RaiseNonException {
-        arg_repr: String,
-        arg: RaiseArgCandidate,
-    },
+    RaiseNonException(Box<RaiseCandidate>),
     BadSplat {
-        operator: String,
-        arg_repr: String,
-        expected: String,
+        operator: SplatOperator,
+        arg_repr: Box<str>,
     },
     /// A local receiver whose exact read proof is checked after flow resolution.
     NilCall {
         local_read: TextRange,
-        variable: String,
-        method: String,
+        variable: Ustr,
+        method: Ustr,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaiseCandidate {
+    pub arg_repr: Box<str>,
+    pub arg: RaiseArgCandidate,
+}
+
+/// The splat form at a call site; the expected container follows from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplatOperator {
+    /// `*expr`, which expects an Array.
+    Positional,
+    /// `**expr`, which expects a Hash.
+    Keyword,
+}
+
+impl SplatOperator {
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Positional => "*",
+            Self::Keyword => "**",
+        }
+    }
+
+    pub fn expected(self) -> &'static str {
+        match self {
+            Self::Positional => "Array",
+            Self::Keyword => "Hash",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,19 +154,12 @@ fn diagnostic_candidate_rank(kind: &DiagnosticCandidateKind) -> u8 {
 
 fn diagnostic_candidate_heap_bytes(candidate: &DiagnosticCandidate) -> usize {
     match &candidate.kind {
-        DiagnosticCandidateKind::RaiseNonException { arg_repr, arg } => {
-            string_heap_bytes(arg_repr) + raise_arg_heap_bytes(arg)
+        DiagnosticCandidateKind::RaiseNonException(raise) => {
+            size_of::<RaiseCandidate>() + raise.arg_repr.len() + raise_arg_heap_bytes(&raise.arg)
         }
-        DiagnosticCandidateKind::BadSplat {
-            operator,
-            arg_repr,
-            expected,
-        } => {
-            string_heap_bytes(operator) + string_heap_bytes(arg_repr) + string_heap_bytes(expected)
-        }
-        DiagnosticCandidateKind::NilCall {
-            variable, method, ..
-        } => string_heap_bytes(variable) + string_heap_bytes(method),
+        DiagnosticCandidateKind::BadSplat { arg_repr, .. } => arg_repr.len(),
+        // Interned names are shared process-wide.
+        DiagnosticCandidateKind::NilCall { .. } => 0,
     }
 }
 
@@ -147,5 +174,59 @@ fn raise_arg_heap_bytes(arg: &RaiseArgCandidate) -> usize {
         RaiseArgCandidate::BareMethodReturn {
             current_namespace, ..
         } => vec_payload_bytes(current_namespace),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn range(start: u32, end: u32) -> TextRange {
+        TextRange::new(SourceFileId(1), start, end)
+    }
+
+    #[test]
+    fn nil_call_candidate_is_compact_and_owns_no_heap() {
+        let candidate = DiagnosticCandidate::new(
+            range(4, 7),
+            DiagnosticCandidateKind::NilCall {
+                local_read: range(0, 3),
+                variable: Ustr::from("value"),
+                method: Ustr::from("upcase"),
+            },
+        );
+        assert!(size_of::<DiagnosticCandidate>() <= 48);
+        assert_eq!(diagnostic_candidate_heap_bytes(&candidate), 0);
+    }
+
+    #[test]
+    fn splat_operator_names_its_symbol_and_expected_container() {
+        assert_eq!(SplatOperator::Positional.symbol(), "*");
+        assert_eq!(SplatOperator::Positional.expected(), "Array");
+        assert_eq!(SplatOperator::Keyword.symbol(), "**");
+        assert_eq!(SplatOperator::Keyword.expected(), "Hash");
+    }
+
+    #[test]
+    fn rare_payload_heap_counts_its_box_and_text() {
+        let raise = DiagnosticCandidate::new(
+            range(0, 2),
+            DiagnosticCandidateKind::RaiseNonException(Box::new(RaiseCandidate {
+                arg_repr: "42".into(),
+                arg: RaiseArgCandidate::NonExceptionLiteral,
+            })),
+        );
+        assert_eq!(
+            diagnostic_candidate_heap_bytes(&raise),
+            size_of::<RaiseCandidate>() + 2
+        );
+        let splat = DiagnosticCandidate::new(
+            range(0, 6),
+            DiagnosticCandidateKind::BadSplat {
+                operator: SplatOperator::Keyword,
+                arg_repr: "value".into(),
+            },
+        );
+        assert_eq!(diagnostic_candidate_heap_bytes(&splat), 5);
     }
 }

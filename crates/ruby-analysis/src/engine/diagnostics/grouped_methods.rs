@@ -105,14 +105,14 @@ impl Project {
                 (
                     left.range.start_byte,
                     left.range.end_byte,
-                    left.code.as_str(),
-                    left.message.as_str(),
+                    left.code,
+                    &*left.message,
                 )
                     .cmp(&(
                         right.range.start_byte,
                         right.range.end_byte,
-                        right.code.as_str(),
-                        right.message.as_str(),
+                        right.code,
+                        &*right.message,
                     ))
             });
             facts.dedup();

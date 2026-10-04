@@ -446,7 +446,7 @@ impl View<'_> {
                 export_hash(|hasher| {
                     stable_u8(hasher, 9);
                     stable_diagnostic_severity(hasher, fact.severity);
-                    stable_string(hasher, &fact.code);
+                    stable_string(hasher, fact.code);
                     stable_string(hasher, &fact.message);
                     stable_range_offsets(hasher, fact.range);
                 }),

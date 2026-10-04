@@ -126,8 +126,8 @@ fn parent_facts(file_id: SourceFileId) -> FileAnalysis {
         diagnostics: vec![DiagnosticFact {
             range: TextRange::new(file_id, 0, 5),
             severity: DiagnosticSeverity::Warning,
-            code: "indexer-note".to_string(),
-            message: "indexer diagnostic owned by the parent file".to_string(),
+            code: "indexer-note",
+            message: "indexer diagnostic owned by the parent file".into(),
         }],
         ..Default::default()
     }

@@ -2,7 +2,7 @@
 
 use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, KeywordArgCandidate,
-    MethodCallSignatureCandidate, RaiseArgCandidate, RubyMethod,
+    MethodCallSignatureCandidate, RaiseArgCandidate, RaiseCandidate, RubyMethod,
 };
 use crate::indexer::{build_constant_path_name, utf8_str};
 use ruby_prism::{CallNode, Node};
@@ -91,7 +91,7 @@ impl FactCollector {
     ) -> Option<DiagnosticCandidate> {
         let args = node.arguments()?;
         let first_arg = args.arguments().iter().next()?;
-        let arg_repr = String::from_utf8_lossy(first_arg.location().as_slice()).to_string();
+        let arg_repr: Box<str> = String::from_utf8_lossy(first_arg.location().as_slice()).into();
         let range = self.text_range_from_prism_location(&first_arg.location(), "raise argument");
 
         let arg = if first_arg.as_string_node().is_some() {
@@ -155,7 +155,7 @@ impl FactCollector {
 
         Some(DiagnosticCandidate::new(
             range,
-            DiagnosticCandidateKind::RaiseNonException { arg_repr, arg },
+            DiagnosticCandidateKind::RaiseNonException(Box::new(RaiseCandidate { arg_repr, arg })),
         ))
     }
 
@@ -165,7 +165,6 @@ impl FactCollector {
             DiagnosticCandidateKind::BadSplat {
                 operator: entry.operator,
                 arg_repr: entry.arg_repr,
-                expected: entry.expected,
             },
         )
     }

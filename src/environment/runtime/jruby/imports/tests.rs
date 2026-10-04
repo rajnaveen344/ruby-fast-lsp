@@ -632,7 +632,7 @@ fn reports_missing_project_class_and_dynamic_alias_block() {
     let codes = collector
         .diagnostics()
         .iter()
-        .map(|diagnostic| diagnostic.code.as_str())
+        .map(|diagnostic| diagnostic.code)
         .collect::<Vec<_>>();
     assert_eq!(
         codes,

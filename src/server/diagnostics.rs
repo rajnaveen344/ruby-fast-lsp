@@ -378,9 +378,9 @@ pub fn engine_diagnostics(view: &View<'_>, uri: &Url) -> Vec<Diagnostic> {
             Some(Diagnostic {
                 range: lsp_file_range(file, fact.range)?,
                 severity: Some(lsp_diagnostic_severity(fact.severity)),
-                code: Some(NumberOrString::String(fact.code)),
+                code: Some(NumberOrString::String(fact.code.to_string())),
                 source: Some("ruby-fast-lsp".to_string()),
-                message: fact.message,
+                message: fact.message.into_string(),
                 ..Diagnostic::default()
             })
         })

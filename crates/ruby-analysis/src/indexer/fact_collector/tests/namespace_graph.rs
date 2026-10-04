@@ -457,7 +457,7 @@ fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
             .analysis
             .diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.code.as_str())
+            .map(|diagnostic| diagnostic.code)
             .collect::<Vec<_>>(),
         vec!["cyclic-inheritance", "conflicting-superclass"]
     );

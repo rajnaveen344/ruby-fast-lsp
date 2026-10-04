@@ -39,14 +39,11 @@ impl Diagnostics {
         file_id: SourceFileId,
         require_diagnostics: Vec<DiagnosticFact>,
     ) {
-        let mut diagnostics = self
-            .resolved
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter(|fact| fact.code != UNRESOLVED_REQUIRE_CODE)
-            .collect::<Vec<_>>();
-        diagnostics.extend(require_diagnostics);
-        self.resolved.replace_file(file_id, diagnostics);
+        self.resolved.replace_matching(
+            file_id,
+            |fact| fact.code == UNRESOLVED_REQUIRE_CODE,
+            require_diagnostics,
+        );
     }
 
     /// Replace one file's resolve-derived diagnostics with `derived`, keeping
@@ -56,14 +53,8 @@ impl Diagnostics {
         file_id: SourceFileId,
         derived: Vec<DiagnosticFact>,
     ) {
-        let mut diagnostics = self
-            .resolved
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter(|fact| !is_resolve_derived(&fact.code))
-            .collect::<Vec<_>>();
-        diagnostics.extend(derived);
-        self.resolved.replace_file(file_id, diagnostics);
+        self.resolved
+            .replace_matching(file_id, |fact| is_resolve_derived(fact.code), derived);
     }
 
     pub(in crate::engine) fn candidate_file_ids(&self) -> Vec<SourceFileId> {

@@ -613,8 +613,8 @@ fn domain_diagnostics(
                 end: one_based_position(end),
             },
             severity: domain_severity(diagnostic.severity),
-            code: Some(diagnostic.code),
-            message: diagnostic.message,
+            code: Some(diagnostic.code.to_string()),
+            message: diagnostic.message.into_string(),
         });
     }
     Ok(diagnostics)

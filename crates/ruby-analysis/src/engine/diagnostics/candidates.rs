@@ -59,26 +59,28 @@ impl Project {
                     format!("Calling `{method}` on `{variable}` which is `nil` here."),
                 ))
             }
-            DiagnosticCandidateKind::BadSplat {
-                operator,
-                arg_repr,
-                expected,
-            } => Some(BAD_SPLAT.fact(
-                candidate.range,
-                format!(
-                    "`{}{}` expected {} but got non-{} value",
-                    operator, arg_repr, expected, expected
-                ),
-            )),
-            DiagnosticCandidateKind::RaiseNonException { arg_repr, arg } => {
-                if self.raise_arg_is_exception(arg.clone()) {
+            DiagnosticCandidateKind::BadSplat { operator, arg_repr } => {
+                let expected = operator.expected();
+                Some(BAD_SPLAT.fact(
+                    candidate.range,
+                    format!(
+                        "`{}{}` expected {} but got non-{} value",
+                        operator.symbol(),
+                        arg_repr,
+                        expected,
+                        expected
+                    ),
+                ))
+            }
+            DiagnosticCandidateKind::RaiseNonException(raise) => {
+                if self.raise_arg_is_exception(&raise.arg) {
                     None
                 } else {
                     Some(RAISE_NON_EXCEPTION.fact(
                         candidate.range,
                         format!(
                             "`raise` argument `{}` is not an Exception subclass",
-                            arg_repr
+                            raise.arg_repr
                         ),
                     ))
                 }
@@ -86,12 +88,12 @@ impl Project {
         }
     }
 
-    fn raise_arg_is_exception(&self, arg: RaiseArgCandidate) -> bool {
+    fn raise_arg_is_exception(&self, arg: &RaiseArgCandidate) -> bool {
         match arg {
             RaiseArgCandidate::StringLiteral | RaiseArgCandidate::Unknown => true,
             RaiseArgCandidate::NonExceptionLiteral => false,
-            RaiseArgCandidate::Constant(name) => self.is_exception_class_name(&name),
-            RaiseArgCandidate::Type(ruby_type) => self.ruby_type_is_exception(ruby_type),
+            RaiseArgCandidate::Constant(name) => self.is_exception_class_name(name),
+            RaiseArgCandidate::Type(ruby_type) => self.ruby_type_is_exception(ruby_type.clone()),
             RaiseArgCandidate::LocalRead(range) => self
                 .local_read_type_at(range.file_id, range.start_byte)
                 .map(|ruby_type| self.ruby_type_is_exception(ruby_type.clone()))
@@ -100,7 +102,7 @@ impl Project {
                 current_namespace,
                 method,
             } => self
-                .bare_method_return_type(&current_namespace, &method)
+                .bare_method_return_type(current_namespace, method)
                 .map(|ruby_type| self.ruby_type_is_exception(ruby_type))
                 .unwrap_or(true),
         }
