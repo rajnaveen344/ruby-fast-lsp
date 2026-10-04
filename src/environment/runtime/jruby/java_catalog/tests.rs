@@ -392,3 +392,66 @@ fn process_cache_evicts_completed_artifact_products_to_both_bounds() {
     );
     assert_eq!(overweight_cache.retained_weight_bytes(), 0);
 }
+
+#[test]
+fn process_cache_reuses_live_archive_after_evicting_its_product() {
+    let fixture = tempfile::tempdir().expect("catalog fixture must be created");
+    let class = decode_hex(include_str!(
+        "../../../../../crates/jvm-metadata/fixtures/minimal_class.hex"
+    ));
+    let first_bytes = jar_with_marker(&class, "first");
+    let second_bytes = jar_with_marker(&class, "second");
+    let first = artifact(
+        fixture.path().join("first.jar"),
+        &first_bytes,
+        ArtifactOrigin::Explicit,
+    );
+    let second = artifact(
+        fixture.path().join("second.jar"),
+        &second_bytes,
+        ArtifactOrigin::Explicit,
+    );
+    let limits = ArchiveLimits::default();
+    let cache = JavaArtifactProductCache::new(1, 1024 * 1024);
+    let build = |artifact: &ClasspathArtifact| {
+        let key = JavaArtifactProductKey::new(artifact, 17, limits);
+        let key_for_build = key.clone();
+        cache
+            .get_or_try_init(key, || {
+                JavaArtifactProduct::build(artifact, &key_for_build, limits)
+                    .map_err(|error| format!("{error:?}"))
+            })
+            .expect("bounded Java artifact product must build")
+    };
+
+    // A project catalog keeps the first archive alive after the bounded
+    // cache evicts its product.
+    let original = build(&first);
+    let retained = Arc::clone(&original.archive);
+    let original_weight = original.estimated_weight_bytes();
+    drop(original);
+    build(&second);
+    assert_eq!(cache.snapshot().get(SingleFlightStat::Evictions), 1);
+
+    let rebuilt = build(&first);
+    assert!(
+        Arc::ptr_eq(&rebuilt.archive, &retained),
+        "a live archive must be shared instead of decoded again after eviction"
+    );
+    assert_eq!(rebuilt.estimated_weight_bytes(), original_weight);
+
+    drop(retained);
+    drop(rebuilt);
+    build(&second);
+    let key = JavaArtifactProductKey::new(&first, 17, limits);
+    let key_for_build = key.clone();
+    let mut decoded = false;
+    cache
+        .get_or_try_init(key, || {
+            decoded = true;
+            JavaArtifactProduct::build(&first, &key_for_build, limits)
+                .map_err(|error| format!("{error:?}"))
+        })
+        .expect("a released archive must be decoded again");
+    assert!(decoded, "a released archive must not be retained");
+}

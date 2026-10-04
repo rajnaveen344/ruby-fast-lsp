@@ -54,6 +54,10 @@ pub struct JavaArtifactProductCache {
     /// Live catalog content by composition identity. Entries never retain
     /// content; the projects that hold it do.
     contents: Arc<Mutex<HashMap<CatalogContentIdentity, Weak<JavaCatalogContent>>>>,
+    /// Live archives by product cache id. A catalog that outlives its
+    /// product's cache entry still shares the archive with later requests
+    /// instead of decoding a second copy.
+    archives: Arc<Mutex<HashMap<String, Weak<ArchiveMetadata>>>>,
 }
 
 impl Default for JavaArtifactProductCache {
@@ -74,6 +78,7 @@ impl JavaArtifactProductCache {
                 JavaArtifactProduct::estimated_weight_bytes,
             ),
             contents: Arc::default(),
+            archives: Arc::default(),
         }
     }
 
@@ -82,7 +87,22 @@ impl JavaArtifactProductCache {
         key: JavaArtifactProductKey,
         producer: impl FnOnce() -> Result<JavaArtifactProduct, String>,
     ) -> Result<Arc<JavaArtifactProduct>, String> {
-        self.inner.get_or_try_init(key, producer)
+        let live_key = key.clone();
+        self.inner.get_or_try_init(key, || {
+            let live = self
+                .archives
+                .lock()
+                .get(&live_key.cache_id)
+                .and_then(Weak::upgrade);
+            if let Some(archive) = live {
+                return Ok(JavaArtifactProduct::new(live_key, archive));
+            }
+            let product = producer()?;
+            let mut archives = self.archives.lock();
+            archives.retain(|_, archive| archive.strong_count() > 0);
+            archives.insert(live_key.cache_id, Arc::downgrade(&product.archive));
+            Ok(product)
+        })
     }
 
     pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
@@ -204,12 +224,16 @@ impl JavaArtifactProduct {
             why = "both hashes cover the same immutable bytes",
             fix = "keep artifact and archive fingerprint algorithms identical",
         );
-        let estimated_weight_bytes = estimate_product_weight(key, &archive);
-        Ok(Self {
-            key: key.clone(),
-            archive: Arc::new(archive),
+        Ok(Self::new(key.clone(), Arc::new(archive)))
+    }
+
+    fn new(key: JavaArtifactProductKey, archive: Arc<ArchiveMetadata>) -> Self {
+        let estimated_weight_bytes = estimate_product_weight(&key, &archive);
+        Self {
+            key,
+            archive,
             estimated_weight_bytes,
-        })
+        }
     }
 
     pub fn estimated_weight_bytes(&self) -> u64 {
@@ -266,12 +290,7 @@ impl PersistentProduct for JavaArtifactProduct {
             ));
         }
         persisted.archive.share_strings();
-        let estimated_weight_bytes = estimate_product_weight(key, &persisted.archive);
-        Ok(Self {
-            key: key.clone(),
-            archive: Arc::new(persisted.archive),
-            estimated_weight_bytes,
-        })
+        Ok(Self::new(key.clone(), Arc::new(persisted.archive)))
     }
 }
 
