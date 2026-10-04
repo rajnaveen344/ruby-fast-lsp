@@ -1,18 +1,21 @@
-//! Persisted Bundler discovery results, keyed by every input that selects them.
+//! Persisted gem discovery results, keyed by every input that selects them.
 //!
 //! Starting the selected runtime only to ask Bundler for the locked specs is
 //! the slowest part of dependency discovery. The answer is a function of the
 //! runtime, the Gemfile and lockfile, Bundler configuration, the environment
-//! the runtime reads, and the gemspecs Bundler evaluates from source. A saved
-//! answer is reused only while all of those still match; anything unreadable
-//! is a miss, and only Bundler results are saved.
+//! the runtime reads, and the gemspecs Bundler evaluates from source. When
+//! Bundler cannot load the bundle, the runtime falls back to every installed
+//! gem; that answer also depends on the installed specification folders and
+//! RubyGems configuration, which the runtime reports and which are checked
+//! again before reuse. A saved answer is reused only while all of those still
+//! match; anything unreadable is a miss.
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const SCHEMA: &str = "rflsp-bundler-discovery-v1";
+const SCHEMA: &str = "rflsp-gem-discovery-v2";
 
 /// Project files Bundler or a runtime version manager reads at startup.
 const PROJECT_INPUTS: &[&str] = &[
@@ -30,7 +33,17 @@ const ENVIRONMENT_PREFIXES: &[&str] = &[
 const ENVIRONMENT_NAMES: &[&str] = &["HOME", "PATH"];
 const REMOVED_ENVIRONMENT: &[&str] = &["GEM_HOME", "GEM_PATH", "RUBY_VERSION"];
 
-pub(super) struct BundlerDiscoveryCache {
+/// Which branch of the discovery command produced a gem array.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum DiscoverySource {
+    /// Bundler loaded the locked bundle.
+    Bundler,
+    /// Bundler could not load the bundle; every installed gem was listed.
+    Global,
+}
+
+pub(super) struct GemDiscoveryCache {
     file: PathBuf,
     key: String,
     inputs: Inputs,
@@ -46,14 +59,18 @@ struct Inputs {
 #[derive(Serialize, Deserialize)]
 struct Saved {
     key: String,
+    source: DiscoverySource,
     /// Fingerprints of the top-level gemspecs in every discovered gem folder,
     /// which Bundler evaluates for path and git sources.
     gem_dirs: Vec<(PathBuf, String)>,
+    /// Fingerprints of the specification folders and configuration files the
+    /// runtime reported reading when it fell back to installed gems.
+    watched: Vec<(PathBuf, String)>,
     /// The gem array exactly as the runtime printed it.
     gems: String,
 }
 
-impl BundlerDiscoveryCache {
+impl GemDiscoveryCache {
     /// Returns `None` when the project has no lockfile: without one, Bundler
     /// resolves against whatever is installed and the answer has no stable key.
     pub(super) fn open(
@@ -86,8 +103,9 @@ impl BundlerDiscoveryCache {
         Ok(Some(Self { file, key, inputs }))
     }
 
-    /// The saved Bundler gem array, if every input still matches.
-    pub(super) fn load(&self) -> Option<Vec<u8>> {
+    /// The saved gem array and the branch that produced it, if every input
+    /// still matches.
+    pub(super) fn load(&self) -> Option<(DiscoverySource, Vec<u8>)> {
         let bytes = std::fs::read(&self.file).ok()?;
         let saved = serde_json::from_slice::<Saved>(&bytes).ok()?;
         if saved.key != self.key {
@@ -98,35 +116,60 @@ impl BundlerDiscoveryCache {
                 return None;
             }
         }
-        Some(saved.gems.into_bytes())
+        for (path, fingerprint) in &saved.watched {
+            if watched_fingerprint(path).ok()? != *fingerprint {
+                return None;
+            }
+        }
+        Some((saved.source, saved.gems.into_bytes()))
     }
 
-    /// Save a Bundler gem array produced while the inputs matched this key.
-    /// The key is computed again so an input edited while the runtime ran is
-    /// never saved under the older identity.
-    pub(super) fn store(&self, gems: &[u8]) -> Result<()> {
+    /// Save a gem array produced while the inputs matched this key. The key is
+    /// computed again so an input edited while the runtime ran is never saved
+    /// under the older identity. An installed-gem fallback is saved only with
+    /// the folders and files the runtime reported reading.
+    pub(super) fn store(
+        &self,
+        source: DiscoverySource,
+        gems: &[u8],
+        watched: Option<&[PathBuf]>,
+    ) -> Result<()> {
         if self.inputs.key()? != self.key {
             return Ok(());
         }
-        #[derive(Deserialize)]
-        struct GemDir {
-            gem_dir: PathBuf,
-        }
         let mut gem_dirs = Vec::new();
-        for gem in serde_json::from_slice::<Vec<GemDir>>(gems)
-            .context("Bundler discovery result has no gem folders")?
-        {
-            // A missing folder means the discovery cannot be reused.
-            let Some(fingerprint) = gemspec_fingerprint(&gem.gem_dir)? else {
-                return Ok(());
-            };
-            gem_dirs.push((gem.gem_dir, fingerprint));
+        let mut watched_fingerprints = Vec::new();
+        match source {
+            DiscoverySource::Bundler => {
+                #[derive(Deserialize)]
+                struct GemDir {
+                    gem_dir: PathBuf,
+                }
+                for gem in serde_json::from_slice::<Vec<GemDir>>(gems)
+                    .context("Bundler discovery result has no gem folders")?
+                {
+                    // A missing folder means the discovery cannot be reused.
+                    let Some(fingerprint) = gemspec_fingerprint(&gem.gem_dir)? else {
+                        return Ok(());
+                    };
+                    gem_dirs.push((gem.gem_dir, fingerprint));
+                }
+            }
+            DiscoverySource::Global => {
+                let Some(watched) = watched else {
+                    return Ok(());
+                };
+                for path in watched {
+                    watched_fingerprints.push((path.clone(), watched_fingerprint(path)?));
+                }
+            }
         }
         let saved = Saved {
             key: self.key.clone(),
+            source,
             gem_dirs,
-            gems: String::from_utf8(gems.to_vec())
-                .context("Bundler discovery result is not UTF-8")?,
+            watched: watched_fingerprints,
+            gems: String::from_utf8(gems.to_vec()).context("gem discovery result is not UTF-8")?,
         };
         let parent = self
             .file
@@ -271,6 +314,37 @@ fn file_identity(path: &Path) -> String {
     #[cfg(not(unix))]
     let inode: Option<(u64, u64)> = None;
     format!("{}:{modified:?}:{inode:?}", metadata.len())
+}
+
+/// Fingerprint of a reported specification folder (every entry's identity) or
+/// configuration file, with a marker when it does not exist yet.
+fn watched_fingerprint(path: &Path) -> Result<String> {
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(file_identity(path));
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to list gem discovery input {}", path.display()))
+        }
+    };
+    let mut listing = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        listing.push(format!(
+            "{}={}",
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            file_identity(&path)
+        ));
+    }
+    listing.sort();
+    Ok(format!("dir:{}", listing.join(";")))
 }
 
 /// Fingerprint of a gem folder's top-level gemspecs, or `None` when the

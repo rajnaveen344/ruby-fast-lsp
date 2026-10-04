@@ -1,6 +1,6 @@
 //! Installed, Bundler, global, and navigation gem discovery through the selected runtime.
 
-use super::discovery_cache::BundlerDiscoveryCache;
+use super::discovery_cache::{DiscoverySource, GemDiscoveryCache};
 use super::lockfile::locked_version_for;
 use super::GemDiscoveryRecord;
 use super::GemDiscoveryStage;
@@ -10,7 +10,7 @@ use super::IndexerGem;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -222,10 +222,17 @@ impl IndexerGem {
     /// second runtime startup before fallback.
     pub(super) fn discover_auto_gems(&mut self) -> Result<()> {
         let gemfile = self.find_gemfile()?;
-        let saved = self.bundler_discovery_cache(&gemfile);
-        if let Some(gems) = saved.as_ref().and_then(BundlerDiscoveryCache::load) {
-            debug!("Reusing saved Bundler gems for unchanged inputs");
-            return self.process_gem_json(&gems, "Bundler", GemSource::BundlerInstalled);
+        let saved = self.gem_discovery_cache(&gemfile);
+        if let Some((source, gems)) = saved.as_ref().and_then(GemDiscoveryCache::load) {
+            debug!("Reusing saved {source:?} gem discovery for unchanged inputs");
+            return match source {
+                DiscoverySource::Bundler => {
+                    self.process_gem_json(&gems, "Bundler", GemSource::BundlerInstalled)
+                }
+                DiscoverySource::Global => {
+                    self.process_gem_json(&gems, "Global", GemSource::GlobalInstalled)
+                }
+            };
         }
         let script = r#"
             require 'json'
@@ -252,8 +259,22 @@ impl IndexerGem {
               require 'rubygems'
               gems = project.call(Gem::Specification.to_a)
               source = 'global'
+              # Everything the fallback answer depends on beyond the project's
+              # own inputs: installed specifications, Bundler's install
+              # location, and RubyGems configuration. Unknown means no reuse.
+              watched = begin
+                paths = Gem::Specification.dirs + [Gem.default_specifications_dir]
+                if defined?(Bundler) && Bundler.respond_to?(:bundle_path)
+                  bundle = Bundler.bundle_path.to_s
+                  paths += [File.join(bundle, 'specifications'), File.join(bundle, 'bundler', 'gems')]
+                end
+                paths += [Gem::ConfigFile::SYSTEM_WIDE_CONFIG_FILE, Gem.configuration.config_file_name]
+                paths.map(&:to_s).uniq
+              rescue Exception
+                nil
+              end
             end
-            puts "RUBY_FAST_LSP_GEM_DISCOVERY=#{JSON.generate({ source: source, gems: gems })}"
+            puts "RUBY_FAST_LSP_GEM_DISCOVERY=#{JSON.generate({ source: source, gems: gems, watched: watched })}"
         "#;
         let output = self
             .ruby_command()?
@@ -298,33 +319,54 @@ impl IndexerGem {
             .ok_or_else(|| anyhow!("automatic gem discovery JSON has no `gems` array"))?;
         let encoded = serde_json::to_vec(gems)
             .context("automatic gem discovery gem array could not be re-encoded")?;
-        match source {
+        let (source, label, gem_source) = match source {
             "bundler" => {
                 debug!("Using Bundler gems from Gemfile");
-                if let Some(saved) = &saved {
-                    if let Err(error) = saved.store(&encoded) {
-                        warn!("Bundler discovery result was not saved for reuse: {error:#}");
-                    }
-                }
-                self.process_gem_json(&encoded, "Bundler", GemSource::BundlerInstalled)
+                (
+                    DiscoverySource::Bundler,
+                    "Bundler",
+                    GemSource::BundlerInstalled,
+                )
             }
             "global" => {
                 debug!("Bundler unavailable; using selected runtime global gems");
-                self.process_gem_json(&encoded, "Global", GemSource::GlobalInstalled)
+                (
+                    DiscoverySource::Global,
+                    "Global",
+                    GemSource::GlobalInstalled,
+                )
             }
-            other => Err(anyhow!(
-                "automatic gem discovery returned unknown source `{other}`"
-            )),
+            other => {
+                return Err(anyhow!(
+                    "automatic gem discovery returned unknown source `{other}`"
+                ))
+            }
+        };
+        if let Some(saved) = &saved {
+            let watched = value
+                .get("watched")
+                .and_then(serde_json::Value::as_array)
+                .map(|paths| {
+                    paths
+                        .iter()
+                        .map(|path| path.as_str().map(PathBuf::from))
+                        .collect::<Option<Vec<_>>>()
+                })
+                .unwrap_or(None);
+            if let Err(error) = saved.store(source, &encoded, watched.as_deref()) {
+                warn!("gem discovery result was not saved for reuse: {error:#}");
+            }
         }
+        self.process_gem_json(&encoded, label, gem_source)
     }
 
     /// The saved-result slot for this project, when reuse is enabled and the
     /// project's inputs can be read.
-    fn bundler_discovery_cache(&self, gemfile: &Path) -> Option<BundlerDiscoveryCache> {
+    fn gem_discovery_cache(&self, gemfile: &Path) -> Option<GemDiscoveryCache> {
         let cache_root = self.discovery_cache_root.as_deref()?;
         let project_root = self.workspace_root.as_deref()?;
         let ruby_executable = self.ruby_executable.as_deref()?;
-        BundlerDiscoveryCache::open(
+        GemDiscoveryCache::open(
             cache_root,
             project_root,
             gemfile,
@@ -332,7 +374,7 @@ impl IndexerGem {
             self.java_home.as_deref(),
         )
         .unwrap_or_else(|error| {
-            warn!("Bundler discovery reuse is unavailable for this project: {error:#}");
+            warn!("gem discovery reuse is unavailable for this project: {error:#}");
             None
         })
     }

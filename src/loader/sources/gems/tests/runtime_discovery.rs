@@ -130,13 +130,31 @@ fn auto_installed_gem_discovery_uses_one_runtime_process() {
 }
 
 #[cfg(unix)]
-fn write_discovery_runtime(path: &Path, invocation_log: &Path, source: &str, gem_dir: &Path) {
+fn write_discovery_runtime(
+    path: &Path,
+    invocation_log: &Path,
+    source: &str,
+    gem_dir: &Path,
+    watched: &[PathBuf],
+) {
     use std::os::unix::fs::PermissionsExt;
 
+    let watched = if watched.is_empty() {
+        "null".to_string()
+    } else {
+        format!(
+            "[{}]",
+            watched
+                .iter()
+                .map(|path| format!("\"{}\"", path.display()))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
     std::fs::write(
         path,
         format!(
-            "#!/bin/sh\nprintf x >> '{log}'\nprintf '%s' 'RUBY_FAST_LSP_GEM_DISCOVERY={{\"source\":\"{source}\",\"gems\":[{{\"name\":\"example\",\"version\":\"1.2.3\",\"platform\":\"ruby\",\"gem_dir\":\"{dir}\",\"lib_dirs\":[\"{dir}/lib\"],\"dependencies\":[],\"default_gem\":false}}]}}'\n",
+            "#!/bin/sh\nprintf x >> '{log}'\nprintf '%s' 'RUBY_FAST_LSP_GEM_DISCOVERY={{\"source\":\"{source}\",\"gems\":[{{\"name\":\"example\",\"version\":\"1.2.3\",\"platform\":\"ruby\",\"gem_dir\":\"{dir}\",\"lib_dirs\":[\"{dir}/lib\"],\"dependencies\":[],\"default_gem\":false}}],\"watched\":{watched}}}'\n",
             log = invocation_log.display(),
             dir = gem_dir.display(),
         ),
@@ -164,7 +182,7 @@ fn bundler_discovery_is_reused_until_a_selecting_input_changes() {
     .unwrap();
     let invocation_log = workspace.path().join("invocations");
     let fake_ruby = workspace.path().join("ruby");
-    write_discovery_runtime(&fake_ruby, &invocation_log, "bundler", &gem_dir);
+    write_discovery_runtime(&fake_ruby, &invocation_log, "bundler", &gem_dir, &[]);
     let cache_root = workspace.path().join("cache");
     let discover = || {
         let mut indexer = IndexerGem::new(Some(project.clone()));
@@ -237,29 +255,92 @@ fn bundler_discovery_is_reused_until_a_selecting_input_changes() {
 
 #[cfg(unix)]
 #[test]
-fn global_fallback_discovery_is_never_reused() {
+fn installed_gem_fallback_is_reused_until_a_reported_input_changes() {
     let workspace = TempDir::new().unwrap();
-    let gem_dir = workspace.path().join("installed/example-1.2.3");
+    let project = workspace.path().join("project");
+    let gem_dir = workspace.path().join("installed/gems/example-1.2.3");
+    let specifications = workspace.path().join("installed/specifications");
+    let bundle_specifications = workspace.path().join("bundle/specifications");
+    let gemrc = workspace.path().join("gemrc");
     std::fs::create_dir_all(gem_dir.join("lib")).unwrap();
-    std::fs::write(workspace.path().join("Gemfile"), "gem 'example'\n").unwrap();
-    std::fs::write(workspace.path().join("Gemfile.lock"), "GEM\n  specs:\n").unwrap();
+    std::fs::create_dir_all(&specifications).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(specifications.join("example-1.2.3.gemspec"), "# one\n").unwrap();
+    std::fs::write(project.join("Gemfile"), "gem 'example'\n").unwrap();
+    std::fs::write(project.join("Gemfile.lock"), "GEM\n  specs:\n").unwrap();
     let invocation_log = workspace.path().join("invocations");
     let fake_ruby = workspace.path().join("ruby");
-    write_discovery_runtime(&fake_ruby, &invocation_log, "global", &gem_dir);
-
-    for expected in 1..=2 {
-        let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+    let watched = [
+        specifications.clone(),
+        bundle_specifications.clone(),
+        gemrc.clone(),
+    ];
+    write_discovery_runtime(&fake_ruby, &invocation_log, "global", &gem_dir, &watched);
+    let discover = || {
+        let mut indexer = IndexerGem::new(Some(project.clone()));
         indexer.set_selected_runtime(fake_ruby.clone(), RuntimeImplementation::Mri, None);
         indexer.set_discovery_cache_root(workspace.path().join("cache"));
         indexer.discover_auto_gems().unwrap();
-        assert_eq!(
-            indexer.discovered_gems["example"][0].source,
-            GemSource::GlobalInstalled
-        );
-        assert_eq!(
-            std::fs::read_to_string(&invocation_log).unwrap().len(),
-            expected,
-            "an installation-wide fallback has no locked identity to reuse"
-        );
-    }
+        let gem = indexer.discovered_gems["example"][0].clone();
+        assert_eq!(gem.source, GemSource::GlobalInstalled);
+        assert_eq!(gem.path, gem_dir);
+        assert_eq!(gem.lib_paths, vec![gem_dir.join("lib")]);
+        std::fs::read_to_string(&invocation_log).unwrap().len()
+    };
+
+    assert_eq!(discover(), 1);
+    assert_eq!(
+        discover(),
+        1,
+        "unchanged installed gems must reuse the saved fallback"
+    );
+
+    std::fs::write(specifications.join("other-2.0.0.gemspec"), "# two\n").unwrap();
+    assert_eq!(discover(), 2, "an installed gem must run the runtime again");
+    assert_eq!(discover(), 2);
+
+    std::fs::write(
+        specifications.join("example-1.2.3.gemspec"),
+        "# rewritten\n",
+    )
+    .unwrap();
+    assert_eq!(
+        discover(),
+        3,
+        "a rewritten specification must run the runtime again"
+    );
+
+    std::fs::create_dir_all(&bundle_specifications).unwrap();
+    assert_eq!(
+        discover(),
+        4,
+        "a newly installed bundle must run the runtime again"
+    );
+
+    std::fs::write(&gemrc, "gempath: /elsewhere\n").unwrap();
+    assert_eq!(
+        discover(),
+        5,
+        "a RubyGems configuration change must run the runtime again"
+    );
+    assert_eq!(discover(), 5);
+
+    std::fs::write(
+        project.join("Gemfile.lock"),
+        "GEM\n  specs:\n    example (1.2.3)\n",
+    )
+    .unwrap();
+    assert_eq!(
+        discover(),
+        6,
+        "a lockfile change must run the runtime again"
+    );
+
+    write_discovery_runtime(&fake_ruby, &invocation_log, "global", &gem_dir, &[]);
+    assert_eq!(discover(), 7);
+    assert_eq!(
+        discover(),
+        8,
+        "a fallback without its reported inputs must never be reused"
+    );
 }

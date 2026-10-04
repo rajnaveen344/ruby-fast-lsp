@@ -115,7 +115,7 @@ pub struct IndexerGem {
     ruby_executable: Option<PathBuf>,
     java_home: Option<PathBuf>,
     cached_gem_root_override: Option<PathBuf>,
-    /// Where Bundler discovery results are saved for reuse; unset disables it.
+    /// Where gem discovery results are saved for reuse; unset disables it.
     discovery_cache_root: Option<PathBuf>,
     file_processor: Option<FileProcessor>,
     /// The immutable core/runtime seed and its semantic identity, computed
@@ -159,7 +159,7 @@ impl IndexerGem {
         self.cached_gem_root_override = Some(root);
     }
 
-    /// Save Bundler discovery results under `root` and reuse them while every
+    /// Save gem discovery results under `root` and reuse them while every
     /// input that selects them is unchanged.
     pub(crate) fn set_discovery_cache_root(&mut self, root: PathBuf) {
         self.discovery_cache_root = Some(root);
