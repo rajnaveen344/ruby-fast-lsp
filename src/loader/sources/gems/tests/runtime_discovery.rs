@@ -344,3 +344,56 @@ fn installed_gem_fallback_is_reused_until_a_reported_input_changes() {
         "a fallback without its reported inputs must never be reused"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn unlocked_project_reuses_only_the_installed_gem_fallback() {
+    let workspace = TempDir::new().unwrap();
+    let project = workspace.path().join("project");
+    let gem_dir = workspace.path().join("installed/gems/example-1.2.3");
+    let specifications = workspace.path().join("installed/specifications");
+    std::fs::create_dir_all(gem_dir.join("lib")).unwrap();
+    std::fs::create_dir_all(&specifications).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(gem_dir.join("example.gemspec"), "# one\n").unwrap();
+    std::fs::write(project.join("Gemfile"), "gem 'example'\n").unwrap();
+    let invocation_log = workspace.path().join("invocations");
+    let fake_ruby = workspace.path().join("ruby");
+    let discover = |source: GemSource| {
+        let mut indexer = IndexerGem::new(Some(project.clone()));
+        indexer.set_selected_runtime(fake_ruby.clone(), RuntimeImplementation::Mri, None);
+        indexer.set_discovery_cache_root(workspace.path().join("cache"));
+        indexer.discover_auto_gems().unwrap();
+        assert_eq!(indexer.discovered_gems["example"][0].source, source);
+        std::fs::read_to_string(&invocation_log).unwrap().len()
+    };
+
+    write_discovery_runtime(
+        &fake_ruby,
+        &invocation_log,
+        "global",
+        &gem_dir,
+        std::slice::from_ref(&specifications),
+    );
+    assert_eq!(discover(GemSource::GlobalInstalled), 1);
+    assert_eq!(
+        discover(GemSource::GlobalInstalled),
+        1,
+        "the installed-gem fallback does not depend on a lockfile"
+    );
+    std::fs::write(project.join("Gemfile.lock"), "GEM\n  specs:\n").unwrap();
+    assert_eq!(
+        discover(GemSource::GlobalInstalled),
+        2,
+        "a new lockfile must run the runtime again"
+    );
+    std::fs::remove_file(project.join("Gemfile.lock")).unwrap();
+
+    write_discovery_runtime(&fake_ruby, &invocation_log, "bundler", &gem_dir, &[]);
+    assert_eq!(discover(GemSource::BundlerInstalled), 3);
+    assert_eq!(
+        discover(GemSource::BundlerInstalled),
+        4,
+        "Bundler without a lockfile resolves against installed gems and must never be reused"
+    );
+}

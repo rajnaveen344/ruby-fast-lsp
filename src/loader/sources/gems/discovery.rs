@@ -373,10 +373,10 @@ impl IndexerGem {
             ruby_executable,
             self.java_home.as_deref(),
         )
-        .unwrap_or_else(|error| {
+        .map_err(|error| {
             warn!("gem discovery reuse is unavailable for this project: {error:#}");
-            None
         })
+        .ok()
     }
 
     /// Discover all global gems

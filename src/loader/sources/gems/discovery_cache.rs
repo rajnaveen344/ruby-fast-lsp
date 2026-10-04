@@ -71,18 +71,13 @@ struct Saved {
 }
 
 impl GemDiscoveryCache {
-    /// Returns `None` when the project has no lockfile: without one, Bundler
-    /// resolves against whatever is installed and the answer has no stable key.
     pub(super) fn open(
         cache_root: &Path,
         project_root: &Path,
         gemfile: &Path,
         ruby_executable: &Path,
         java_home: Option<&Path>,
-    ) -> Result<Option<Self>> {
-        if !project_root.join("Gemfile.lock").is_file() {
-            return Ok(None);
-        }
+    ) -> Result<Self> {
         let project_root = project_root.canonicalize().with_context(|| {
             format!(
                 "failed to canonicalize {} for gem discovery reuse",
@@ -100,7 +95,7 @@ impl GemDiscoveryCache {
             java_home: java_home.map(Path::to_path_buf),
         };
         let key = inputs.key()?;
-        Ok(Some(Self { file, key, inputs }))
+        Ok(Self { file, key, inputs })
     }
 
     /// The saved gem array and the branch that produced it, if every input
@@ -141,6 +136,11 @@ impl GemDiscoveryCache {
         let mut watched_fingerprints = Vec::new();
         match source {
             DiscoverySource::Bundler => {
+                // Without a lockfile Bundler resolves against whatever is
+                // installed, which the gem folders alone do not identify.
+                if !self.inputs.project_root.join("Gemfile.lock").is_file() {
+                    return Ok(());
+                }
                 #[derive(Deserialize)]
                 struct GemDir {
                     gem_dir: PathBuf,
