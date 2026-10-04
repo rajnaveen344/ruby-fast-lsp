@@ -186,14 +186,14 @@ pub(super) fn build_cached_project_java_catalog(
                     }
                 })
                 .map_err(|message| anyhow!(message))?;
-            Ok((*product).clone())
+            Ok(product)
         })
         .collect::<Result<Vec<_>>>()?;
 
     // Indexed Rayon collection preserves input order. Keep composition
     // explicitly sequential because the first artifact defining a class wins.
     let mut builder = ProjectJavaCatalogBuilder::new(classpath);
-    for (artifact, product) in classpath.artifacts.iter().zip(products) {
+    for (artifact, product) in classpath.artifacts.iter().zip(&products) {
         builder.push(product).map_err(|error| {
             anyhow!(
                 "failed to compose Java artifact metadata for {} into project catalog: \
@@ -202,7 +202,7 @@ pub(super) fn build_cached_project_java_catalog(
             )
         })?;
     }
-    Ok(builder.finish())
+    Ok(builder.finish_shared(process_cache))
 }
 
 pub(super) fn build_jruby_import_provider(
@@ -316,16 +316,16 @@ pub(super) fn build_jruby_import_provider(
     info!(
         "JRuby Java catalog ready for {}: classes={}, artifacts={}, duplicates={}, fingerprint={}",
         workspace_root.display(),
-        catalog.classes.len(),
+        catalog.class_count(),
         classpath.artifacts.len(),
-        catalog.duplicates.len(),
-        catalog.classpath_fingerprint_sha256
+        catalog.duplicate_count(),
+        catalog.classpath_fingerprint()
     );
     let source_cache_root = jruby_cache_root_for_project(
         &workspace_root,
         user_cache_root_override.as_deref(),
         "jruby-sources",
-        &catalog.classpath_fingerprint_sha256,
+        catalog.classpath_fingerprint(),
     )?;
     let source_resolver = JavaSourceResolver::new(
         classpath.sources,

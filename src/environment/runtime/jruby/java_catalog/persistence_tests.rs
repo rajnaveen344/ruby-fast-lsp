@@ -2,8 +2,10 @@
 //! exact identity selection, corruption recovery, fresh-process loads, and
 //! compatibility with products written in the schema-1 envelope.
 
-use super::classpath::{ArtifactKind, ArtifactOrigin, ClasspathArtifact, SourceFileIdentity};
-use super::java_catalog::{JavaArtifactProduct, JavaArtifactProductKey};
+use super::super::classpath::{
+    ArtifactKind, ArtifactOrigin, ClasspathArtifact, SourceFileIdentity,
+};
+use super::{JavaArtifactProduct, JavaArtifactProductKey};
 use crate::utils::persistent_cache::{
     PersistentDerivedProductCache, PersistentProduct, PersistentProductLookup,
     PersistentProductStat,
@@ -15,7 +17,7 @@ use std::path::PathBuf;
 use zip::write::SimpleFileOptions;
 
 fn java_artifact(path: PathBuf) -> ClasspathArtifact {
-    let digits = include_str!("../../../../crates/jvm-metadata/fixtures/minimal_class.hex")
+    let digits = include_str!("../../../../../crates/jvm-metadata/fixtures/minimal_class.hex")
         .bytes()
         .filter(|byte| !byte.is_ascii_whitespace())
         .collect::<Vec<_>>();
@@ -193,10 +195,14 @@ fn fresh_process_loads_java_artifact_metadata() {
     };
     reservation.publish(&product).unwrap();
 
+    // Test names omit the crate segment of the module path.
+    let (_, module) = module_path!()
+        .split_once("::")
+        .expect("test module must sit below the crate root");
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "environment::runtime::jruby::java_catalog_persistence_tests::fresh_process_loads_java_artifact_metadata",
+            &format!("{module}::fresh_process_loads_java_artifact_metadata"),
             "--nocapture",
         ])
         .env(CHILD_ROOT, fixture.path())

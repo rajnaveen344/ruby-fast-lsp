@@ -1,4 +1,3 @@
-use super::super::java_catalog::JavaClassDeclaration;
 use super::navigation::supplemental_implementation_location;
 use super::*;
 use parking_lot::RwLock;
@@ -14,42 +13,44 @@ use ruby_fast_lsp_jvm_metadata::{
     SourceByteRange,
 };
 use ruby_prism::Visit;
-use std::collections::BTreeMap;
 
 use tower_lsp::lsp_types::Url;
 
-fn catalog(class_names: &[&str]) -> Arc<ProjectJavaCatalog> {
-    let classes = class_names
+fn class_files(class_names: &[&str]) -> Vec<ClassFile> {
+    class_names
         .iter()
-        .map(|name| {
-            (
-                (*name).to_string(),
-                JavaClassDeclaration {
-                    class: Arc::new(ClassFile {
-                        minor_version: 0,
-                        major_version: 61,
-                        access_flags: 0x0021,
-                        name: (*name).into(),
-                        super_name: Some("java/lang/Object".into()),
-                        interfaces: Box::default(),
-                        fields: Box::default(),
-                        methods: Box::default(),
-                        source_file: None,
-                        is_record: false,
-                    }),
-                    artifact_path: crate::test::harness::fixture_path("/fixture/runtime.jar"),
-                    artifact_fingerprint_sha256: "fixture".to_string(),
-                    entry_name: format!("{name}.class"),
-                    release: None,
-                },
-            )
+        .map(|name| ClassFile {
+            minor_version: 0,
+            major_version: 61,
+            access_flags: 0x0021,
+            name: (*name).into(),
+            super_name: Some("java/lang/Object".into()),
+            interfaces: Box::default(),
+            fields: Box::default(),
+            methods: Box::default(),
+            source_file: None,
+            is_record: false,
         })
-        .collect::<BTreeMap<_, _>>();
-    Arc::new(ProjectJavaCatalog {
-        classpath_fingerprint_sha256: "fixture-classpath".to_string(),
+        .collect()
+}
+
+fn catalog_of(classes: Vec<ClassFile>) -> Arc<ProjectJavaCatalog> {
+    Arc::new(ProjectJavaCatalog::from_test_classes(
+        "fixture-classpath",
+        crate::test::harness::fixture_path("/fixture/runtime.jar"),
         classes,
-        duplicates: Vec::new(),
-    })
+    ))
+}
+
+fn catalog(class_names: &[&str]) -> Arc<ProjectJavaCatalog> {
+    catalog_of(class_files(class_names))
+}
+
+fn class_mut<'a>(classes: &'a mut [ClassFile], name: &str) -> &'a mut ClassFile {
+    classes
+        .iter_mut()
+        .find(|class| &*class.name == name)
+        .expect("fixture class must exist")
 }
 
 fn add_methods(class: &mut ClassFile, methods: impl IntoIterator<Item = MemberInfo>) {
@@ -81,6 +82,38 @@ fn provider_ignores_anonymous_jvm_classes_without_losing_named_nested_proxies() 
             .unwrap(),
         None
     );
+}
+
+#[test]
+fn provider_reports_ambiguous_proxies_and_lists_only_direct_package_classes() {
+    let provider = JrubyImportProvider::new(catalog(&[
+        "com/example/Widget",
+        "comExample/Widget",
+        "java/util/List",
+        "java/util/Map$Entry",
+        "java/util/concurrent/Future",
+        "java/utility/Helper",
+    ]));
+
+    assert_eq!(
+        provider.class_name_for_static_proxy_reference("Java::ComExample::Widget"),
+        Err(
+            "JRuby proxy `Java::ComExample::Widget` maps to multiple classpath identities: \
+             com/example/Widget, comExample/Widget"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        provider.class_name_for_static_proxy_reference("Java::JavaUtil::List"),
+        Ok(Some("java/util/List".to_string()))
+    );
+    assert_eq!(
+        provider.class_names_in_package("java.util"),
+        Ok(vec!["java/util/List".to_string()])
+    );
+    assert!(provider.source_may_reference_static_java("widget = com.example.Widget.new\n"));
+    assert!(provider.source_may_reference_static_java("widget = comExample.Widget.new\n"));
+    assert!(!provider.source_may_reference_static_java("name = user.profile.name\n"));
 }
 
 fn collect_with_catalog(source: &str, catalog: Arc<ProjectJavaCatalog>) -> FactCollector {
@@ -175,14 +208,10 @@ fn generated_signature_source_preserves_its_java_proxy_class_declaration() {
 
 #[test]
 fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
-    let mut catalog = Arc::try_unwrap(catalog(&["java/util/ArrayList", "java/lang/Object"]))
-        .expect("fixture catalog must have one owner");
-    let declaration = catalog
-        .classes
-        .get_mut("java/util/ArrayList")
-        .expect("fixture class must exist");
+    let mut classes = class_files(&["java/util/ArrayList", "java/lang/Object"]);
+    let declaration = class_mut(&mut classes, "java/util/ArrayList");
     add_methods(
-        Arc::make_mut(&mut declaration.class),
+        declaration,
         [MemberInfo {
             access_flags: 0x0001,
             name: "add".into(),
@@ -204,7 +233,7 @@ fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
              class ArrayList\n\
                java_alias :simple_add, :add, [Java::int, java.lang.Object]\n\
              end\n",
-        Arc::new(catalog),
+        catalog_of(classes),
     );
     let alias = FullyQualifiedName::method(
         ["Java", "JavaUtil", "ArrayList"]
@@ -230,17 +259,12 @@ fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
 
 #[test]
 fn java_send_selects_an_exact_overload_projects_its_return_and_references_its_name() {
-    let mut catalog = Arc::try_unwrap(catalog(&[
+    let mut classes = class_files(&[
         "java/util/ArrayList",
         "java/lang/Object",
         "java/lang/String",
-    ]))
-    .expect("fixture catalog must have one owner");
-    let declaration = catalog
-        .classes
-        .get_mut("java/util/ArrayList")
-        .expect("fixture class must exist");
-    let list = Arc::make_mut(&mut declaration.class);
+    ]);
+    let list = class_mut(&mut classes, "java/util/ArrayList");
     add_methods(
         list,
         [
@@ -264,7 +288,7 @@ fn java_send_selects_an_exact_overload_projects_its_return_and_references_its_na
             },
         ],
     );
-    let provider = Arc::new(JrubyImportProvider::new(Arc::new(catalog)));
+    let provider = Arc::new(JrubyImportProvider::new(catalog_of(classes)));
     let preferred_range = TextRange::new(SourceFileId(99), 10, 40);
     provider.register_method_navigation_ranges(
         "java/util/ArrayList",
@@ -393,13 +417,8 @@ fn decompiled_supplement_retains_only_members_missing_from_exact_source() {
 
 #[test]
 fn java_method_distinguishes_bound_static_and_unbound_instance_handles() {
-    let mut catalog = Arc::try_unwrap(catalog(&["java/lang/String"]))
-        .expect("fixture catalog must have one owner");
-    let declaration = catalog
-        .classes
-        .get_mut("java/lang/String")
-        .expect("fixture class must exist");
-    let string = Arc::make_mut(&mut declaration.class);
+    let mut classes = class_files(&["java/lang/String"]);
+    let string = class_mut(&mut classes, "java/lang/String");
     add_methods(
         string,
         [
@@ -431,7 +450,7 @@ fn java_method_distinguishes_bound_static_and_unbound_instance_handles() {
              UNBOUND_HANDLE = String.java_method(:substring, [Java::int])\n\
              INSTANCE = String.new\n\
              BOUND_HANDLE = INSTANCE.java_method(:substring, [Java::int])\n",
-        Arc::new(catalog),
+        catalog_of(classes),
     );
     for (constant, expected) in [
         ("STATIC_HANDLE", "Method"),
@@ -498,13 +517,8 @@ fn to_java_projects_explicit_object_primitive_and_array_targets() {
 
 #[test]
 fn java_interfaces_connect_to_ruby_classes_through_include_and_java_implements() {
-    let mut catalog = Arc::try_unwrap(catalog(&["java/lang/Runnable"]))
-        .expect("fixture catalog must have one owner");
-    let declaration = catalog
-        .classes
-        .get_mut("java/lang/Runnable")
-        .expect("fixture interface must exist");
-    Arc::make_mut(&mut declaration.class).access_flags = 0x0601;
+    let mut classes = class_files(&["java/lang/Runnable"]);
+    class_mut(&mut classes, "java/lang/Runnable").access_flags = 0x0601;
     let collector = collect_with_catalog(
         "class Worker\n\
              \x20 java_implements java.lang.Runnable\n\
@@ -512,7 +526,7 @@ fn java_interfaces_connect_to_ruby_classes_through_include_and_java_implements()
              class IncludedWorker\n\
              \x20 include java.lang.Runnable\n\
              end\n",
-        Arc::new(catalog),
+        catalog_of(classes),
     );
     let target = FullyQualifiedName::namespace(
         ["Java", "JavaLang", "Runnable"]

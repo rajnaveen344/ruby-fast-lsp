@@ -30,12 +30,17 @@ pub struct ArchiveClass {
 
 impl ArchiveClass {
     pub fn entry_name(&self, kind: ArchiveKind) -> String {
-        match (kind, self.release) {
-            (ArchiveKind::Jmod, _) => format!("classes/{}.class", self.class.name),
-            (ArchiveKind::Jar, None) => format!("{}.class", self.class.name),
-            (ArchiveKind::Jar, Some(release)) => {
-                format!("{VERSIONED_PREFIX}{release}/{}.class", self.class.name)
-            }
+        archive_entry_name(kind, self.release, &self.class.name)
+    }
+}
+
+/// The archive entry that holds `internal_name` for the selected release.
+pub fn archive_entry_name(kind: ArchiveKind, release: Option<u16>, internal_name: &str) -> String {
+    match (kind, release) {
+        (ArchiveKind::Jmod, _) => format!("classes/{internal_name}.class"),
+        (ArchiveKind::Jar, None) => format!("{internal_name}.class"),
+        (ArchiveKind::Jar, Some(release)) => {
+            format!("{VERSIONED_PREFIX}{release}/{internal_name}.class")
         }
     }
 }

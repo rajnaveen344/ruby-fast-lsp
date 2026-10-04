@@ -44,8 +44,6 @@ pub struct StaticJavaNavigationPlan {
 #[derive(Debug)]
 pub struct JrubyImportProvider {
     catalog: Arc<ProjectJavaCatalog>,
-    proxy_to_internal: BTreeMap<String, Vec<String>>,
-    static_top_level_packages: BTreeSet<String>,
     source_resolver: Option<Arc<JavaSourceResolver>>,
     decompiler: Option<Arc<JavaDecompiler>>,
     signature_cache_root: Option<PathBuf>,
@@ -55,28 +53,8 @@ pub struct JrubyImportProvider {
 
 impl JrubyImportProvider {
     pub fn new(catalog: Arc<ProjectJavaCatalog>) -> Self {
-        let mut proxy_to_internal = BTreeMap::<String, Vec<String>>::new();
-        let mut static_top_level_packages = BTreeSet::new();
-        for internal_name in catalog.classes.keys() {
-            if let Some(package) = internal_name.split('/').next() {
-                static_top_level_packages.insert(package.to_string());
-            }
-            // JVM classfiles may legitimately contain anonymous and compiler-generated
-            // names such as `Outer$1`. They are classpath truth, but JRuby cannot expose
-            // them as ordinary Ruby proxy constants. Keep them in metadata for exact
-            // descriptor relationships and omit only the invalid Ruby proxy projection.
-            let Ok(java_name) = JavaClassName::parse(internal_name) else {
-                continue;
-            };
-            proxy_to_internal
-                .entry(java_name.ruby_fqn())
-                .or_default()
-                .push(internal_name.clone());
-        }
         Self {
             catalog,
-            proxy_to_internal,
-            static_top_level_packages,
             source_resolver: None,
             decompiler: None,
             signature_cache_root: None,
@@ -105,30 +83,27 @@ impl JrubyImportProvider {
     }
 
     pub fn classpath_fingerprint(&self) -> &str {
-        &self.catalog.classpath_fingerprint_sha256
+        self.catalog.classpath_fingerprint()
     }
 
-    pub fn class_declaration(&self, internal_name: &str) -> Option<&JavaClassDeclaration> {
-        self.catalog.classes.get(internal_name)
+    pub fn class_declaration(&self, internal_name: &str) -> Option<JavaClassDeclaration<'_>> {
+        self.catalog.class(internal_name)
     }
 
     pub fn class_names_in_package(&self, package: &str) -> Result<Vec<String>, String> {
         let Some(prefix) = java_package_prefix(package) else {
             return Err(format!("`{package}` is not a valid Java package name"));
         };
-        let mut names = self
+        // Catalog names iterate in sorted order.
+        let names = self
             .catalog
-            .classes
-            .keys()
-            .filter_map(|internal| {
-                let class = internal.strip_prefix(&prefix)?;
-                if class.contains('/') || class.contains('$') {
-                    return None;
-                }
-                Some(internal.clone())
+            .class_names_with_prefix(&prefix)
+            .filter(|internal| {
+                let class = &internal[prefix.len()..];
+                !class.contains('/') && !class.contains('$')
             })
+            .map(str::to_string)
             .collect::<Vec<_>>();
-        names.sort();
         if names.len() > MAX_INCLUDED_PACKAGE_CLASSES {
             return Err(format!(
                 "Java package `{package}` contains {} direct classes, exceeding the bounded limit of {MAX_INCLUDED_PACKAGE_CLASSES}",
@@ -144,9 +119,10 @@ impl JrubyImportProvider {
 
     pub fn source_hint_may_reference_static_java(&self, hint: &StaticJavaSourceHint) -> bool {
         hint.definite_catalog_semantics()
-            || hint.dotted_roots().iter().any(|root| {
-                root == "Java" || self.static_top_level_packages.contains(root.as_str())
-            })
+            || hint
+                .dotted_roots()
+                .iter()
+                .any(|root| root == "Java" || self.catalog.has_top_level_package(root))
     }
 
     pub fn class_name_for_static_proxy_reference(
@@ -154,24 +130,24 @@ impl JrubyImportProvider {
         reference: &str,
     ) -> Result<Option<String>, String> {
         if reference.contains("::") {
-            let Some(internal_names) = self.proxy_to_internal.get(reference) else {
+            let targets = self.catalog.proxy_targets(reference);
+            if targets.is_empty() {
                 return Ok(None);
-            };
-            if internal_names.len() != 1 {
+            }
+            let Some(target) = targets.unique() else {
                 return Err(format!(
                     "JRuby proxy `{reference}` maps to multiple classpath identities: {}",
-                    internal_names.join(", ")
+                    targets.joined_class_names()
                 ));
-            }
-            return Ok(Some(internal_names[0].clone()));
+            };
+            return Ok(Some(target.class.name.to_string()));
         }
         let Ok(java_name) = JavaClassName::parse(reference) else {
             return Ok(None);
         };
         Ok(self
             .catalog
-            .classes
-            .contains_key(java_name.internal_name())
+            .contains_class(java_name.internal_name())
             .then(|| java_name.internal_name().to_string()))
     }
 }

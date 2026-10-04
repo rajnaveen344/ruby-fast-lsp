@@ -211,7 +211,7 @@ impl JavaDecompiler {
             != declaration.artifact_fingerprint_sha256
         {
             return Err(JavaDecompilerError::ArtifactFingerprintMismatch(
-                declaration.artifact_path.clone(),
+                declaration.artifact_path.to_path_buf(),
             ));
         }
         safe_internal_class_path(&declaration.class.name)?;
@@ -400,7 +400,7 @@ fn extract_class_family(
 ) -> Result<PathBuf, JavaDecompilerError> {
     let mut archive = zip::ZipArchive::new(Cursor::new(artifact_bytes)).map_err(|error| {
         JavaDecompilerError::InvalidArchive {
-            path: declaration.artifact_path.clone(),
+            path: declaration.artifact_path.to_path_buf(),
             message: error.to_string(),
         }
     })?;
@@ -409,7 +409,8 @@ fn extract_class_family(
             "Java artifact archive entries",
         ));
     }
-    let selected_entry = Path::new(&declaration.entry_name);
+    let entry_name = declaration.entry_name();
+    let selected_entry = Path::new(&entry_name);
     let selected_parent = selected_entry.parent().unwrap_or_else(|| Path::new(""));
     let selected_name = selected_entry
         .file_name()
@@ -417,7 +418,7 @@ fn extract_class_family(
         .ok_or_else(|| {
             JavaDecompilerError::InvalidOutput(format!(
                 "selected class archive entry `{}` is not a safe UTF-8 path",
-                declaration.entry_name
+                entry_name
             ))
         })?;
     let outer_stem = selected_name
@@ -426,7 +427,7 @@ fn extract_class_family(
         .ok_or_else(|| {
             JavaDecompilerError::InvalidOutput(format!(
                 "selected archive entry `{}` is not a class",
-                declaration.entry_name
+                entry_name
             ))
         })?;
     let outer_class_name = format!("{outer_stem}.class");
@@ -438,12 +439,12 @@ fn extract_class_family(
             archive
                 .by_index(index)
                 .map_err(|error| JavaDecompilerError::InvalidArchive {
-                    path: declaration.artifact_path.clone(),
+                    path: declaration.artifact_path.to_path_buf(),
                     message: error.to_string(),
                 })?;
         let Some(path) = entry.enclosed_name() else {
             return Err(JavaDecompilerError::InvalidArchive {
-                path: declaration.artifact_path.clone(),
+                path: declaration.artifact_path.to_path_buf(),
                 message: format!("archive entry `{}` escapes its root", entry.name()),
             });
         };
@@ -483,17 +484,17 @@ fn extract_class_family(
         entry
             .read_to_end(&mut bytes)
             .map_err(|error| JavaDecompilerError::InvalidArchive {
-                path: declaration.artifact_path.clone(),
+                path: declaration.artifact_path.to_path_buf(),
                 message: error.to_string(),
             })?;
         extracted.push((name.to_string(), bytes));
     }
     if !extracted.iter().any(|(name, _)| name == selected_name) {
         return Err(JavaDecompilerError::InvalidArchive {
-            path: declaration.artifact_path.clone(),
+            path: declaration.artifact_path.to_path_buf(),
             message: format!(
                 "selected class entry `{}` disappeared from verified artifact",
-                declaration.entry_name
+                entry_name
             ),
         });
     }

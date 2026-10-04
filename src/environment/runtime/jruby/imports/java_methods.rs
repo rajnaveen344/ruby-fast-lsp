@@ -71,17 +71,18 @@ impl JrubyImportProvider {
         let current_namespace =
             FullyQualifiedName::namespace(visitor.scope_tracker().get_ns_stack());
         let Some(proxy) = current_runtime_proxy(visitor).or_else(|| {
-            self.proxy_to_internal
-                .contains_key(&current_namespace.to_string())
+            self.catalog
+                .has_proxy(&current_namespace.to_string())
                 .then_some(current_namespace)
         }) else {
             return;
         };
         let proxy_name = proxy.to_string();
-        let Some(internal_names) = self.proxy_to_internal.get(&proxy_name) else {
-            return;
-        };
-        if internal_names.len() != 1 {
+        let targets = self.catalog.proxy_targets(&proxy_name);
+        let Some(declaration) = targets.unique() else {
+            if targets.is_empty() {
+                return;
+            }
             visitor.push_error_diagnostic(
                 visitor.text_range_from_offsets(
                     node.location().start_offset(),
@@ -90,20 +91,11 @@ impl JrubyImportProvider {
                 "ambiguous-java-proxy",
                 format!(
                     "Java proxy `{proxy_name}` maps to multiple classpath identities: {}.",
-                    internal_names.join(", ")
+                    targets.joined_class_names()
                 ),
             );
             return;
-        }
-        let declaration = self
-            .catalog
-            .classes
-            .get(&internal_names[0])
-            .expect_invariant(
-                "Java proxy reverse index points at a missing catalog class",
-                "both structures are built atomically from the same catalog",
-                "keep JrubyImportProvider::new reverse-index construction synchronized",
-            );
+        };
         let matching = declaration
             .class
             .methods
@@ -417,8 +409,8 @@ impl JrubyImportProvider {
             | RubyType::Union(_)
             | RubyType::Unknown => return None,
         };
-        self.proxy_to_internal
-            .contains_key(&proxy.to_string())
+        self.catalog
+            .has_proxy(&proxy.to_string())
             .then_some((proxy, kind))
     }
 
@@ -428,16 +420,17 @@ impl JrubyImportProvider {
         method_name: &str,
         signature: &[JvmType],
     ) -> Result<Vec<SelectedJavaMethod>, String> {
-        let Some(roots) = self.proxy_to_internal.get(&proxy.to_string()) else {
+        let targets = self.catalog.proxy_targets(&proxy.to_string());
+        if targets.is_empty() {
             return Ok(Vec::new());
-        };
-        if roots.len() != 1 {
+        }
+        let Some(root) = targets.unique() else {
             return Err(format!(
                 "Java proxy `{proxy}` maps to multiple classpath identities: {}.",
-                roots.join(", ")
+                targets.joined_class_names()
             ));
-        }
-        let mut queue = VecDeque::from([(roots[0].clone(), 0usize)]);
+        };
+        let mut queue = VecDeque::from([(root.class.name.to_string(), 0usize)]);
         let mut visited = BTreeSet::new();
         let mut identities = BTreeSet::new();
         let mut selected = Vec::new();
@@ -450,7 +443,7 @@ impl JrubyImportProvider {
                     "Java hierarchy for `{proxy}` exceeds the bounded limit of {MAX_JAVA_HIERARCHY_TYPES} types."
                 ));
             }
-            let Some(declaration) = self.catalog.classes.get(&owner) else {
+            let Some(declaration) = self.catalog.class(&owner) else {
                 continue;
             };
             for method in &declaration.class.methods {

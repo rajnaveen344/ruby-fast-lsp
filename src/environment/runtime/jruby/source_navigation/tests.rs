@@ -1,4 +1,5 @@
 use super::*;
+use crate::environment::runtime::jruby::java_catalog::ProjectJavaCatalog;
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{Project, ResolveMode, SourceFileInput};
 use ruby_fast_lsp_jvm_metadata::{
@@ -53,16 +54,21 @@ fn decode_hex(source: &str) -> Vec<u8> {
         .collect()
 }
 
-fn rich_declaration(root: &Path) -> JavaClassDeclaration {
-    JavaClassDeclaration {
-        class: parse_class(&decode_hex(RICH_FIXTURE_CLASS_HEX), ClassLimits::default())
-            .expect("checked class fixture must parse")
-            .into(),
-        artifact_path: root.join("rich.jar"),
-        artifact_fingerprint_sha256: "fixture-artifact".to_string(),
-        entry_name: "fixtures/RichFixture.class".to_string(),
-        release: None,
-    }
+fn rich_catalog(root: &Path) -> ProjectJavaCatalog {
+    ProjectJavaCatalog::from_test_classes(
+        "fixture-classpath",
+        root.join("rich.jar"),
+        vec![
+            parse_class(&decode_hex(RICH_FIXTURE_CLASS_HEX), ClassLimits::default())
+                .expect("checked class fixture must parse"),
+        ],
+    )
+}
+
+fn rich_declaration(catalog: &ProjectJavaCatalog) -> JavaClassDeclaration<'_> {
+    catalog
+        .class("fixtures/RichFixture")
+        .expect("fixture catalog must contain the rich class")
 }
 
 fn source_root(path: PathBuf, origin: SourceOrigin) -> SourceRoot {
@@ -128,7 +134,7 @@ fn archive_resolution_streams_only_the_selected_entry() {
 
     let mut archive = zip::ZipArchive::new(reader).expect("streaming archive fixture must parse");
     let resolved = source_from_archive(
-        &rich_declaration(Path::new("/fixture")),
+        &rich_declaration(&rich_catalog(Path::new("/fixture"))),
         &root,
         &mut archive,
         Path::new("fixtures/RichFixture.java"),
@@ -170,7 +176,7 @@ fn resolves_project_source_before_archives_even_when_roots_are_unsorted() {
     );
 
     let resolved = resolver
-        .resolve(&rich_declaration(fixture.path()))
+        .resolve(&rich_declaration(&rich_catalog(fixture.path())))
         .expect("source resolution must succeed")
         .expect("project source must resolve");
 
@@ -198,7 +204,7 @@ fn verifies_and_materializes_attached_source_archive_outside_the_project() {
     );
 
     let resolved = resolver
-        .resolve(&rich_declaration(fixture.path()))
+        .resolve(&rich_declaration(&rich_catalog(fixture.path())))
         .expect("source resolution must succeed")
         .expect("attached source must resolve");
 
@@ -224,7 +230,8 @@ fn reuses_one_parsed_archive_for_repeated_source_resolution() {
         fixture.path().join("cache"),
         JavaSourceResolutionLimits::default(),
     );
-    let declaration = rich_declaration(fixture.path());
+    let catalog = rich_catalog(fixture.path());
+    let declaration = rich_declaration(&catalog);
 
     resolver
         .resolve(&declaration)
@@ -269,7 +276,7 @@ fn resolves_jdk_module_prefixed_source_and_rejects_ambiguous_matches() {
     );
     assert_eq!(
         resolver
-            .resolve(&rich_declaration(fixture.path()))
+            .resolve(&rich_declaration(&rich_catalog(fixture.path())))
             .expect("module-prefixed JDK source must resolve")
             .expect("JDK source must be present")
             .origin,
@@ -291,7 +298,7 @@ fn resolves_jdk_module_prefixed_source_and_rejects_ambiguous_matches() {
         JavaSourceResolutionLimits::default(),
     );
     assert!(matches!(
-        resolver.resolve(&rich_declaration(fixture.path())),
+        resolver.resolve(&rich_declaration(&rich_catalog(fixture.path()))),
         Err(JavaSourceResolutionError::Ambiguous {
             class_name,
             source
@@ -318,7 +325,7 @@ fn rejects_source_archive_whose_discovered_fingerprint_changed() {
     );
 
     assert_eq!(
-        resolver.resolve(&rich_declaration(fixture.path())),
+        resolver.resolve(&rich_declaration(&rich_catalog(fixture.path()))),
         Err(JavaSourceResolutionError::FingerprintMismatch { path: attached })
     );
 }

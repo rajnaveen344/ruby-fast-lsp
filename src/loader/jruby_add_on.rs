@@ -33,11 +33,7 @@ impl JrubyAddOn {
     pub(crate) fn for_classpath_fingerprint(fingerprint: String) -> Self {
         use crate::environment::runtime::jruby::java_catalog::ProjectJavaCatalog;
         Self::new(Arc::new(JrubyImportProvider::new(Arc::new(
-            ProjectJavaCatalog {
-                classpath_fingerprint_sha256: fingerprint,
-                classes: Default::default(),
-                duplicates: Vec::new(),
-            },
+            ProjectJavaCatalog::from_test_classes(&fingerprint, Default::default(), Vec::new()),
         ))))
     }
 }

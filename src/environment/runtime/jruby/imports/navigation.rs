@@ -80,17 +80,17 @@ impl JrubyImportProvider {
         let Some(resolver) = &self.source_resolver else {
             return Ok(None);
         };
-        let Some(declaration) = self.catalog.classes.get(internal_name) else {
+        let Some(declaration) = self.catalog.class(internal_name) else {
             return Ok(None);
         };
-        resolver.resolve(declaration)
+        resolver.resolve(&declaration)
     }
 
     pub fn resolved_navigation_implementations(
         &self,
         internal_name: &str,
     ) -> Result<Vec<ResolvedJavaSource>, JavaImplementationResolutionError> {
-        let Some(declaration) = self.catalog.classes.get(internal_name) else {
+        let Some(declaration) = self.catalog.class(internal_name) else {
             return Ok(Vec::new());
         };
         let exact_source = self
@@ -106,7 +106,7 @@ impl JrubyImportProvider {
                 return Ok(vec![exact_source]);
             }
             let Some(mut decompiled) = decompiler
-                .decompile(declaration)
+                .decompile(&declaration)
                 .map_err(JavaImplementationResolutionError::Decompiler)?
             else {
                 return Ok(vec![exact_source]);
@@ -132,7 +132,7 @@ impl JrubyImportProvider {
         }
 
         Ok(decompiler
-            .decompile(declaration)
+            .decompile(&declaration)
             .map_err(JavaImplementationResolutionError::Decompiler)?
             .into_iter()
             .collect())
@@ -145,7 +145,7 @@ impl JrubyImportProvider {
         let Ok(java_name) = JavaClassName::parse(import_name) else {
             return Ok(None);
         };
-        let Some(declaration) = self.catalog.classes.get(java_name.internal_name()) else {
+        let Some(declaration) = self.catalog.class(java_name.internal_name()) else {
             return Ok(None);
         };
         let source = ruby_fast_lsp_jruby_support::generate_ruby_signature(&declaration.class)?;

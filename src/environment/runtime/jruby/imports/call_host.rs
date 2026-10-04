@@ -123,7 +123,7 @@ impl JrubyImportProvider {
         let Ok(root) = std::str::from_utf8(root) else {
             return false;
         };
-        root == "Java" || self.static_top_level_packages.contains(root)
+        root == "Java" || self.catalog.has_top_level_package(root)
     }
 
     fn seed_static_proxy_expression(&self, visitor: &mut FactCollector, node: &Node<'_>) {
@@ -131,7 +131,7 @@ impl JrubyImportProvider {
             let Some(reference) = canonical_java_constant_path(&path) else {
                 return;
             };
-            if !self.proxy_to_internal.contains_key(&reference) {
+            if !self.catalog.has_proxy(&reference) {
                 return;
             }
             // The selected project's class catalog proves this proxy exists.
@@ -139,8 +139,8 @@ impl JrubyImportProvider {
             // syntax before the provider installs its runtime evidence.
             let proxy = FullyQualifiedName::try_from(reference.as_str()).expect_invariant(
                 "a catalog-owned Java proxy has an invalid Ruby constant path",
-                "proxy_to_internal contains validated proxy identities",
-                "preserve validation when constructing the catalog mapping",
+                "catalog proxies are projected from validated Java class names",
+                "preserve validation when composing catalog proxies",
             );
             visitor.direct_push_expression_type(
                 node,
@@ -162,7 +162,7 @@ impl JrubyImportProvider {
         let Ok(java_name) = JavaClassName::parse(&dotted_name) else {
             return;
         };
-        if !self.catalog.classes.contains_key(java_name.internal_name()) {
+        if !self.catalog.contains_class(java_name.internal_name()) {
             return;
         }
         CALL_HOST_STATS.increment(CallHostStat::SeedCatalogHits);

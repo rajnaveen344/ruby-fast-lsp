@@ -170,7 +170,7 @@ impl JrubyImportProvider {
             let Ok(java_name) = JavaClassName::parse(&interface.name) else {
                 continue;
             };
-            let Some(declaration) = self.catalog.classes.get(java_name.internal_name()) else {
+            let Some(declaration) = self.catalog.class(java_name.internal_name()) else {
                 visitor.push_error_diagnostic(
                     interface.range,
                     "unresolved-java-interface",
@@ -308,7 +308,7 @@ impl JrubyImportProvider {
             );
             return;
         };
-        let Some(declaration) = self.catalog.classes.get(java_name.internal_name()) else {
+        let Some(declaration) = self.catalog.class(java_name.internal_name()) else {
             visitor.push_error_diagnostic(
                 import.range,
                 "unresolved-java-import",

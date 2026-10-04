@@ -14,8 +14,8 @@ mod descriptor;
 mod java_source;
 
 pub use archive::{
-    parse_archive, ArchiveClass, ArchiveError, ArchiveKind, ArchiveLimits, ArchiveMetadata,
-    ARCHIVE_PRODUCT_SEMANTIC_VERSION,
+    archive_entry_name, parse_archive, ArchiveClass, ArchiveError, ArchiveKind, ArchiveLimits,
+    ArchiveMetadata, ARCHIVE_PRODUCT_SEMANTIC_VERSION,
 };
 pub use classfile::{
     parse_class, parse_class_with_interner, ClassFile, ClassKind, ClassLimits, JvmStringInterner,

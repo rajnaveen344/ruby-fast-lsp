@@ -17,35 +17,24 @@ fn jruby_provider_with_superclasses(
 ) -> JrubyImportProvider {
     let classes = classes_with_superclasses
         .iter()
-        .map(|(name, superclass)| {
-            (
-                (*name).to_string(),
-                JavaClassDeclaration {
-                    class: Arc::new(ClassFile {
-                        minor_version: 0,
-                        major_version: 61,
-                        access_flags: 0x0021,
-                        name: (*name).into(),
-                        super_name: Some((*superclass).into()),
-                        interfaces: Box::default(),
-                        fields: Box::default(),
-                        methods: Box::default(),
-                        source_file: None,
-                        is_record: false,
-                    }),
-                    artifact_path: PathBuf::from("/fixture/runtime.jar"),
-                    artifact_fingerprint_sha256: "fixture".to_string(),
-                    entry_name: format!("{name}.class"),
-                    release: None,
-                },
-            )
+        .map(|(name, superclass)| ClassFile {
+            minor_version: 0,
+            major_version: 61,
+            access_flags: 0x0021,
+            name: (*name).into(),
+            super_name: Some((*superclass).into()),
+            interfaces: Box::default(),
+            fields: Box::default(),
+            methods: Box::default(),
+            source_file: None,
+            is_record: false,
         })
-        .collect::<BTreeMap<_, _>>();
-    JrubyImportProvider::new(Arc::new(ProjectJavaCatalog {
-        classpath_fingerprint_sha256: "fixture-classpath".to_string(),
+        .collect();
+    JrubyImportProvider::new(Arc::new(ProjectJavaCatalog::from_test_classes(
+        "fixture-classpath",
+        PathBuf::from("/fixture/runtime.jar"),
         classes,
-        duplicates: Vec::new(),
-    }))
+    )))
 }
 
 #[test]

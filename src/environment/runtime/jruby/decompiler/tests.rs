@@ -2,7 +2,9 @@ use super::*;
 use crate::environment::runtime::jruby::classpath::{
     ArtifactKind, ArtifactOrigin, ClasspathArtifact, ProjectClasspath, SourceFileIdentity,
 };
-use crate::environment::runtime::jruby::java_catalog::build_project_java_catalog;
+use crate::environment::runtime::jruby::java_catalog::{
+    build_project_java_catalog, ProjectJavaCatalog,
+};
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -35,7 +37,7 @@ fn fixture_jar(class: &[u8]) -> Vec<u8> {
     writer.finish().unwrap().into_inner()
 }
 
-fn fixture_declaration(root: &std::path::Path) -> JavaClassDeclaration {
+fn fixture_catalog(root: &std::path::Path) -> ProjectJavaCatalog {
     let class = decode_hex(include_str!(
         "../../../../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
     ));
@@ -60,11 +62,13 @@ fn fixture_declaration(root: &std::path::Path) -> JavaClassDeclaration {
         unresolved: Vec::new(),
         fingerprint_sha256: "fixture-classpath".to_string(),
     };
-    build_project_java_catalog(&classpath, 17, ArchiveLimits::default())
-        .unwrap()
-        .classes
-        .remove("fixtures/RichFixture")
-        .unwrap()
+    build_project_java_catalog(&classpath, 17, ArchiveLimits::default()).unwrap()
+}
+
+fn fixture_declaration(catalog: &ProjectJavaCatalog) -> JavaClassDeclaration<'_> {
+    catalog
+        .class("fixtures/RichFixture")
+        .expect("fixture catalog must contain the rich class")
 }
 
 fn java_executable() -> PathBuf {
@@ -101,7 +105,8 @@ fn bundled_asset() -> JavaDecompilerAsset {
 fn decompiles_only_the_selected_class_and_returns_verified_implementation_ranges() {
     let _decompiler_budget = crate::test::harness::isolate_decompiler_budget();
     let fixture = tempfile::tempdir().unwrap();
-    let declaration = fixture_declaration(fixture.path());
+    let catalog = fixture_catalog(fixture.path());
+    let declaration = fixture_declaration(&catalog);
     let cache = fixture.path().join("cache");
     let decompiler = JavaDecompiler::new(
         java_executable(),
@@ -141,7 +146,8 @@ fn decompiles_only_the_selected_class_and_returns_verified_implementation_ranges
 #[test]
 fn rejects_a_bundled_decompiler_checksum_mismatch_before_execution() {
     let fixture = tempfile::tempdir().unwrap();
-    let declaration = fixture_declaration(fixture.path());
+    let catalog = fixture_catalog(fixture.path());
+    let declaration = fixture_declaration(&catalog);
     let mut asset = bundled_asset();
     asset.fingerprint_sha256 = "0".repeat(64);
     let decompiler = JavaDecompiler::new(

@@ -86,18 +86,11 @@ fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() 
     assert_eq!(process_cache.snapshot().get(SingleFlightStat::Entries), 1);
     assert!(process_cache.retained_weight_bytes() > 0);
     assert!(process_cache.retained_weight_bytes() <= 1024 * 1024);
-    assert_eq!(
-        first.classes["com/example/Demo"].artifact_path,
-        first_artifact.path
-    );
-    assert_eq!(
-        second.classes["com/example/Demo"].artifact_path,
-        second_artifact.path
-    );
-    assert!(Arc::ptr_eq(
-        &first.classes["com/example/Demo"].class,
-        &second.classes["com/example/Demo"].class,
-    ));
+    let first_demo = first.class("com/example/Demo").unwrap();
+    let second_demo = second.class("com/example/Demo").unwrap();
+    assert_eq!(first_demo.artifact_path, first_artifact.path);
+    assert_eq!(second_demo.artifact_path, second_artifact.path);
+    assert!(Arc::ptr_eq(first_demo.class, second_demo.class));
 }
 
 #[test]
@@ -160,15 +153,15 @@ fn parallel_cached_java_products_preserve_classpath_winner_order() {
     .unwrap();
 
     assert_eq!(
-        catalog.classes["com/example/Demo"].artifact_path,
+        catalog.class("com/example/Demo").unwrap().artifact_path,
         winner.path
     );
     assert_eq!(
-        catalog.duplicates,
+        catalog.duplicates(),
         vec![java_catalog::DuplicateJavaClass {
-            name: "com/example/Demo".to_string(),
-            winner: winner.path,
-            shadowed: shadowed.path,
+            name: "com/example/Demo",
+            winner: &winner.path,
+            shadowed: &shadowed.path,
         }]
     );
     assert_eq!(
