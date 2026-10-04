@@ -727,8 +727,14 @@ impl SemanticGraph {
                 "remove stale edge ids from edges_by_file when deleting edges",
             );
         for (fqn, outgoing) in [(edge.source, true), (edge.target, false)] {
-            if let Some(node) = self.nodes.get_mut(&fqn) {
-                node.unlink(id, outgoing);
+            let node = self.nodes.get_mut(&fqn).expect_invariant(
+                "graph edge endpoint has no node",
+                "insert_edge creates both endpoint nodes and a node outlives its links",
+                "prune a node only after its last link and definition are gone",
+            );
+            node.unlink(id, outgoing);
+            if node.is_empty() {
+                self.nodes.remove(&fqn);
             }
         }
         self.free_edges.push(id);

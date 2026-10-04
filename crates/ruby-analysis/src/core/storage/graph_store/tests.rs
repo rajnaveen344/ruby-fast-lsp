@@ -466,3 +466,46 @@ fn hub_node_keeps_both_directions_through_mixed_removals() {
         StoredSuperclassResolution::Unique(outgoing)
     );
 }
+
+#[test]
+fn removing_the_last_edge_prunes_endpoint_nodes_without_definitions() {
+    let edge_file = SourceFileId(2);
+    let defined = FqnId(1);
+    let edge_only = FqnId(2);
+    let mut store = SemanticGraph::default();
+    store.add_node(StoredGraphNodeFact::new(
+        defined,
+        GraphNodeKind::Class,
+        TextRange::new(file(), 0, 10),
+    ));
+    let include = StoredGraphEdgeFact::new(
+        defined,
+        edge_only,
+        GraphEdgeKind::Include,
+        TextRange::new(edge_file, 0, 10),
+    );
+    store.add_edge(include);
+    store.add_edge(StoredGraphEdgeFact::new(
+        edge_only,
+        edge_only,
+        GraphEdgeKind::Extend,
+        TextRange::new(edge_file, 20, 30),
+    ));
+
+    store.remove_file(edge_file);
+    assert_eq!(
+        store.nodes.keys().copied().collect::<Vec<_>>(),
+        vec![defined],
+        "a node with no definitions and no edges must not outlive its last edge"
+    );
+
+    store.add_edge(include);
+    assert!(store.remove_edge_fact(&include));
+    assert_eq!(
+        store.nodes.keys().copied().collect::<Vec<_>>(),
+        vec![defined]
+    );
+
+    store.remove_file(file());
+    assert!(store.nodes.is_empty());
+}
