@@ -47,8 +47,10 @@ impl IndexerProject {
             let trimmed = line.trim();
 
             // Require
-            if let Some(required) = Self::parse_require_statement(trimmed) {
-                if Self::is_stdlib_module(&required) {
+            if let Some(required) = Self::parse_require_statement(trimmed)
+                .filter(|_| !trimmed.starts_with("require_relative "))
+            {
+                if Self::is_load_path_feature(&required) {
                     stdlib_deps.push(required);
                 }
             }
@@ -88,78 +90,16 @@ impl IndexerProject {
         None
     }
 
-    /// Check if a module is part of Ruby's standard library
-    fn is_stdlib_module(module_name: &str) -> bool {
-        // Common stdlib modules
-        const STDLIB_MODULES: &[&str] = &[
-            "json",
-            "yaml",
-            "csv",
-            "uri",
-            "net/http",
-            "net/https",
-            "openssl",
-            "digest",
-            "base64",
-            "time",
-            "date",
-            "fileutils",
-            "pathname",
-            "tempfile",
-            "tmpdir",
-            "logger",
-            "benchmark",
-            "optparse",
-            "ostruct",
-            "set",
-            "forwardable",
-            "delegate",
-            "singleton",
-            "observer",
-            "thread",
-            "mutex_m",
-            "monitor",
-            "sync",
-            "fiber",
-            "continuation",
-            "english",
-            "abbrev",
-            "cgi",
-            "erb",
-            "rexml",
-            "rss",
-            "xmlrpc",
-            "webrick",
-            "socket",
-            "ipaddr",
-            "resolv",
-            "open-uri",
-            "open3",
-            "pty",
-            "expect",
-            "readline",
-            "zlib",
-            "stringio",
-            "strscan",
-            "scanf",
-            "getoptlong",
-            "find",
-            "ftools",
-            "shell",
-            "shellwords",
-            "etc",
-            "fcntl",
-            "io/console",
-            "io/nonblock",
-            "io/wait",
-            "dbm",
-            "gdbm",
-            "sdbm",
-            "pstore",
-            "yaml/store",
-        ];
-
-        STDLIB_MODULES.contains(&module_name)
+    /// Whether a `require` feature could name a file on the selected
+    /// runtime's load path. The stdlib indexer keeps only features the exact
+    /// runtime ships, so every bare feature is a candidate; relative, absolute,
+    /// and traversing names never are, so a lookup cannot leave a load-path root.
+    fn is_load_path_feature(module_name: &str) -> bool {
+        let path = std::path::Path::new(module_name);
+        !module_name.is_empty()
+            && path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
     }
 
     /// Parse a gem statement from Gemfile

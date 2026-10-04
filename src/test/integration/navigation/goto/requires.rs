@@ -117,6 +117,106 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
         "standalone projects must use one exact runtime load-path probe and no global gem discovery");
 }
 
+/// Any feature the selected runtime's stdlib ships resolves, not only a
+/// curated list of well-known module names. Nested features resolve by path,
+/// and the required file's declarations join the project.
+#[cfg(unix)]
+#[tokio::test]
+async fn runtime_stdlib_resolves_every_shipped_feature() {
+    use crate::environment::config::runtime::{
+        ProjectRuntimeSelection, RuntimeMode, RuntimeSelection, RuntimeSelectionConfig,
+        SelectedRuntimeDescriptor,
+    };
+    use crate::environment::config::RubyFastLspConfig;
+    use crate::environment::runtime::catalog::{RuntimeDiscoverySource, RuntimeImplementation};
+    use crate::loader::coordinator::IndexingCoordinator;
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let base = fixture.path().canonicalize().unwrap();
+    let root = base.join("project");
+    let runtime = base.join("runtime");
+    let stdlib = runtime.join("lib/ruby/stdlib");
+    for directory in [&root, &runtime.join("bin"), &stdlib.join("toolkit")] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let feature = stdlib.join("runtime_only_feature.rb");
+    let nested = stdlib.join("toolkit/part.rb");
+    std::fs::write(&feature, "module RuntimeOnlyFeature\nend\n").unwrap();
+    std::fs::write(&nested, "module Toolkit\n  class Part\n  end\nend\n").unwrap();
+    std::fs::write(runtime.join("lib/ruby/outside.rb"), "# not a feature\n").unwrap();
+    let executable = runtime.join("bin/ruby");
+    std::fs::write(
+        &executable,
+        concat!(
+            "#!/bin/sh\n",
+            "runtime_root=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\n",
+            "printf '%s\\0' \"$runtime_root/lib/ruby/stdlib\"\n",
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let config = RubyFastLspConfig {
+        runtime: RuntimeSelectionConfig {
+            mode: RuntimeMode::Auto,
+            projects: vec![ProjectRuntimeSelection {
+                root: root.to_str().unwrap().to_string(),
+                selection: RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                    implementation: RuntimeImplementation::Mri,
+                    family: "3.3".to_string(),
+                    engine_version: "3.3.11".to_string(),
+                    compatibility_version: "3.3".to_string(),
+                    executable,
+                    discovery_source: RuntimeDiscoverySource::Path,
+                    java_home: None,
+                }),
+            }],
+        },
+        ..RubyFastLspConfig::default()
+    };
+    let source = "require 'runtime_only_feature'\nrequire 'toolkit/part'\nrequire '../outside'\nRuntimeOnlyFeature\nToolkit::Part\n";
+    let main = root.join("main.rb");
+    std::fs::write(&main, source).unwrap();
+    let filename = main.to_str().unwrap().trim_start_matches('/');
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace(root.to_str().unwrap().trim_start_matches('/'));
+    editor.server().replace_configuration(config.clone());
+    editor.open(filename, source).await;
+
+    let ctx = editor.server().load_context_for_project(&root);
+    IndexingCoordinator::new(root, config)
+        .run_complete_indexing(&ctx)
+        .await
+        .unwrap();
+
+    let unresolved = editor
+        .published_diagnostics(filename)
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code))
+                    if code == "unresolved-require" || code == "unresolved-constant"
+            )
+        })
+        .map(|diagnostic| diagnostic.range.start.line)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        unresolved,
+        [2].into_iter().collect(),
+        "shipped stdlib features resolve with their declarations; a path outside the load path does not"
+    );
+    for (line, target) in [(0, &feature), (1, &nested)] {
+        let locations = editor.goto_def_at(filename, line, 12).await;
+        assert_eq!(
+            locations.len(),
+            1,
+            "one deterministic require target: {locations:?}"
+        );
+        assert_eq!(locations[0].uri.to_file_path().unwrap(), *target);
+    }
+}
+
 #[tokio::test]
 async fn goto_require_relative_sibling() {
     let mut editor = FakeEditor::new().await;
