@@ -1,75 +1,58 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="ruby" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ff6b6b"/>
-      <stop offset="55%" stop-color="#d6202a"/>
-      <stop offset="100%" stop-color="#7a0d12"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#262a4c"/><stop offset="1" stop-color="#121320"/></linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#tile)"/>
+  <g transform="translate(128 130) scale(0.78) translate(-128 -128)">
+  <defs>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#fffbd6"/>
+      <stop offset="0.3" stop-color="#ffe44f"/>
+      <stop offset="1" stop-color="#ff9f0f"/>
     </linearGradient>
-    <linearGradient id="facet-light" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ff9c9c"/>
-      <stop offset="100%" stop-color="#e63946"/>
-    </linearGradient>
-    <linearGradient id="facet-dark" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#b3151c"/>
-      <stop offset="100%" stop-color="#5a0a0f"/>
-    </linearGradient>
-    <linearGradient id="bolt" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#fff48a"/>
-      <stop offset="100%" stop-color="#f5a623"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#fff48a" stop-opacity="0.55"/>
-      <stop offset="60%" stop-color="#f5a623" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="#f5a623" stop-opacity="0"/>
-    </radialGradient>
+    <linearGradient id="crownL" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff6a72"/><stop offset="1" stop-color="#e8283a"/></linearGradient>
+    <linearGradient id="table" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff9aa0"/><stop offset="1" stop-color="#ff4a56"/></linearGradient>
+    <linearGradient id="crownM" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4d58"/><stop offset="1" stop-color="#d81c2c"/></linearGradient>
+    <linearGradient id="crownR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e93444"/><stop offset="1" stop-color="#b4111f"/></linearGradient>
+    <linearGradient id="pavL" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#ea2434"/><stop offset="1" stop-color="#a80d1b"/></linearGradient>
+    <linearGradient id="pavM" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cc1424"/><stop offset="1" stop-color="#860914"/></linearGradient>
+    <linearGradient id="pavR" x1="1" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#a00c19"/><stop offset="1" stop-color="#5c040c"/></linearGradient>
+    <polygon id="boltShape" points="156,20 86,142 124,142 94,240 182,110 142,110 188,20"/>
+    <mask id="knock" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <rect width="256" height="256" fill="#fff"/>
+      <use href="#boltShape" fill="#000" stroke="#000" stroke-width="14" stroke-linejoin="round"/>
+    </mask>
   </defs>
 
-  <!-- soft background glow -->
-  <circle cx="128" cy="128" r="120" fill="url(#glow)"/>
-
-  <!-- lightning rays radiating behind ruby -->
-  <g fill="url(#bolt)" stroke="#c97a14" stroke-width="2" stroke-linejoin="round">
-    <!-- top-left bolt -->
-    <polygon points="60,20 96,72 74,76 110,118 78,90 100,84 70,46"/>
-    <!-- top-right bolt -->
-    <polygon points="206,28 168,78 188,84 152,124 184,96 162,90 196,54"/>
-    <!-- left bolt -->
-    <polygon points="14,108 70,118 60,138 108,140 70,154 80,134 24,128"/>
-    <!-- right bolt -->
-    <polygon points="244,118 188,126 198,146 150,148 196,162 184,142 240,138"/>
-    <!-- bottom-left bolt -->
-    <polygon points="48,228 92,180 110,196 128,156 116,200 96,188 64,238"/>
-    <!-- bottom-right bolt -->
-    <polygon points="216,232 174,182 156,198 138,158 150,202 170,190 200,240"/>
+  <g mask="url(#knock)">
+    <g stroke="#ffd0d4" stroke-opacity="0.22" stroke-width="1.5" stroke-linejoin="round">
+      <!-- crown -->
+      <polygon points="18,100 74,48 100,100" fill="url(#crownL)"/>
+      <polygon points="74,48 128,48 100,100" fill="url(#table)"/>
+      <polygon points="100,100 128,48 156,100" fill="url(#crownM)"/>
+      <polygon points="128,48 182,48 156,100" fill="url(#crownL)"/>
+      <polygon points="156,100 182,48 238,100" fill="url(#crownR)"/>
+      <!-- pavilion -->
+      <polygon points="18,100 59,100 128,230" fill="url(#pavL)"/>
+      <polygon points="59,100 100,100 128,230" fill="#d51a2a"/>
+      <polygon points="100,100 156,100 128,230" fill="url(#pavM)"/>
+      <polygon points="156,100 197,100 128,230" fill="#9a0b17"/>
+      <polygon points="197,100 238,100 128,230" fill="url(#pavR)"/>
+    </g>
+    <!-- girdle highlight and table glint -->
+    <path d="M22,100 H234" stroke="#ffb3b8" stroke-opacity="0.45" stroke-width="2"/>
+    <polygon points="84,54 116,54 101,82" fill="#fff" opacity="0.45"/>
   </g>
 
-  <!-- ruby gem (classic gem cut) -->
-  <g stroke="#3a0508" stroke-width="3" stroke-linejoin="round">
-    <!-- outer silhouette -->
-    <polygon points="128,44 200,92 168,212 88,212 56,92" fill="url(#ruby)"/>
-
-    <!-- top crown band -->
-    <polygon points="128,44 200,92 56,92" fill="url(#facet-light)" opacity="0.85"/>
-
-    <!-- crown facet divisions -->
-    <line x1="128" y1="44" x2="92" y2="92" stroke="#3a0508" stroke-width="2"/>
-    <line x1="128" y1="44" x2="164" y2="92" stroke="#3a0508" stroke-width="2"/>
-
-    <!-- pavilion facets -->
-    <polygon points="56,92 128,212 88,212" fill="url(#facet-dark)" opacity="0.55"/>
-    <polygon points="200,92 128,212 168,212" fill="url(#facet-dark)" opacity="0.7"/>
-    <polygon points="92,92 128,212 88,212" fill="url(#facet-light)" opacity="0.25"/>
-    <polygon points="164,92 128,212 168,212" fill="url(#facet-dark)" opacity="0.35"/>
-
-    <!-- center pavilion line -->
-    <line x1="128" y1="92" x2="128" y2="212" stroke="#3a0508" stroke-width="2"/>
-    <line x1="92" y1="92" x2="128" y2="212" stroke="#3a0508" stroke-width="1.5" opacity="0.6"/>
-    <line x1="164" y1="92" x2="128" y2="212" stroke="#3a0508" stroke-width="1.5" opacity="0.6"/>
-
-    <!-- top crown highlight diamond -->
-    <polygon points="128,56 156,88 128,84 100,88" fill="#ffd1d1" opacity="0.9" stroke="none"/>
+  <!-- sparks -->
+  <g stroke="#ffc21a" stroke-width="7" stroke-linecap="round" fill="none">
+    <path d="M212,30 l16,-14"/>
+    <path d="M220,58 l22,-2"/>
+    <path d="M56,226 l-16,14"/>
   </g>
 
-  <!-- specular shine on top-left facet -->
-  <polygon points="76,92 110,68 118,86 92,90" fill="#ffffff" opacity="0.35"/>
+  <use href="#boltShape" fill="url(#bolt)" stroke="#f08c00" stroke-width="3" stroke-linejoin="round"/>
+  <!-- bolt bevel highlight -->
+  <polyline points="160,26 94,138" stroke="#fffde8" stroke-opacity="0.8" stroke-width="3" stroke-linecap="round" fill="none"/>
+</g>
 </svg>
