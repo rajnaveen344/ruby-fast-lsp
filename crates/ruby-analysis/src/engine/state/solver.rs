@@ -95,6 +95,11 @@ pub(in crate::engine) fn resolve_constant_dependency_type(
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct Solver {
     evidence_by_file: HashMap<SourceFileId, InferenceEvidence>,
+    /// Files whose evidence holds constant-type equations or method-return
+    /// equations with constant dependencies.
+    constant_solve_files: usize,
+    /// Files whose method-return equations have constant dependencies.
+    constant_dependency_files: usize,
     method_return_equations_dirty: bool,
     constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
@@ -175,9 +180,12 @@ impl Solver {
         evidence: InferenceEvidence,
         equations_changed: bool,
     ) {
-        self.evidence_by_file.insert(file_id, evidence);
+        self.count_constant_inputs(&evidence, 1);
+        if let Some(previous) = self.evidence_by_file.insert(file_id, evidence) {
+            self.count_constant_inputs(&previous, -1);
+        }
         self.method_return_equations_dirty |= equations_changed;
-        self.refresh_constant_type_equations_dirty();
+        self.constant_type_equations_dirty = self.constant_solve_files > 0;
     }
 
     /// Drop one file's inference evidence. Its method-return equations, if
@@ -187,18 +195,31 @@ impl Solver {
         let Some(previous) = self.evidence_by_file.remove(&file_id) else {
             return;
         };
+        self.count_constant_inputs(&previous, -1);
         self.method_return_equations_dirty |= !previous.method_return_equations.is_empty();
-        self.refresh_constant_type_equations_dirty();
+        self.constant_type_equations_dirty = self.constant_solve_files > 0;
     }
 
-    fn refresh_constant_type_equations_dirty(&mut self) {
-        self.constant_type_equations_dirty = self.evidence_by_file.values().any(|evidence| {
-            !evidence.constant_type_equations.is_empty()
-                || evidence
-                    .method_return_equations
-                    .iter()
-                    .any(|equation| !equation.constant_dependencies().is_empty())
-        });
+    /// Add (`delta` 1) or remove (`delta` -1) one file's evidence from the
+    /// counts of files that feed the constant-type solve.
+    fn count_constant_inputs(&mut self, evidence: &InferenceEvidence, delta: isize) {
+        let has_dependencies = evidence
+            .method_return_equations
+            .iter()
+            .any(|equation| !equation.constant_dependencies().is_empty());
+        let feeds_constant_solve = has_dependencies || !evidence.constant_type_equations.is_empty();
+        let adjust = |count: usize, applies: bool| {
+            if !applies {
+                return count;
+            }
+            count.checked_add_signed(delta).expect_invariant(
+                "constant solve input count left the file count range",
+                "each file's evidence is counted once on insert and once on removal",
+                "pair every evidence insert and removal with count_constant_inputs",
+            )
+        };
+        self.constant_solve_files = adjust(self.constant_solve_files, feeds_constant_solve);
+        self.constant_dependency_files = adjust(self.constant_dependency_files, has_dependencies);
     }
 
     pub(in crate::engine) fn refresh_retained_shape_telemetry(
@@ -252,12 +273,7 @@ impl Solver {
     }
 
     fn has_method_return_constant_dependencies(&self) -> bool {
-        self.evidence_by_file.values().any(|evidence| {
-            evidence
-                .method_return_equations
-                .iter()
-                .any(|equation| !equation.constant_dependencies().is_empty())
-        })
+        self.constant_dependency_files > 0
     }
 
     /// Collect the project's constant-type equations and solve them against
