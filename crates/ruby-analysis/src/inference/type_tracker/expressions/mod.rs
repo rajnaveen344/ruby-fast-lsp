@@ -1,7 +1,5 @@
 use crate::core::{RubyType, ShapeConstructionError};
-use crate::inference::r#type::literal::{
-    infer_array_literal_type_fallible, infer_hash_literal_type_fallible, LiteralAnalyzer,
-};
+use crate::inference::r#type::literal::{infer_collection_literal_type, LiteralAnalyzer};
 use crate::inference::type_tracker::flow::shapes::values::type_contains_shape;
 use crate::inference::type_tracker::observations::LocalReadType;
 use crate::inference::type_tracker::TypeTracker;
@@ -95,25 +93,10 @@ impl TypeTracker {
         RubyType::Unknown
     }
 
-    /// Infer nested collection literals while preserving a shape-construction
-    /// failure from any depth. Non-collection expressions retain the existing
-    /// resolver and therefore represent ordinary incompleteness as
-    /// `RubyType::Unknown`, not as a shape-bound error.
     pub(in crate::inference::type_tracker) fn infer_collection_literal_type(
         &mut self,
         node: &Node<'_>,
     ) -> Option<Result<RubyType, ShapeConstructionError>> {
-        if let Some(hash) = node.as_hash_node() {
-            return Some(infer_hash_literal_type_fallible(&hash, |value| {
-                self.infer_collection_literal_type(value)
-                    .unwrap_or_else(|| Ok(self.infer_expression(value)))
-            }));
-        }
-        node.as_array_node().map(|array| {
-            infer_array_literal_type_fallible(&array, |value| {
-                self.infer_collection_literal_type(value)
-                    .unwrap_or_else(|| Ok(self.infer_expression(value)))
-            })
-        })
+        infer_collection_literal_type(node, &mut |value| self.infer_expression(value))
     }
 }

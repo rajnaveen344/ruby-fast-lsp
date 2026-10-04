@@ -1,6 +1,5 @@
 use crate::core::RubyType;
 use crate::inference::control_flow;
-use crate::inference::type_tracker::flow::branches::join_branch_types;
 use crate::inference::type_tracker::flow::environment::FlowEnvironment;
 use crate::inference::type_tracker::TypeTracker;
 use crate::invariant::ExpectInvariant;
@@ -137,7 +136,7 @@ impl TypeTracker {
             .into_iter()
             .map(|(_, ty, diverges)| (ty, diverges))
             .collect::<Vec<_>>();
-        join_branch_types(&typed_branches)
+        control_flow::join_non_diverging_types(&typed_branches)
     }
 
     pub(in crate::inference::type_tracker) fn track_rescue_modifier(
@@ -167,7 +166,7 @@ impl TypeTracker {
         self.environment = expression_env;
         self.merge_env(&rescue_env, false);
 
-        join_branch_types(&[
+        control_flow::join_non_diverging_types(&[
             (expression_type, control_flow::diverges(&expression)),
             (rescue_type, control_flow::diverges(&rescue_expression)),
         ])

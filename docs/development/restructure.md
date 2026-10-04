@@ -977,7 +977,7 @@ Delete this file when the last task is done. Git history keeps the record.
     - The receiverless and `send`-driven `define_method` side rules
       (`receiverless_definition_kind`, `sent_definition_kind`) had a copy in
       each of the three walks and in `dynamic_definition_block`.
-- [ ] D2. Merge collector flow inference and `TypeTracker` into one `Flow`.
+- [x] D2. Merge collector flow inference and `TypeTracker` into one `Flow`.
       Compare the profiler output before and after. Both walks keep running
       (the collector also serves dependency sources, where the tracker does
       not run), so the merge goes rule by rule, each a shared owner both
@@ -1004,12 +1004,20 @@ Delete this file when the last task is done. Git history keeps the record.
         callables). Each walk keeps its own block-body evaluation: the
         collector runs an isolated tracker, the tracker binds into its live
         environment.
-  - [ ] D2f. Evaluated, not landed: the collector consuming expression
+  - [x] D2f. One branch-value join (`control_flow::join_non_diverging_types`)
+        and one nested collection-literal recursion
+        (`type::literal::infer_collection_literal_type`); each walk passes
+        its own leaf typing.
+  - [x] D2g. Evaluated and not landed: the collector consuming expression
         evidence the tracker recorded instead of re-deriving it. Dependency
         sources run without the tracker and declarations (constant and ivar
         values) are typed outside method bodies, so the collector's
         derivation stays; reading recorded evidence would add a second path
-        and per-call storage without removing code.
+        and per-call storage without removing code. The remaining per-walk
+        code reads different sources (constant callables and yield types
+        from in-progress file facts vs. the solved project) or is the
+        tracker's environment-aware branching, which the collector's
+        expression typing does not model.
 - [ ] D3. Rewrite `src/ARCHITECTURE.md`, the analysis README, and `AGENTS.md`
       ownership tables to match the final layout. Remove this plan.
 

@@ -5,9 +5,8 @@ use crate::core::{
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::control_flow;
 use crate::inference::r#type::literal::{
-    infer_array_literal_type_fallible, infer_hash_literal_type_fallible,
-    literal_shape_construction_unknown_reason, project_immediate_hash_receiver_type,
-    LiteralAnalyzer,
+    infer_collection_literal_type, literal_shape_construction_unknown_reason,
+    project_immediate_hash_receiver_type, LiteralAnalyzer,
 };
 use crate::inference::r#type::shape as shape_reads;
 use crate::invariant::ExpectInvariant;
@@ -218,21 +217,8 @@ impl FactCollector {
         value_node: &Node<'_>,
         local_types: &HashMap<String, RubyType>,
     ) -> Option<Result<RubyType, ShapeConstructionError>> {
-        if let Some(hash) = value_node.as_hash_node() {
-            return Some(infer_hash_literal_type_fallible(&hash, |value| {
-                self.infer_collection_type_from_value(value, local_types)
-                    .unwrap_or_else(|| {
-                        Ok(self.infer_type_from_value_with_locals(value, local_types))
-                    })
-            }));
-        }
-        value_node.as_array_node().map(|array| {
-            infer_array_literal_type_fallible(&array, |value| {
-                self.infer_collection_type_from_value(value, local_types)
-                    .unwrap_or_else(|| {
-                        Ok(self.infer_type_from_value_with_locals(value, local_types))
-                    })
-            })
+        infer_collection_literal_type(value_node, &mut |value| {
+            self.infer_type_from_value_with_locals(value, local_types)
         })
     }
 
@@ -362,7 +348,10 @@ impl FactCollector {
             (RubyType::nil_class(), false)
         };
 
-        join_non_diverging_types(&[(then_type, then_diverges), (else_type, else_diverges)])
+        control_flow::join_non_diverging_types(&[
+            (then_type, then_diverges),
+            (else_type, else_diverges),
+        ])
     }
 
     pub(in crate::indexer::fact_collector) fn infer_unless_expression_type(
@@ -394,7 +383,10 @@ impl FactCollector {
             })
             .unwrap_or_else(RubyType::nil_class);
 
-        join_non_diverging_types(&[(then_type, then_diverges), (else_type, else_diverges)])
+        control_flow::join_non_diverging_types(&[
+            (then_type, then_diverges),
+            (else_type, else_diverges),
+        ])
     }
 
     pub(in crate::indexer::fact_collector) fn infer_case_expression_type(
@@ -436,7 +428,7 @@ impl FactCollector {
             branches.push((RubyType::nil_class(), false));
         }
 
-        join_non_diverging_types(&branches)
+        control_flow::join_non_diverging_types(&branches)
     }
 
     pub(in crate::indexer::fact_collector) fn infer_begin_expression_type(
@@ -486,7 +478,7 @@ impl FactCollector {
             rescue_clause = rescue_node.subsequent();
         }
 
-        join_non_diverging_types(&branches)
+        control_flow::join_non_diverging_types(&branches)
     }
 
     pub(in crate::indexer::fact_collector) fn infer_rescue_modifier_expression_type(
@@ -496,7 +488,7 @@ impl FactCollector {
     ) -> RubyType {
         let expression = rescue_modifier.expression();
         let rescue_expression = rescue_modifier.rescue_expression();
-        join_non_diverging_types(&[
+        control_flow::join_non_diverging_types(&[
             (
                 self.infer_type_from_value_with_locals(&expression, local_types),
                 control_flow::diverges(&expression),
@@ -671,20 +663,5 @@ impl FactCollector {
             );
         }
         local_read_types.into_boxed_slice()
-    }
-}
-
-pub(in crate::indexer::fact_collector) fn join_non_diverging_types(
-    branches: &[(RubyType, bool)],
-) -> RubyType {
-    let surviving = branches
-        .iter()
-        .filter(|(_, diverges)| !*diverges)
-        .map(|(ty, _)| ty.clone())
-        .collect::<Vec<_>>();
-    if surviving.is_empty() {
-        RubyType::Unknown
-    } else {
-        RubyType::union(surviving)
     }
 }

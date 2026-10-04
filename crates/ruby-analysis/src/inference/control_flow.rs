@@ -9,6 +9,7 @@
 //! - guard narrowing (future)
 //! - definite-return diagnostic (future)
 
+use crate::core::RubyType;
 use ruby_prism::{IfNode, Node, StatementsNode, UnlessNode, Visit};
 
 /// Reachability outcome for a node or statement.
@@ -144,6 +145,21 @@ pub fn analyze_statements(stmts: &StatementsNode<'_>) -> Reachability {
 /// Convenience: does any path exit?
 pub fn diverges(node: &Node<'_>) -> bool {
     analyze(node).is_diverges()
+}
+
+/// The value of a branching expression: the union of the branches that
+/// complete normally, or `Unknown` when every branch diverges.
+pub(crate) fn join_non_diverging_types(branches: &[(RubyType, bool)]) -> RubyType {
+    let surviving = branches
+        .iter()
+        .filter(|(_, diverges)| !*diverges)
+        .map(|(ty, _)| ty.clone())
+        .collect::<Vec<_>>();
+    if surviving.is_empty() {
+        RubyType::Unknown
+    } else {
+        RubyType::union(surviving)
+    }
 }
 
 /// Convenience: does every path exit via Return or Raise?

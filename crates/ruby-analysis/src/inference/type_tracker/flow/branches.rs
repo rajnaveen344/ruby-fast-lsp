@@ -111,7 +111,10 @@ impl TypeTracker {
         }
 
         // Type union — exclude diverging branches.
-        join_branch_types(&[(then_type, then_diverges), (else_type, else_diverges)])
+        control_flow::join_non_diverging_types(&[
+            (then_type, then_diverges),
+            (else_type, else_diverges),
+        ])
     }
 
     /// Track a case statement with branch merging
@@ -236,7 +239,7 @@ impl TypeTracker {
         // Type union — exclude diverging branches.
         let typed_branches: Vec<(RubyType, bool)> =
             branches.into_iter().map(|(_, ty, d)| (ty, d)).collect();
-        join_branch_types(&typed_branches)
+        control_flow::join_non_diverging_types(&typed_branches)
     }
 
     pub(in crate::inference::type_tracker) fn track_case_match(
@@ -388,7 +391,7 @@ impl TypeTracker {
 
         let typed_branches: Vec<(RubyType, bool)> =
             branches.into_iter().map(|(_, ty, d)| (ty, d)).collect();
-        join_branch_types(&typed_branches)
+        control_flow::join_non_diverging_types(&typed_branches)
     }
 
     /// Track an unless statement (inverse of if)
@@ -460,7 +463,10 @@ impl TypeTracker {
             }
         }
 
-        join_branch_types(&[(then_type, then_diverges), (else_type, else_diverges)])
+        control_flow::join_non_diverging_types(&[
+            (then_type, then_diverges),
+            (else_type, else_diverges),
+        ])
     }
 
     /// Track Ruby's value-returning short-circuit operators.
@@ -591,21 +597,6 @@ pub(in crate::inference::type_tracker) fn short_circuit_result_type(
     );
     result_members.push(right_type);
     RubyType::union(result_members)
-}
-
-pub(in crate::inference::type_tracker) fn join_branch_types(
-    branches: &[(RubyType, bool)],
-) -> RubyType {
-    let surviving: Vec<RubyType> = branches
-        .iter()
-        .filter(|(_, diverges)| !*diverges)
-        .map(|(ty, _)| ty.clone())
-        .collect();
-    if surviving.is_empty() {
-        RubyType::Unknown
-    } else {
-        RubyType::union(surviving)
-    }
 }
 
 pub(in crate::inference::type_tracker) fn push_unmatched_ordinary_case_path(

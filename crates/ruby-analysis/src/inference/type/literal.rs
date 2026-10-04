@@ -280,6 +280,24 @@ pub(crate) fn infer_array_literal_type(
     )
 }
 
+/// Infer a nested collection literal while preserving a shape-construction
+/// failure from any depth. `None` when `node` is not an Array or Hash literal;
+/// every non-collection value is typed by the walk's `infer_leaf`, so ordinary
+/// incompleteness stays `RubyType::Unknown`, not a shape-bound error.
+pub(crate) fn infer_collection_literal_type(
+    node: &Node<'_>,
+    infer_leaf: &mut dyn FnMut(&Node<'_>) -> RubyType,
+) -> Option<Result<RubyType, ShapeConstructionError>> {
+    let mut infer_value = |value: &Node<'_>| {
+        infer_collection_literal_type(value, infer_leaf).unwrap_or_else(|| Ok(infer_leaf(value)))
+    };
+    if let Some(hash) = node.as_hash_node() {
+        return Some(infer_hash_literal_type_fallible(&hash, infer_value));
+    }
+    node.as_array_node()
+        .map(|array| infer_array_literal_type_fallible(&array, &mut infer_value))
+}
+
 /// Fallible Array literal inference used when nested shape-bound failures must
 /// remain proof-carrying instead of being flattened into an Unknown element.
 pub(crate) fn infer_array_literal_type_fallible(
