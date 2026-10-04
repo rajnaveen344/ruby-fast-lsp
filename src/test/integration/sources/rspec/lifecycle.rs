@@ -254,3 +254,52 @@ end
         )
         .await;
 }
+
+/// Cold indexing collects project files before the `rspec-core` gem is
+/// indexed, so the extension's own declarations must make `RSpec` resolvable.
+#[tokio::test]
+async fn cold_indexed_group_include_does_not_mix_into_the_enclosing_module() {
+    use crate::lsp::lifecycle::indexing::init_workspace_for_run;
+    use std::time::Duration;
+    use tower_lsp::lsp_types::Url;
+
+    let mut editor = RspecEditor::new().await;
+    let app = "class BaseApp\n  def request\n  end\nend\n\nmodule Routes\nend\n\nclass App < BaseApp\n  include Routes\n\n  def handle\n    request\n  end\nend\n";
+    let helpers = "module ClientHelpers\n  def request\n  end\nend\n";
+    let spec = "module Routes\n  RSpec.describe App do\n    include ClientHelpers\n  end\nend\n";
+    let app_path = editor.path("lib/app.rb");
+    for (path, source) in [
+        (app_path.clone(), app),
+        (editor.path("spec/support/helpers.rb"), helpers),
+        (editor.path("spec/app_spec.rb"), spec),
+    ] {
+        let path = std::path::Path::new(&path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, source).unwrap();
+    }
+    let root_uri = Url::from_directory_path(editor.path("")).unwrap();
+    let server = editor.server().clone();
+    server.set_discovered_runtimes_for_tests(Vec::new());
+    let workspace = server.add_workspace(root_uri.clone());
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        init_workspace_for_run(&server, root_uri, workspace.begin_indexing_run()),
+    )
+    .await
+    .expect("cold indexing must finish")
+    .expect("cold indexing must succeed");
+
+    editor.open(&app_path, app).await;
+    let definitions = editor.goto_def_at(&app_path, 12, 6).await;
+    assert_eq!(
+        definitions
+            .iter()
+            .map(|location| (
+                location.uri.path().ends_with("lib/app.rb"),
+                location.range.start.line
+            ))
+            .collect::<Vec<_>>(),
+        vec![(true, 1)],
+        "an include inside a cold-indexed example group must not reach the enclosing module"
+    );
+}

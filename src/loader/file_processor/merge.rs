@@ -68,6 +68,34 @@ pub(super) fn merge_execution_context_direct_facts(
             merged.graph_nodes.push(generated.clone());
         }
     }
+    // The seed walk has no extension execution contexts, so a mixin call in
+    // a generated owner's block lands on the lexical namespace there. The
+    // extension-aware edge from the same call replaces it unless that walk
+    // produced the lexical edge as well.
+    let generated_edge_sites = extension_aware
+        .graph_edges
+        .iter()
+        .filter(|fact| fact.source.has_generated_owner())
+        .map(|fact| (fact.range, fact.kind))
+        .chain(
+            extension_aware
+                .unresolved_graph_edges
+                .iter()
+                .filter(|fact| fact.source.has_generated_owner())
+                .map(|fact| (fact.range, fact.kind)),
+        )
+        .collect::<HashSet<_>>();
+    merged.graph_edges.retain(|fact| {
+        fact.source.has_generated_owner()
+            || !generated_edge_sites.contains(&(fact.range, fact.kind))
+            || extension_aware.graph_edges.contains(fact)
+    });
+    merged.unresolved_graph_edges.retain(|fact| {
+        fact.source.has_generated_owner()
+            || !generated_edge_sites.contains(&(fact.range, fact.kind))
+            || extension_aware.unresolved_graph_edges.contains(fact)
+    });
+
     for generated in extension_aware
         .graph_edges
         .iter()
@@ -75,6 +103,15 @@ pub(super) fn merge_execution_context_direct_facts(
     {
         if !merged.graph_edges.contains(generated) {
             merged.graph_edges.push(generated.clone());
+        }
+    }
+    for generated in extension_aware
+        .unresolved_graph_edges
+        .iter()
+        .filter(|fact| fact.source.has_generated_owner())
+    {
+        if !merged.unresolved_graph_edges.contains(generated) {
+            merged.unresolved_graph_edges.push(generated.clone());
         }
     }
 }

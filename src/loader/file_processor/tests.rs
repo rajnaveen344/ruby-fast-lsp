@@ -2,8 +2,9 @@ use super::merge::{merge_execution_context_direct_facts, merge_precise_visitor_t
 use super::*;
 use crate::server::Server;
 use ruby_analysis::core::{
-    FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant,
-    RubyMethod, RubyType, SourceKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    FileAnalysis, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+    MethodFact, RubyConstant, RubyMethod, RubyType, SourceKind, TextRange, TypeFact,
+    TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use ruby_analysis::engine::{Project, ResolveMode, SemanticChange};
 use std::collections::HashSet;
@@ -100,6 +101,72 @@ fn execution_context_merge_replaces_lexical_method_with_generated_owner() {
     assert_eq!(merged.methods.len(), 1);
     assert!(merged.methods[0].owner.has_generated_owner());
     assert_eq!(merged.graph_nodes, extension_aware.graph_nodes);
+}
+
+#[test]
+fn execution_context_merge_replaces_lexical_mixin_edges_with_generated_owner() {
+    let file_id = ruby_analysis::core::SourceFileId(7);
+    let call_range = TextRange::new(file_id, 20, 44);
+    let other_range = TextRange::new(file_id, 50, 70);
+    let lexical = FullyQualifiedName::namespace(vec![RubyConstant::new("Lexical").unwrap()]);
+    let generated = FullyQualifiedName::namespace(vec![RubyConstant::generated_owner(
+        ruby_analysis::core::GeneratedOwnerId::new(
+            "rspec-ruby",
+            "file:///workspace/spec/example_spec.rb",
+            "group:1:2",
+        )
+        .unwrap(),
+    )]);
+    let helpers = FullyQualifiedName::namespace(vec![RubyConstant::new("Helpers").unwrap()]);
+    let remote_parts = vec![RubyConstant::new("Remote").unwrap()];
+    let unresolved = |source: &FullyQualifiedName, range| {
+        UnresolvedGraphEdgeFact::new(
+            source.clone(),
+            remote_parts.clone(),
+            false,
+            lexical.clone(),
+            GraphEdgeKind::Include,
+            range,
+        )
+    };
+    let lexical_outside = GraphEdgeFact::new(
+        lexical.clone(),
+        helpers.clone(),
+        GraphEdgeKind::Include,
+        other_range,
+    );
+    let mut merged = FileAnalysis {
+        graph_edges: vec![
+            GraphEdgeFact::new(
+                lexical.clone(),
+                helpers.clone(),
+                GraphEdgeKind::Include,
+                call_range,
+            ),
+            lexical_outside.clone(),
+        ],
+        unresolved_graph_edges: vec![unresolved(&lexical, call_range)],
+        ..Default::default()
+    };
+    let generated_edge = GraphEdgeFact::new(
+        generated.clone(),
+        helpers,
+        GraphEdgeKind::Include,
+        call_range,
+    );
+    let extension_aware = FileAnalysis {
+        graph_edges: vec![generated_edge.clone(), lexical_outside.clone()],
+        unresolved_graph_edges: vec![unresolved(&generated, call_range)],
+        ..Default::default()
+    };
+
+    merge_execution_context_direct_facts(&extension_aware, &mut merged);
+
+    assert_eq!(merged.graph_edges, vec![lexical_outside, generated_edge]);
+    assert_eq!(
+        merged.unresolved_graph_edges,
+        vec![unresolved(&generated, call_range)]
+    );
 }
 
 #[test]

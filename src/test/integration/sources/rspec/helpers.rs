@@ -224,9 +224,11 @@ end
     );
 }
 
+/// Without a locked `rspec-core`, nothing declares `RSpec`, so the name alone
+/// neither resolves nor enters an example group.
 #[tokio::test]
 async fn extension_requires_resolved_rspec_constant() {
-    let mut editor = RspecEditor::new().await;
+    let mut editor = RspecEditor::with_projects(&[false]).await;
     editor
         .check(
             r#"
@@ -238,6 +240,29 @@ end
 
   it "uses helper" do
     user
+  end
+end
+"#,
+        )
+        .await;
+}
+
+/// A locked `rspec-core` lets the extension declare `RSpec` before the gem's
+/// own sources are indexed.
+#[tokio::test]
+async fn locked_rspec_core_declares_the_rspec_constant() {
+    let mut editor = RspecEditor::new().await;
+    editor
+        .check(
+            r#"
+class User
+end
+
+RSpec.describe User do
+  let(<def>:user</def>) { User.new }
+
+  it "uses helper" do
+    us$0er
   end
 end
 "#,

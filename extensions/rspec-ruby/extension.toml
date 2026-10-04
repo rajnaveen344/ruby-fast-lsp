@@ -22,6 +22,10 @@ source_sha256 = "1cfc25674fdfad430b44ce165c973effcf12d15818ec39c05bbbb7a91b852fa
 project_context = "activation"
 call_names = ["describe", "context", "shared_context", "include_context", "shared_examples", "shared_examples_for", "include_examples", "it_behaves_like", "it_should_behave_like", "it", "example", "specify", "before", "after", "around", "let", "let!", "subject", "subject!", "include", "prepend", "extend"]
 
+[[indexing.namespaces]]
+owner = ["RSpec"]
+declaration_kind = "module"
+
 [[indexing.targets]]
 owner = ["RSpec"]
 owner_kind = "singleton"

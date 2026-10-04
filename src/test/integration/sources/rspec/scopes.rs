@@ -133,6 +133,46 @@ end
 }
 
 #[tokio::test]
+async fn group_include_does_not_mix_into_the_enclosing_module() {
+    let mut editor = RspecEditor::new().await;
+    editor
+        .check(
+            r#"
+class BaseApp
+  <def>def request
+  end</def>
+end
+
+module Routes
+end
+
+class App < BaseApp
+  include Routes
+
+  def handle
+    requ$0est
+  end
+end
+
+module ClientHelpers
+  def request
+  end
+end
+
+module RSpec
+end
+
+module Routes
+  RSpec.describe App do
+    include ClientHelpers
+  end
+end
+"#,
+        )
+        .await;
+}
+
+#[tokio::test]
 async fn example_group_owns_direct_method_definitions() {
     let mut editor = RspecEditor::new().await;
     editor
