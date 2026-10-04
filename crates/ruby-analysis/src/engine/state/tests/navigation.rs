@@ -106,7 +106,7 @@ fn union_method_completion_requires_every_receiver_member() {
     assert_eq!(signature_facts.len(), 2);
     assert!(signature_facts
         .iter()
-        .all(|fact| fact.params == vec!["value"]));
+        .all(|fact| fact.param_names().eq(["value"])));
 
     let alpha_only = RubyMethod::new("alpha_only").unwrap();
     assert!(

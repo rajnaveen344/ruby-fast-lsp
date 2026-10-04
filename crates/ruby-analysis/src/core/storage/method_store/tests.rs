@@ -9,22 +9,26 @@ fn stored_method(
     method: Option<RubyMethod>,
     range: TextRange,
 ) -> StoredMethodFact {
-    StoredMethodFact {
-        fqn,
-        owner,
-        method,
+    stored_method_with_availability(fqn, owner, method, range, MethodAvailability::Available)
+}
+
+fn stored_method_with_availability(
+    fqn: FqnId,
+    owner: FqnId,
+    method: Option<RubyMethod>,
+    range: TextRange,
+    availability: MethodAvailability,
+) -> StoredMethodFact {
+    let mut declaration = MethodFact::new(
+        FullyQualifiedName::namespace(Vec::new()),
+        FullyQualifiedName::namespace(Vec::new()),
         range,
-        name_range: range,
-        params: Vec::new(),
-        param_facts: Vec::new(),
-        parameter_shape_complete: false,
-        delegate_receiver: None,
-        visibility: MethodVisibility::Public,
-        availability: MethodAvailability::Available,
-        documentation: None,
-        return_type_label: None,
-        higher_order: None,
-    }
+    );
+    declaration.availability = availability;
+    let mut stored = StoredMethodFact::new(declaration, |_| fqn);
+    stored.owner = owner;
+    stored.method = method;
+    stored
 }
 
 fn file() -> SourceFileId {
@@ -98,9 +102,9 @@ fn replace_file_removes_stale_method_facts_for_same_file_only() {
         )],
     );
 
-    assert_eq!(store.facts_for(fqn).len(), 1);
-    assert_eq!(store.facts_for(fqn)[0].range.start_byte, 10);
-    assert_eq!(store.facts_for(other_fqn).len(), 1);
+    assert_eq!(store.facts_for(fqn).count(), 1);
+    assert_eq!(store.facts_for(fqn).next().unwrap().range.start_byte, 10);
+    assert_eq!(store.facts_for(other_fqn).count(), 1);
 }
 
 #[test]
@@ -130,36 +134,41 @@ fn exact_owner_name_match_preserves_availability_and_ambiguity() {
     let fqn = FqnId(1);
     let owner = FqnId(2);
     let method = RubyMethod::new("call").unwrap();
-    let mut available = stored_method(
+    let available = stored_method(
         fqn,
         owner,
         Some(method),
         TextRange::new(SourceFileId(1), 0, 8),
     );
-    let mut unavailable = stored_method(
+    let unavailable = stored_method_with_availability(
         fqn,
         owner,
         Some(method),
         TextRange::new(SourceFileId(2), 0, 8),
+        MethodAvailability::Unavailable {
+            reason: "JRuby runtime API".to_string(),
+        },
     );
-    unavailable.availability = MethodAvailability::Unavailable {
-        reason: "JRuby runtime API".to_string(),
-    };
 
     let mut store = MethodStore::default();
-    store.replace_file(available.range.file_id, [available.clone()]);
+    store.replace_file(available.range.file_id, [available]);
     store.replace_file(unavailable.range.file_id, [unavailable]);
     assert!(matches!(
         store.effective_fact_matching_owner_name(owner, &method),
         StoredMethodFactMatch::Unique(fact)
-            if matches!(fact.availability, MethodAvailability::Unavailable { .. })
+            if matches!(fact.availability(), MethodAvailability::Unavailable { .. })
     ));
 
-    available.range = TextRange::new(SourceFileId(3), 0, 8);
-    available.availability = MethodAvailability::Absent {
-        reason: "not defined by this runtime".to_string(),
-    };
-    store.replace_file(available.range.file_id, [available]);
+    let absent = stored_method_with_availability(
+        fqn,
+        owner,
+        Some(method),
+        TextRange::new(SourceFileId(3), 0, 8),
+        MethodAvailability::Absent {
+            reason: "not defined by this runtime".to_string(),
+        },
+    );
+    store.replace_file(absent.range.file_id, [absent]);
     assert!(matches!(
         store.effective_fact_matching_owner_name(owner, &method),
         StoredMethodFactMatch::Missing
@@ -188,4 +197,30 @@ fn exact_owner_name_match_preserves_availability_and_ambiguity() {
         ambiguous.effective_fact_matching_owner_name(owner, &method),
         StoredMethodFactMatch::Ambiguous
     ));
+}
+
+#[test]
+fn stored_method_fact_keeps_rare_details_out_of_line() {
+    assert!(
+        std::mem::size_of::<StoredMethodFact>() <= 88,
+        "stored method rows must stay compact; move rare fields into RareMethodDetails"
+    );
+    let ordinary = stored_method(FqnId(1), FqnId(2), None, TextRange::new(file(), 0, 8));
+    assert!(ordinary.rare.is_none());
+
+    let unavailable = stored_method_with_availability(
+        FqnId(1),
+        FqnId(2),
+        None,
+        TextRange::new(file(), 0, 8),
+        MethodAvailability::Unavailable {
+            reason: "runtime API".to_string(),
+        },
+    );
+    assert!(unavailable.rare.is_some());
+    let expanded = unavailable.expand(
+        FullyQualifiedName::namespace(Vec::new()),
+        FullyQualifiedName::namespace(Vec::new()),
+    );
+    assert_eq!(&expanded.availability, unavailable.availability());
 }

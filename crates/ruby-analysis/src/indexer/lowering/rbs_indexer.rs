@@ -611,7 +611,7 @@ mod tests {
             .iter()
             .find(|fact| fact.fqn.name() == "encode")
             .expect("ordinary RBS method must be indexed");
-        assert_eq!(encode.params, vec!["value"]);
+        assert!(encode.param_names().eq(["value"]));
         assert_eq!(encode.return_type_label.as_deref(), Some("String"));
         assert!(facts
             .types

@@ -24,6 +24,7 @@ use crate::core::{
     MethodParamFact, MethodParamKind, MethodVisibilityOverrideFact, RubyMethod, SourceFileId,
     SymbolFact, SymbolKind, TypeFact, UnresolvedGraphEdgeFact,
 };
+use ustr::Ustr;
 
 pub(super) fn snapshot_declaration_facts(
     facts: &FileAnalysis,
@@ -257,15 +258,14 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
         owner: snapshot_fqn(&fact.owner)?,
         range: snapshot_range(fact.range),
         name_range: snapshot_range(fact.name_range),
-        params: fact.params.clone(),
         param_facts: fact
             .param_facts
             .iter()
             .map(|parameter| SnapshotMethodParamFact {
-                name: parameter.name.clone(),
+                name: parameter.name.to_string(),
                 kind: snapshot_param_kind(parameter.kind),
-                type_label: parameter.type_label.clone(),
-                documentation: parameter.documentation.clone(),
+                type_label: parameter.type_label.map(|label| label.to_string()),
+                documentation: parameter.documentation.as_deref().map(str::to_string),
             })
             .collect(),
         parameter_shape_complete: fact.parameter_shape_complete,
@@ -276,7 +276,7 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
         visibility: snapshot_visibility(fact.visibility),
         availability: snapshot_availability(&fact.availability),
         documentation: fact.documentation.clone(),
-        return_type_label: fact.return_type_label.clone(),
+        return_type_label: fact.return_type_label.map(|label| label.to_string()),
         callable_signatures: fact
             .callable_signatures()
             .iter()
@@ -348,14 +348,13 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
         owner: restore_fqn(fact.owner)?,
         range,
         name_range,
-        params: fact.params,
         param_facts,
         parameter_shape_complete: fact.parameter_shape_complete,
         delegate_receiver,
         visibility: restore_visibility(fact.visibility),
         availability: restore_availability(fact.availability)?,
         documentation: fact.documentation,
-        return_type_label: fact.return_type_label,
+        return_type_label: fact.return_type_label.as_deref().map(Ustr::from),
         higher_order: None,
     }
     .with_callable_signatures(callable_signatures)

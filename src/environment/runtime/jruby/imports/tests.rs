@@ -248,7 +248,7 @@ fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
         .iter()
         .find(|fact| fact.fqn == alias)
         .expect("java_alias must define the alias on the Java proxy");
-    assert_eq!(method.params, vec!["index", "value"]);
+    assert!(method.param_names().eq(["index", "value"]));
     assert!(collector.analysis().types.iter().any(|fact| {
         fact.subject == TypeSubject::MethodReturn(alias.clone())
             && fact.ruby_type == RubyType::boolean()

@@ -245,12 +245,7 @@ impl<'a> View<'a> {
 
         MethodMatch {
             name: method.get_name(),
-            params: fact
-                .params
-                .iter()
-                .filter(|param| !param.is_empty())
-                .cloned()
-                .collect(),
+            params: fact.param_names().map(str::to_string).collect(),
             return_type: self.method_return_type(fact),
         }
     }

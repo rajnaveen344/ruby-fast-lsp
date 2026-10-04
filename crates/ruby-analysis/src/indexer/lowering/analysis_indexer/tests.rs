@@ -50,8 +50,8 @@ fn indexes_method_param_names() {
             "keep visit_def_node method fact emission active",
         );
     assert_eq!(
-        method.params,
-        vec!["id", "name", "rest", "tail", "active", "role", "opts", "block"]
+        method.param_names().collect::<Vec<_>>(),
+        ["id", "name", "rest", "tail", "active", "role", "opts", "block"]
     );
     let kinds = method
         .param_facts

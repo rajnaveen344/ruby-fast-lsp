@@ -238,7 +238,7 @@ fn signature_data(
         .iter()
         .map(|parameter| SignatureParameterData {
             label: parameter_label(parameter, parameter.type_label.as_deref()),
-            documentation: parameter.documentation.clone(),
+            documentation: parameter.documentation.as_deref().map(str::to_string),
         })
         .collect::<Vec<_>>();
     let return_type = fact.return_type_label.as_ref();
@@ -396,7 +396,7 @@ fn active_positional_parameter(
 fn parameter_label(parameter: &MethodParamFact, type_label: Option<&str>) -> String {
     let typed_name = type_label
         .map(|type_label| format!("{}: {}", parameter.name, type_label))
-        .unwrap_or_else(|| parameter.name.clone());
+        .unwrap_or_else(|| parameter.name.to_string());
     match parameter.kind {
         MethodParamKind::Required => typed_name,
         MethodParamKind::Optional => format!("{} = ...", typed_name),

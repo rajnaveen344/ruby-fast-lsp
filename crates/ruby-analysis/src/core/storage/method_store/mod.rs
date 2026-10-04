@@ -12,6 +12,7 @@ use crate::core::storage::memory_estimate::{
     ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
 };
 use crate::core::{FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
+use ustr::Ustr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MethodParamKind {
@@ -59,10 +60,10 @@ impl MethodAvailability {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodParamFact {
-    pub name: String,
+    pub name: Ustr,
     pub kind: MethodParamKind,
-    pub type_label: Option<String>,
-    pub documentation: Option<String>,
+    pub type_label: Option<Ustr>,
+    pub documentation: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -81,8 +82,8 @@ impl HigherOrderMethodMetadata {
 }
 
 impl MethodParamFact {
-    pub fn new(name: impl Into<String>, kind: MethodParamKind) -> Self {
-        let name = name.into();
+    pub fn new(name: impl AsRef<str>, kind: MethodParamKind) -> Self {
+        let name = Ustr::from(name.as_ref());
         invariant!(
             !name.is_empty(),
             what = "method parameter fact name is empty",
@@ -102,8 +103,8 @@ impl MethodParamFact {
         type_label: Option<String>,
         documentation: Option<String>,
     ) -> Self {
-        self.type_label = type_label;
-        self.documentation = documentation;
+        self.type_label = type_label.as_deref().map(Ustr::from);
+        self.documentation = documentation.map(String::into_boxed_str);
         self
     }
 }
@@ -114,14 +115,13 @@ pub struct MethodFact {
     pub owner: FullyQualifiedName,
     pub range: TextRange,
     pub name_range: TextRange,
-    pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
     pub(crate) parameter_shape_complete: bool,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
     pub availability: MethodAvailability,
     pub documentation: Option<String>,
-    pub return_type_label: Option<String>,
+    pub return_type_label: Option<Ustr>,
     pub(crate) higher_order: Option<Box<HigherOrderMethodMetadata>>,
 }
 
@@ -136,7 +136,6 @@ impl MethodFact {
             owner,
             range,
             name_range: range,
-            params: Vec::new(),
             param_facts: Vec::new(),
             parameter_shape_complete: false,
             delegate_receiver: None,
@@ -167,13 +166,11 @@ impl MethodFact {
         range: TextRange,
         param_facts: Vec<MethodParamFact>,
     ) -> Self {
-        let params = param_facts.iter().map(|param| param.name.clone()).collect();
         Self {
             fqn,
             owner,
             range,
             name_range: range,
-            params,
             param_facts,
             parameter_shape_complete: true,
             delegate_receiver: None,
@@ -196,7 +193,6 @@ impl MethodFact {
             owner,
             range,
             name_range: range,
-            params: Vec::new(),
             param_facts: Vec::new(),
             parameter_shape_complete: false,
             delegate_receiver: Some(delegate_receiver),
@@ -256,8 +252,13 @@ impl MethodFact {
         return_type_label: Option<String>,
     ) -> Self {
         self.documentation = documentation;
-        self.return_type_label = return_type_label;
+        self.return_type_label = return_type_label.as_deref().map(Ustr::from);
         self
+    }
+
+    /// Parameter names in declaration order.
+    pub fn param_names(&self) -> impl Iterator<Item = &str> {
+        self.param_facts.iter().map(|param| param.name.as_str())
     }
 
     pub(crate) fn with_callable_signatures(
@@ -375,22 +376,125 @@ impl MethodVisibilityOverrideFact {
     }
 }
 
+/// A method declaration as the engine stores it: interned names, the name
+/// range as offsets in the declaration's file, and the rarely set details in
+/// one optional box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredMethodFact {
     pub fqn: FqnId,
     pub owner: FqnId,
     pub method: Option<RubyMethod>,
     pub range: TextRange,
-    pub name_range: TextRange,
-    pub params: Vec<String>,
-    pub param_facts: Vec<MethodParamFact>,
-    pub(crate) parameter_shape_complete: bool,
-    pub delegate_receiver: Option<RubyMethod>,
+    name_start: u32,
+    name_end: u32,
+    pub param_facts: Box<[MethodParamFact]>,
+    pub documentation: Option<Box<str>>,
+    pub return_type_label: Option<Ustr>,
+    rare: Option<Box<RareMethodDetails>>,
     pub visibility: MethodVisibility,
-    pub availability: MethodAvailability,
-    pub documentation: Option<String>,
-    pub return_type_label: Option<String>,
-    pub(crate) higher_order: Option<Box<HigherOrderMethodMetadata>>,
+    pub(crate) parameter_shape_complete: bool,
+}
+
+/// Details that only runtime stubs, delegations and block-calling methods set.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct RareMethodDetails {
+    availability: MethodAvailability,
+    delegate_receiver: Option<RubyMethod>,
+    higher_order: HigherOrderMethodMetadata,
+}
+
+static AVAILABLE: MethodAvailability = MethodAvailability::Available;
+
+impl StoredMethodFact {
+    /// Store `fact`, interning its method and owner names with `intern`.
+    pub(crate) fn new(
+        fact: MethodFact,
+        mut intern: impl FnMut(FullyQualifiedName) -> FqnId,
+    ) -> Self {
+        let MethodFact {
+            fqn,
+            owner,
+            range,
+            name_range,
+            param_facts,
+            parameter_shape_complete,
+            delegate_receiver,
+            visibility,
+            availability,
+            documentation,
+            return_type_label,
+            higher_order,
+        } = fact;
+        let method = match &fqn {
+            FullyQualifiedName::Method(_, method) => Some(*method),
+            FullyQualifiedName::Namespace(_, _)
+            | FullyQualifiedName::Constant(_)
+            | FullyQualifiedName::LocalVariable(_)
+            | FullyQualifiedName::InstanceVariable(_)
+            | FullyQualifiedName::ClassVariable(_)
+            | FullyQualifiedName::GlobalVariable(_) => None,
+        };
+        let rare = RareMethodDetails {
+            availability,
+            delegate_receiver,
+            higher_order: higher_order.map(|metadata| *metadata).unwrap_or_default(),
+        };
+        let has_rare = rare != RareMethodDetails::default();
+        Self {
+            fqn: intern(fqn),
+            owner: intern(owner),
+            method,
+            range,
+            name_start: name_range.start_byte,
+            name_end: name_range.end_byte,
+            param_facts: param_facts.into_boxed_slice(),
+            documentation: documentation.map(String::into_boxed_str),
+            return_type_label,
+            rare: has_rare.then(|| Box::new(rare)),
+            visibility,
+            parameter_shape_complete,
+        }
+    }
+
+    /// The declaration with its interned names expanded.
+    pub(crate) fn expand(&self, fqn: FullyQualifiedName, owner: FullyQualifiedName) -> MethodFact {
+        let rare = self.rare.as_deref();
+        MethodFact {
+            fqn,
+            owner,
+            range: self.range,
+            name_range: self.name_range(),
+            param_facts: self.param_facts.to_vec(),
+            parameter_shape_complete: self.parameter_shape_complete,
+            delegate_receiver: self.delegate_receiver(),
+            visibility: self.visibility,
+            availability: self.availability().clone(),
+            documentation: self.documentation.as_deref().map(str::to_string),
+            return_type_label: self.return_type_label,
+            higher_order: rare
+                .map(|rare| &rare.higher_order)
+                .filter(|metadata| !metadata.is_empty())
+                .map(|metadata| Box::new(metadata.clone())),
+        }
+    }
+
+    pub fn name_range(&self) -> TextRange {
+        TextRange {
+            file_id: self.range.file_id,
+            start_byte: self.name_start,
+            end_byte: self.name_end,
+        }
+    }
+
+    pub fn availability(&self) -> &MethodAvailability {
+        self.rare
+            .as_deref()
+            .map_or(&AVAILABLE, |rare| &rare.availability)
+    }
+
+    pub fn delegate_receiver(&self) -> Option<RubyMethod> {
+        self.rare.as_deref().and_then(|rare| rare.delegate_receiver)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -415,8 +519,8 @@ impl FileRow for StoredMethodFact {
 }
 
 impl MethodStore {
-    pub fn facts_for(&self, fqn: FqnId) -> Vec<StoredMethodFact> {
-        self.clone_facts(self.facts_by_fqn.get(&fqn))
+    pub fn facts_for(&self, fqn: FqnId) -> impl Iterator<Item = &StoredMethodFact> {
+        self.indexed(self.facts_by_fqn.get(&fqn))
     }
 
     /// Every fact in arena order.
@@ -428,22 +532,24 @@ impl MethodStore {
         self.facts.len()
     }
 
-    pub fn facts_matching_owner(&self, owner: FqnId, partial: &str) -> Vec<StoredMethodFact> {
+    pub fn facts_matching_owner<'a>(
+        &'a self,
+        owner: FqnId,
+        partial: &'a str,
+    ) -> impl Iterator<Item = &'a StoredMethodFact> {
         self.indexed(self.facts_by_owner.get(&owner))
-            .filter(|fact| {
+            .filter(move |fact| {
                 fact.method
                     .is_some_and(|method| method.get_name().starts_with(partial))
             })
-            .cloned()
-            .collect()
     }
 
     pub fn facts_matching_owner_name(
         &self,
         owner: FqnId,
         method: &RubyMethod,
-    ) -> Vec<StoredMethodFact> {
-        self.clone_facts(self.facts_by_owner_name.get(&(owner, *method)))
+    ) -> impl Iterator<Item = &StoredMethodFact> {
+        self.indexed(self.facts_by_owner_name.get(&(owner, *method)))
     }
 
     /// Select the effective exact owner/name fact without cloning or expanding
@@ -462,15 +568,16 @@ impl MethodStore {
         let ids = self.facts_by_owner_name.get(&(owner, *method));
         if self
             .indexed(ids)
-            .any(|fact| matches!(fact.availability, MethodAvailability::Absent { .. }))
+            .any(|fact| matches!(fact.availability(), MethodAvailability::Absent { .. }))
         {
             return StoredMethodFactMatch::Missing;
         }
         let unavailable_wins = self
             .indexed(ids)
-            .any(|fact| matches!(fact.availability, MethodAvailability::Unavailable { .. }));
+            .any(|fact| matches!(fact.availability(), MethodAvailability::Unavailable { .. }));
         let mut effective = self.indexed(ids).filter(|fact| {
-            !unavailable_wins || matches!(fact.availability, MethodAvailability::Unavailable { .. })
+            !unavailable_wins
+                || matches!(fact.availability(), MethodAvailability::Unavailable { .. })
         });
         let Some(first) = effective.next() else {
             return StoredMethodFactMatch::Missing;
@@ -497,8 +604,8 @@ impl MethodStore {
         names
     }
 
-    pub fn facts_in_file(&self, file_id: SourceFileId) -> Vec<StoredMethodFact> {
-        self.facts.rows_in_file(file_id).cloned().collect()
+    pub fn facts_in_file(&self, file_id: SourceFileId) -> impl Iterator<Item = &StoredMethodFact> {
+        self.facts.rows_in_file(file_id)
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
@@ -561,10 +668,6 @@ impl MethodStore {
     fn indexed<'a>(&'a self, ids: &'a [RowId]) -> impl Iterator<Item = &'a StoredMethodFact> {
         ids.iter().map(|id| self.facts.get(*id))
     }
-
-    fn clone_facts(&self, ids: &[RowId]) -> Vec<StoredMethodFact> {
-        self.indexed(ids).cloned().collect()
-    }
 }
 
 fn by_range(left: &StoredMethodFact, right: &StoredMethodFact) -> Ordering {
@@ -577,51 +680,22 @@ fn by_range_then_fqn(left: &StoredMethodFact, right: &StoredMethodFact) -> Order
 }
 
 fn method_fact_heap_bytes(fact: &StoredMethodFact) -> usize {
-    vec_payload_bytes(&fact.params)
-        + fact.params.iter().map(string_heap_bytes).sum::<usize>()
-        + vec_payload_bytes(&fact.param_facts)
+    fact.param_facts.len() * std::mem::size_of::<MethodParamFact>()
         + fact
             .param_facts
             .iter()
-            .map(|param| {
-                string_heap_bytes(&param.name)
-                    + param
-                        .type_label
-                        .as_ref()
-                        .map(string_heap_bytes)
-                        .unwrap_or(0)
-                    + param
-                        .documentation
-                        .as_ref()
-                        .map(string_heap_bytes)
-                        .unwrap_or(0)
-            })
+            .map(|param| param.documentation.as_ref().map_or(0, |doc| doc.len()))
             .sum::<usize>()
-        + fact
-            .availability
-            .reason()
-            .map(string_heap_bytes)
-            .unwrap_or(0)
-        + fact
-            .documentation
-            .as_ref()
-            .map(string_heap_bytes)
-            .unwrap_or(0)
-        + fact
-            .return_type_label
-            .as_ref()
-            .map(string_heap_bytes)
-            .unwrap_or(0)
-        + fact
-            .higher_order
-            .as_deref()
-            .map(higher_order_method_metadata_heap_bytes)
-            .unwrap_or(0)
+        + fact.documentation.as_ref().map_or(0, |doc| doc.len())
+        + fact.rare.as_deref().map_or(0, |rare| {
+            std::mem::size_of::<RareMethodDetails>()
+                + rare.availability.reason().map_or(0, string_heap_bytes)
+                + higher_order_method_metadata_heap_bytes(&rare.higher_order)
+        })
 }
 
 fn higher_order_method_metadata_heap_bytes(metadata: &HigherOrderMethodMetadata) -> usize {
-    std::mem::size_of::<HigherOrderMethodMetadata>()
-        + vec_payload_bytes(&metadata.callable_signatures)
+    vec_payload_bytes(&metadata.callable_signatures)
         + metadata
             .callable_signatures
             .iter()

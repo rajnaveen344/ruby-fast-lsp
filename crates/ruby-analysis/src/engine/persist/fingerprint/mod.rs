@@ -18,8 +18,8 @@ use stable_hash::{
     stable_graph_edge_provenance, stable_graph_node_kind, stable_len, stable_method,
     stable_method_availability, stable_method_param_kind, stable_method_reference_access,
     stable_method_visibility, stable_optional_fqn, stable_optional_method, stable_optional_string,
-    stable_range_offsets, stable_ruby_type, stable_source_kind, stable_string, stable_strings,
-    stable_symbol_kind, stable_type_provenance, stable_type_subject, stable_u64, stable_u8,
+    stable_range_offsets, stable_ruby_type, stable_source_kind, stable_string, stable_symbol_kind,
+    stable_type_provenance, stable_type_subject, stable_u64, stable_u8,
 };
 
 impl SemanticExportFingerprint {
@@ -43,7 +43,10 @@ impl SemanticExportFingerprint {
                 stable_u8(hasher, 2);
                 stable_fqn(hasher, &fact.fqn);
                 stable_fqn(hasher, &fact.owner);
-                stable_strings(hasher, &fact.params);
+                stable_len(hasher, fact.param_facts.len());
+                for name in fact.param_names() {
+                    stable_string(hasher, name);
+                }
                 stable_len(hasher, fact.param_facts.len());
                 for parameter in &fact.param_facts {
                     stable_string(hasher, &parameter.name);
@@ -312,7 +315,10 @@ impl View<'_> {
                     stable_fqn(hasher, &fact.owner);
                     stable_range_offsets(hasher, fact.name_range);
                     stable_range_offsets(hasher, fact.range);
-                    stable_strings(hasher, &fact.params);
+                    stable_len(hasher, fact.param_facts.len());
+                    for name in fact.param_names() {
+                        stable_string(hasher, name);
+                    }
                     stable_len(hasher, fact.param_facts.len());
                     for parameter in &fact.param_facts {
                         stable_string(hasher, &parameter.name);

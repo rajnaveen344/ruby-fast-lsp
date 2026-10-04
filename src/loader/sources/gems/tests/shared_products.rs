@@ -56,7 +56,7 @@ fn assert_shared_dependency_semantics(engine: &Project, expected_path: &Path) {
     );
     let signatures = ruby_analysis::engine::lookup::method(&query, request).into_signature_vec();
     assert_eq!(signatures.len(), 1);
-    assert_eq!(signatures[0].params, ["prefix"]);
+    assert!(signatures[0].param_names().eq(["prefix"]));
     assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));
     let value = FullyQualifiedName::constant(vec![
         RubyConstant::new("SharedWidget").unwrap(),

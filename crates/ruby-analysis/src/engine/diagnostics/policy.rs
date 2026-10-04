@@ -393,10 +393,10 @@ impl MethodArity {
                 MethodParamKind::Optional => arity.optional += 1,
                 MethodParamKind::Rest | MethodParamKind::AnonymousRest => arity.has_rest = true,
                 MethodParamKind::RequiredKeyword => {
-                    arity.required_keywords.push(param.name.clone())
+                    arity.required_keywords.push(param.name.to_string())
                 }
                 MethodParamKind::OptionalKeyword => {
-                    arity.optional_keywords.push(param.name.clone())
+                    arity.optional_keywords.push(param.name.to_string())
                 }
                 MethodParamKind::KeywordRest | MethodParamKind::AnonymousKeywordRest => {
                     arity.has_kwrest = true

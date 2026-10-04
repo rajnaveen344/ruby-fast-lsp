@@ -244,7 +244,6 @@ struct SnapshotMethodFact {
     owner: SnapshotFqn,
     range: SnapshotRange,
     name_range: SnapshotRange,
-    params: Vec<String>,
     param_facts: Vec<SnapshotMethodParamFact>,
     parameter_shape_complete: bool,
     delegate_receiver: Option<String>,
@@ -523,25 +522,11 @@ impl ProjectNeutralFileFactsTemplate {
                 .map(|fact| {
                     fqn_heap_bytes(&fact.fqn)
                         + fqn_heap_bytes(&fact.owner)
-                        + vec_payload_bytes(&fact.params)
-                        + fact.params.iter().map(string_heap_bytes).sum::<usize>()
                         + vec_payload_bytes(&fact.param_facts)
                         + fact
                             .param_facts
                             .iter()
-                            .map(|parameter| {
-                                string_heap_bytes(&parameter.name)
-                                    + parameter
-                                        .type_label
-                                        .as_ref()
-                                        .map(string_heap_bytes)
-                                        .unwrap_or(0)
-                                    + parameter
-                                        .documentation
-                                        .as_ref()
-                                        .map(string_heap_bytes)
-                                        .unwrap_or(0)
-                            })
+                            .map(|parameter| parameter.documentation.as_deref().map_or(0, str::len))
                             .sum::<usize>()
                         + match &fact.availability {
                             MethodAvailability::Available => 0,
@@ -550,11 +535,6 @@ impl ProjectNeutralFileFactsTemplate {
                         }
                         + fact
                             .documentation
-                            .as_ref()
-                            .map(string_heap_bytes)
-                            .unwrap_or(0)
-                        + fact
-                            .return_type_label
                             .as_ref()
                             .map(string_heap_bytes)
                             .unwrap_or(0)

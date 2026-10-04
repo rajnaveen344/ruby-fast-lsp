@@ -196,7 +196,7 @@ impl<'a> View<'a> {
         // would lie about the resulting program, so reject the coupled token.
         if declaration_facts.iter().any(|declaration| {
             self.method_facts_where(|other, names| {
-                (other.name_range == declaration.name_range || other.range == declaration.range)
+                (other.name_range() == declaration.name_range || other.range == declaration.range)
                     && names.fqn(other.owner) != Some(&identity.owner)
             })
             .next()

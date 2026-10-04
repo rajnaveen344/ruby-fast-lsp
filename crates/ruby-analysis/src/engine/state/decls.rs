@@ -231,8 +231,7 @@ impl DeclIndex {
         };
         self.methods
             .facts_matching_owner_name(owner_id, method)
-            .iter()
-            .any(|fact| matches!(fact.availability, MethodAvailability::Absent { .. }))
+            .any(|fact| matches!(fact.availability(), MethodAvailability::Absent { .. }))
     }
 
     fn effective_method_fact_matching_owner_id(
@@ -247,7 +246,7 @@ impl DeclIndex {
         {
             StoredMethodFactMatch::Missing => EffectiveMethodFactMatch::Missing,
             StoredMethodFactMatch::Unique(fact) => {
-                EffectiveMethodFactMatch::Found(expand_method_fact(names, fact.clone()))
+                EffectiveMethodFactMatch::Found(expand_method_fact(names, fact))
             }
             StoredMethodFactMatch::Ambiguous => EffectiveMethodFactMatch::Ambiguous {
                 owner: names
@@ -422,7 +421,7 @@ impl<'a> View<'a> {
             .methods
             .facts()
             .filter(move |fact| keep(fact, names))
-            .map(move |fact| expand_method_fact(names, fact.clone()))
+            .map(move |fact| expand_method_fact(names, fact))
     }
 
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
@@ -510,35 +509,7 @@ fn intern_symbol_facts(names: &mut Names, facts: Vec<SymbolFact>) -> Vec<StoredS
 fn intern_method_facts(names: &mut Names, facts: Vec<MethodFact>) -> Vec<StoredMethodFact> {
     facts
         .into_iter()
-        .map(|fact| {
-            let method = match &fact.fqn {
-                FullyQualifiedName::Method(_, method) => Some(*method),
-                FullyQualifiedName::Namespace(_, _)
-                | FullyQualifiedName::Constant(_)
-                | FullyQualifiedName::LocalVariable(_)
-                | FullyQualifiedName::InstanceVariable(_)
-                | FullyQualifiedName::ClassVariable(_)
-                | FullyQualifiedName::GlobalVariable(_) => None,
-            };
-            let fqn = names.intern_fqn(fact.fqn);
-            let owner = names.intern_fqn(fact.owner);
-            StoredMethodFact {
-                fqn,
-                owner,
-                method,
-                range: fact.range,
-                name_range: fact.name_range,
-                params: fact.params,
-                param_facts: fact.param_facts,
-                parameter_shape_complete: fact.parameter_shape_complete,
-                delegate_receiver: fact.delegate_receiver,
-                visibility: fact.visibility,
-                availability: fact.availability,
-                documentation: fact.documentation,
-                return_type_label: fact.return_type_label,
-                higher_order: fact.higher_order,
-            }
-        })
+        .map(|fact| StoredMethodFact::new(fact, |fqn| names.intern_fqn(fqn)))
         .collect()
 }
 
@@ -561,14 +532,17 @@ fn expand_symbol_fact(names: &Names, fact: StoredSymbolFact) -> SymbolFact {
     SymbolFact::new(fqn, fact.kind, fact.range).with_name_range(fact.name_range)
 }
 
-fn expand_method_facts(names: &Names, facts: Vec<StoredMethodFact>) -> Vec<MethodFact> {
+fn expand_method_facts<'a>(
+    names: &Names,
+    facts: impl IntoIterator<Item = &'a StoredMethodFact>,
+) -> Vec<MethodFact> {
     facts
         .into_iter()
         .map(|fact| expand_method_fact(names, fact))
         .collect()
 }
 
-fn expand_method_fact(names: &Names, fact: StoredMethodFact) -> MethodFact {
+fn expand_method_fact(names: &Names, fact: &StoredMethodFact) -> MethodFact {
     let fqn = names
         .fqn(fact.fqn)
         .expect_invariant(
@@ -585,21 +559,7 @@ fn expand_method_fact(names: &Names, fact: StoredMethodFact) -> MethodFact {
             "intern method owners before inserting facts",
         )
         .clone();
-    MethodFact {
-        fqn,
-        owner,
-        range: fact.range,
-        name_range: fact.name_range,
-        params: fact.params,
-        param_facts: fact.param_facts,
-        parameter_shape_complete: fact.parameter_shape_complete,
-        delegate_receiver: fact.delegate_receiver,
-        visibility: fact.visibility,
-        availability: fact.availability,
-        documentation: fact.documentation,
-        return_type_label: fact.return_type_label,
-        higher_order: fact.higher_order,
-    }
+    fact.expand(fqn, owner)
 }
 
 fn retain_effective_method_availability(facts: &mut Vec<MethodFact>) {

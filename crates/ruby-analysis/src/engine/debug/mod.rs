@@ -169,11 +169,8 @@ fn lookup_entry_from_method_fact(engine: &Project, fact: &MethodFact) -> LookupE
         return_type: query
             .method_return_type(fact)
             .and_then(non_unknown_type_string),
-        parameters: if fact.params.is_empty() {
-            None
-        } else {
-            Some(fact.params.clone())
-        },
+        parameters: (!fact.param_facts.is_empty())
+            .then(|| fact.param_names().map(str::to_string).collect()),
     }
 }
 
