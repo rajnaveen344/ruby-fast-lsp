@@ -102,9 +102,23 @@ impl Diagnostics {
     }
 }
 
-impl View<'_> {
+impl<'a> View<'a> {
     pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
         self.engine.diagnostics.facts_in_file(file_id)
+    }
+
+    /// One file's diagnostics with `code`, without copying its others.
+    pub fn diagnostic_facts_with_code_in_file(
+        &self,
+        file_id: SourceFileId,
+        code: &'static str,
+    ) -> impl Iterator<Item = &'a DiagnosticFact> + 'a {
+        self.engine
+            .diagnostics
+            .resolved
+            .rows_in_file(file_id)
+            .iter()
+            .filter(move |fact| fact.code == code)
     }
 
     pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {

@@ -64,6 +64,10 @@ impl DiagnosticStore {
         self.facts.rows(file_id).to_vec()
     }
 
+    pub fn rows_in_file(&self, file_id: SourceFileId) -> &[DiagnosticFact] {
+        self.facts.rows(file_id)
+    }
+
     pub fn all_facts(&self) -> Vec<DiagnosticFact> {
         self.facts.iter().cloned().collect()
     }

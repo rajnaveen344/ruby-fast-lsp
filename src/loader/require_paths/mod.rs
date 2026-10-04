@@ -32,11 +32,12 @@
 use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use log::trace;
 use ruby_analysis::core::{DiagnosticFact, DiagnosticSeverity, SourceFileId, TextRange};
 use ruby_analysis::engine::{View, UNRESOLVED_REQUIRE_CODE};
-use ruby_prism::{visit_call_node, CallNode, Visit};
+use ruby_prism::{visit_call_node, CallNode, Node, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 /// One-shot map from a `require` feature string to the first matching file.
@@ -47,7 +48,8 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 /// `loadPaths` / `lib` / root are still probed with `is_file` first.
 #[derive(Debug, Clone, Default)]
 pub struct RequireFeatureIndex {
-    by_feature: HashMap<String, PathBuf>,
+    /// Values share the engine's path allocation when built from a view.
+    by_feature: HashMap<Box<str>, Arc<Path>>,
 }
 
 impl RequireFeatureIndex {
@@ -61,16 +63,17 @@ impl RequireFeatureIndex {
     /// `.rb` files. First insert wins, matching sequential `$LOAD_PATH` search.
     pub fn build(roots: &[PathBuf], view: Option<&View<'_>>) -> Self {
         if let Some(view) = view {
-            let paths: Vec<PathBuf> = view
+            let mut paths: Vec<&Arc<Path>> = view
                 .files()
                 .filter(|file| {
                     file.path
                         .extension()
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("rb"))
                 })
-                .map(|file| file.path.to_path_buf())
+                .map(|file| &file.path)
                 .collect();
-            return Self::from_indexed_paths(roots, &paths);
+            paths.sort_unstable();
+            return Self::from_sorted_indexed_paths(roots, &paths);
         }
         let mut index = Self::empty();
         for root in roots {
@@ -82,15 +85,13 @@ impl RequireFeatureIndex {
         index
     }
 
-    fn from_indexed_paths(roots: &[PathBuf], paths: &[PathBuf]) -> Self {
+    fn from_sorted_indexed_paths(roots: &[PathBuf], sorted: &[&Arc<Path>]) -> Self {
         let mut index = Self::empty();
-        let mut sorted: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-        sorted.sort();
         for root in roots {
             if root.as_os_str().is_empty() {
                 continue;
             }
-            let start = sorted.partition_point(|path| *path < root.as_path());
+            let start = sorted.partition_point(|path| ***path < *root.as_path());
             for path in &sorted[start..] {
                 if !path.starts_with(root) {
                     break;
@@ -98,7 +99,7 @@ impl RequireFeatureIndex {
                 let Ok(relative) = path.strip_prefix(root) else {
                     continue;
                 };
-                index.insert_relative(relative, (*path).to_path_buf());
+                index.insert_relative(relative, Arc::clone(path));
             }
         }
         index
@@ -109,7 +110,7 @@ impl RequireFeatureIndex {
     }
 
     pub fn lookup(&self, argument: &str) -> Option<&Path> {
-        self.by_feature.get(argument).map(PathBuf::as_path)
+        self.by_feature.get(argument).map(|path| &**path)
     }
 
     fn add_disk_root(&mut self, root: &Path) {
@@ -148,19 +149,21 @@ impl RequireFeatureIndex {
             let Ok(relative) = path.strip_prefix(root) else {
                 continue;
             };
-            self.insert_relative(relative, path.clone());
+            self.insert_relative(relative, Arc::from(path.as_path()));
         }
     }
 
-    fn insert_relative(&mut self, relative: &Path, absolute: PathBuf) {
+    fn insert_relative(&mut self, relative: &Path, absolute: Arc<Path>) {
         let Some((with_ext, bare)) = require_feature_keys(relative) else {
             return;
         };
         self.by_feature
-            .entry(with_ext)
-            .or_insert_with(|| absolute.clone());
+            .entry(with_ext.into_boxed_str())
+            .or_insert_with(|| Arc::clone(&absolute));
         if let Some(bare) = bare {
-            self.by_feature.entry(bare).or_insert(absolute);
+            self.by_feature
+                .entry(bare.into_boxed_str())
+                .or_insert(absolute);
         }
     }
 }
@@ -268,14 +271,14 @@ pub fn find_require_string_at_offset(
     finder.results.into_iter().next()
 }
 
-/// Collect every static `require` / `require_relative` string in a file.
-pub fn find_all_require_strings(content: &str) -> Vec<RequireStringTarget> {
-    let parse_result = ruby_prism::parse(content.as_bytes());
+/// Collect every static `require` / `require_relative` string under an
+/// already parsed root, so callers that hold a parse never parse again.
+pub fn static_require_targets(root: &Node<'_>) -> Vec<RequireStringTarget> {
     let mut finder = RequireStringFinder {
         byte_offset: None,
         results: Vec::new(),
     };
-    finder.visit(&parse_result.node());
+    finder.visit(root);
     finder.results
 }
 
@@ -284,6 +287,7 @@ pub fn find_all_require_strings(content: &str) -> Vec<RequireStringTarget> {
 /// `autoload` / `load` / dynamic arguments are intentionally ignored.
 pub fn unresolved_require_diagnostics(
     content: &str,
+    root: &Node<'_>,
     file_id: SourceFileId,
     current_file: &Path,
     project_root: &Path,
@@ -292,7 +296,7 @@ pub fn unresolved_require_diagnostics(
     view: Option<&View<'_>>,
 ) -> Vec<DiagnosticFact> {
     let mut diagnostics = Vec::new();
-    for target in find_all_require_strings(content) {
+    for target in static_require_targets(root) {
         if resolve_require_path(
             target.kind,
             &target.argument,
@@ -314,8 +318,12 @@ pub fn unresolved_require_diagnostics(
 /// Complete static require candidates for delayed open-document refresh.
 /// Resolve these against the current engine at commit time, including targets
 /// that existed during collection but may have been removed before commit.
-pub fn require_diagnostic_candidates(content: &str, file_id: SourceFileId) -> Vec<DiagnosticFact> {
-    find_all_require_strings(content)
+pub fn require_diagnostic_candidates(
+    content: &str,
+    root: &Node<'_>,
+    file_id: SourceFileId,
+) -> Vec<DiagnosticFact> {
+    static_require_targets(root)
         .iter()
         .map(|target| require_diagnostic_for_target(content, file_id, target))
         .collect()

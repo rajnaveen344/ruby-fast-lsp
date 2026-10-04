@@ -207,9 +207,8 @@ impl Server {
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
                     let candidates = view
-                        .diagnostic_facts_in_file(file.id)
-                        .into_iter()
-                        .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
+                        .diagnostic_facts_with_code_in_file(file.id, UNRESOLVED_REQUIRE_CODE)
+                        .cloned()
                         .collect::<Vec<_>>();
                     if open_paths.contains(&*file.path) {
                         open_files = open_files.checked_add(1).expect_invariant(
@@ -257,20 +256,26 @@ impl Server {
                 let semantic_lock = self.document_semantic_lock(&uri);
                 let _semantic_guard = semantic_lock.lock().await;
                 let document = self.get_doc(&uri);
-                let syntax = document.as_ref().map(|document| {
-                    let parse = document.parse();
-                    crate::loader::file_processor::syntax_diagnostics::generate_diagnostics(
-                        &parse, document,
-                    )
-                });
                 // An initially closed file may have opened while collection
                 // waited. Open documents provide all static requires, including
-                // previously resolved targets. Closed files reuse stored misses
+                // previously resolved targets, from the parse that also yields
+                // their syntax diagnostics. Closed files reuse stored misses
                 // without rereading or parsing disk sources.
-                let candidates = if let Some(document) = &document {
-                    require_diagnostic_candidates(document.analysis_content(), file_id)
-                } else {
-                    candidates
+                let (syntax, candidates) = match &document {
+                    Some(document) => {
+                        let parse = document.parse();
+                        let syntax =
+                            crate::loader::file_processor::syntax_diagnostics::generate_diagnostics(
+                                &parse, document,
+                            );
+                        let candidates = require_diagnostic_candidates(
+                            document.analysis_content(),
+                            &parse.node(),
+                            file_id,
+                        );
+                        (Some(syntax), candidates)
+                    }
+                    None => (None, candidates),
                 };
                 let workspaces = self.projects.read();
                 let Some(owner) = ProjectRegistry::workspace_for_path(&workspaces, &path) else {

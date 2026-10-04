@@ -33,7 +33,7 @@ fn rejects_interpolated_require_string() {
 #[test]
 fn collects_all_static_requires_in_file() {
     let source = "require \"a\"\nrequire_relative \"./b\"\nautoload :C, \"c\"\n";
-    let targets = find_all_require_strings(source);
+    let targets = static_require_targets(&ruby_prism::parse(source.as_bytes()).node());
     assert_eq!(targets.len(), 2);
     assert_eq!(targets[0].argument, "a");
     assert_eq!(targets[1].argument, "./b");
@@ -46,6 +46,7 @@ fn unresolved_require_emits_diagnostic_on_string() {
     let file_id = SourceFileId(1);
     let diagnostics = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         file_id,
         Path::new("/project/main.rb"),
         Path::new("/project"),
@@ -71,6 +72,7 @@ fn resolved_require_emits_no_diagnostic() {
     let source = "require \"foo\"\n";
     let diagnostics = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         SourceFileId(1),
         &dir.path().join("main.rb"),
         dir.path(),
@@ -301,6 +303,7 @@ fn reresolve_clears_stored_require_when_dependency_root_appears() {
     let current = dir.path().join("main.rb");
     let existing = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         file_id,
         &current,
         dir.path(),
@@ -332,6 +335,7 @@ fn reresolve_keeps_stored_require_when_path_is_still_missing() {
     let file_id = SourceFileId(1);
     let existing = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         file_id,
         Path::new("/project/main.rb"),
         Path::new("/project"),
@@ -365,6 +369,7 @@ fn reresolve_clears_only_the_require_that_gained_a_root() {
     let current = dir.path().join("main.rb");
     let existing = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         file_id,
         &current,
         dir.path(),
@@ -393,6 +398,7 @@ fn reresolve_keeps_require_relative_kind_from_the_stored_message() {
     let file_id = SourceFileId(1);
     let existing = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         file_id,
         Path::new("/project/app/main.rb"),
         Path::new("/project"),
@@ -428,6 +434,7 @@ fn reresolve_clears_from_engine_indexed_files_without_disk() {
     let source = "require 'platform/helpers/json'\n";
     let existing = unresolved_require_diagnostics(
         source,
+        &ruby_prism::parse(source.as_bytes()).node(),
         SourceFileId(1),
         Path::new("/project/main.rb"),
         Path::new("/project"),

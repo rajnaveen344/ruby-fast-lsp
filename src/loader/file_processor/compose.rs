@@ -17,6 +17,7 @@ use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::indexer::fact_collector::FactCollectorOutput;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_extension_api::ProjectContext;
+use ruby_prism::Node;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::Url;
 
@@ -41,6 +42,9 @@ pub(super) enum ExtensionDocument<'a> {
 pub(super) struct FileComposition<'a> {
     pub uri: &'a Url,
     pub content: &'a str,
+    /// The file's parsed analysis source; require diagnostics read its
+    /// static requires instead of parsing the file again.
+    pub root: &'a Node<'a>,
     pub file_id: SourceFileId,
     pub source_kind: SourceKind,
     pub analysis_engine: &'a dyn LoadTarget,
@@ -63,6 +67,7 @@ impl FileProcessor {
         let FileComposition {
             uri,
             content,
+            root,
             file_id,
             source_kind,
             analysis_engine,
@@ -105,6 +110,7 @@ impl FileProcessor {
             self.add_require_diagnostics(
                 uri,
                 content,
+                root,
                 file_id,
                 analysis_engine,
                 require_roots,
@@ -121,6 +127,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
+        root: &Node<'_>,
         file_id: SourceFileId,
         analysis_engine: &dyn LoadTarget,
         require_roots: RequireDiagnosticRoots<'_>,
@@ -144,6 +151,7 @@ impl FileProcessor {
                 let diagnostics = analysis_engine.view(|view| {
                     unresolved_require_diagnostics(
                         content,
+                        root,
                         file_id,
                         &current_path,
                         &project_root,
@@ -161,6 +169,7 @@ impl FileProcessor {
                 let diagnostics = analysis_engine.view(|view| {
                     unresolved_require_diagnostics(
                         content,
+                        root,
                         file_id,
                         &current_path,
                         project_root,

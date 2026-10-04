@@ -656,6 +656,7 @@ impl FileProcessor {
             FileComposition {
                 uri,
                 content: document.content.as_str(),
+                root: &node,
                 file_id: analysis_file_id,
                 source_kind,
                 analysis_engine: &*analysis_engine,

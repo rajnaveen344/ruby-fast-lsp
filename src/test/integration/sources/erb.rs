@@ -196,3 +196,30 @@ async fn legacy_rhtml_templates_use_the_same_embedded_ruby_mapping() {
         "legacy ERB host text must not create Ruby diagnostics: {diagnostics:?}"
     );
 }
+
+#[tokio::test]
+async fn erb_require_diagnostics_read_only_ruby_regions_at_template_positions() {
+    let root = tempfile::TempDir::new().expect("create project root");
+    let root = root.path().canonicalize().expect("canonical project root");
+    let template = root.join("show.html.erb");
+    let template = template.to_string_lossy();
+    let source = "<p>require_relative \"host_text_feature\"</p><% require_relative \"missing_template_feature\" %>\n";
+    std::fs::write(&*template, source).expect("write template");
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace(&root.to_string_lossy());
+    editor.open(&template, source).await;
+
+    let diagnostics = editor.diagnostics(&template).await;
+    let requires = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.message.contains("_feature"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        requires.len(),
+        1,
+        "only the Ruby region's require is diagnosed, got {diagnostics:?}"
+    );
+    assert!(requires[0].message.contains("missing_template_feature"));
+    assert_eq!(requires[0].range.start.line, 0);
+    assert_eq!(requires[0].range.start.character, 64);
+}
