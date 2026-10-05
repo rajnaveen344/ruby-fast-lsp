@@ -24,10 +24,8 @@ pub async fn check_project(files: &[(&str, &str)]) {
         "check_project requires at least one file"
     );
     let fixture_dir = tempfile::tempdir().expect("create project fixture directory");
-    let base = fixture_dir
-        .path()
-        .canonicalize()
-        .expect("canonicalize project fixture directory");
+    let base =
+        dunce::canonicalize(fixture_dir.path()).expect("canonicalize project fixture directory");
     let root = base.join("project");
     let parsed = files
         .iter()

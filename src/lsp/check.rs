@@ -229,8 +229,7 @@ impl CheckSession {
     /// Analyze one project directory or one Ruby/RBS source without starting an
     /// LSP service. Inputs and all output diagnostics are sorted deterministically.
     pub async fn check_path(&self, input: &Path) -> Result<CheckReport> {
-        let input = input
-            .canonicalize()
+        let input = dunce::canonicalize(input)
             .with_context(|| format!("failed to resolve check path {}", input.display()))?;
         // Workspace routing and indexed files use paths decoded from file URLs.
         // Windows canonicalization adds a verbatim prefix that URLs do not retain.

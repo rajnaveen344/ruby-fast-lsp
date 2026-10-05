@@ -209,6 +209,8 @@ fn vendor_archive_extraction_is_reused_until_the_archive_changes() {
 
     // Same-length bytes at the same inode and modification time: discovery
     // trusts the recorded extraction and does not read the archive again.
+    // Without an inode the stat cannot identify the archive, so it is read,
+    // verified, and these overwritten bytes are rejected.
     let original = std::fs::read(&archive).unwrap();
     let modified = std::fs::metadata(&archive).unwrap().modified().unwrap();
     let file = std::fs::OpenOptions::new()
@@ -219,15 +221,22 @@ fn vendor_archive_extraction_is_reused_until_the_archive_changes() {
     file.set_modified(modified).unwrap();
     drop(file);
     let reused = discover();
-    assert_eq!(
-        reused.len(),
-        1,
-        "an unchanged archive stat reuses the extraction"
-    );
-    assert_eq!(reused[0].path, first[0].path);
-    assert_eq!(reused[0].lib_paths, first[0].lib_paths);
-    assert_eq!(reused[0].version, "1.2.3");
-    assert_eq!(reused[0].platform, "ruby");
+    if cfg!(unix) {
+        assert_eq!(
+            reused.len(),
+            1,
+            "an unchanged archive stat reuses the extraction"
+        );
+        assert_eq!(reused[0].path, first[0].path);
+        assert_eq!(reused[0].lib_paths, first[0].lib_paths);
+        assert_eq!(reused[0].version, "1.2.3");
+        assert_eq!(reused[0].platform, "ruby");
+    } else {
+        assert!(
+            reused.is_empty(),
+            "an archive without an identifying stat is verified again: {reused:?}"
+        );
+    }
 
     // A replaced archive is read, verified, and extracted again.
     create_cached_gem_with_source(

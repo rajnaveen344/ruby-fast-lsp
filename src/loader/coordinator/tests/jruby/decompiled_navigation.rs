@@ -31,7 +31,7 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
     fs::create_dir_all(root.join("lib")).unwrap();
     fs::create_dir_all(jruby_home.join("bin")).unwrap();
     fs::write(jruby_home.join("bin/jruby"), b"fixture").unwrap();
-    let java = real_java_executable().canonicalize().unwrap();
+    let java = dunce::canonicalize(real_java_executable()).unwrap();
     let java_home = java
         .parent()
         .and_then(Path::parent)

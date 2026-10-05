@@ -57,7 +57,7 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
         runtime_stdlib_paths_for_project(&ctx, &runtime),
         runtime_stdlib_paths_for_project(&ctx, &runtime)
     );
-    let expected = fs::canonicalize(runtime_stdlib).expect("runtime stdlib must canonicalize");
+    let expected = dunce::canonicalize(runtime_stdlib).expect("runtime stdlib must canonicalize");
     assert_eq!(first.unwrap().paths(), &[expected.clone()]);
     assert_eq!(second.unwrap().paths(), &[expected]);
     assert_eq!(

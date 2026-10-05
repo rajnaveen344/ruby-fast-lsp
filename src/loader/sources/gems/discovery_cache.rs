@@ -78,7 +78,7 @@ impl GemDiscoveryCache {
         ruby_executable: &Path,
         java_home: Option<&Path>,
     ) -> Result<Self> {
-        let project_root = project_root.canonicalize().with_context(|| {
+        let project_root = dunce::canonicalize(project_root).with_context(|| {
             format!(
                 "failed to canonicalize {} for gem discovery reuse",
                 project_root.display()
@@ -214,7 +214,7 @@ impl Inputs {
             "runtime file",
             file_identity(&self.ruby_executable).as_bytes(),
         );
-        if let Ok(resolved) = self.ruby_executable.canonicalize() {
+        if let Ok(resolved) = dunce::canonicalize(&self.ruby_executable) {
             field("runtime target", file_identity(&resolved).as_bytes());
         }
         field(

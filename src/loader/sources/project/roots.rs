@@ -44,7 +44,7 @@ pub fn discover_project_roots_with_explicit(
         return discover_project_roots(workspace_root);
     }
 
-    let canonical_workspace = fs::canonicalize(workspace_root).with_context(|| {
+    let canonical_workspace = dunce::canonicalize(workspace_root).with_context(|| {
         format!(
             "Failed to canonicalize workspace folder {}",
             workspace_root.display()
@@ -62,7 +62,7 @@ pub fn discover_project_roots_with_explicit(
             configured
         );
         let candidate = canonical_workspace.join(relative);
-        let canonical_candidate = fs::canonicalize(&candidate).with_context(|| {
+        let canonical_candidate = dunce::canonicalize(&candidate).with_context(|| {
             format!(
                 "indexing.projectRoots entry does not exist: {}",
                 candidate.display()
@@ -206,8 +206,8 @@ mod tests {
             )
             .unwrap(),
             [
-                fs::canonicalize(workspace.path().join("services/billing")).unwrap(),
-                fs::canonicalize(workspace.path().join("services/identity")).unwrap(),
+                dunce::canonicalize(workspace.path().join("services/billing")).unwrap(),
+                dunce::canonicalize(workspace.path().join("services/identity")).unwrap(),
             ]
         );
     }

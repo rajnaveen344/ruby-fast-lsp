@@ -361,7 +361,7 @@ pub fn runtime_catalog_for_projects(
     .collect::<Vec<_>>();
     let mut roots = project_roots
         .into_iter()
-        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .filter_map(|root| dunce::canonicalize(root).ok())
         .collect::<Vec<_>>();
     roots.sort();
     roots.dedup();
@@ -480,7 +480,7 @@ fn add_java_home(homes: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !candidate.join("bin/java").is_file() || !candidate.join("release").is_file() {
         return;
     }
-    let Ok(candidate) = std::fs::canonicalize(candidate) else {
+    let Ok(candidate) = dunce::canonicalize(candidate) else {
         return;
     };
     if !homes.contains(&candidate) {
@@ -496,7 +496,7 @@ fn add_candidate(
     if !executable.is_file() {
         return;
     }
-    let Ok(executable) = std::fs::canonicalize(executable) else {
+    let Ok(executable) = dunce::canonicalize(executable) else {
         return;
     };
     candidates.push(RuntimeCandidate { executable, source });
@@ -777,7 +777,7 @@ mod tests {
         assert!(homes.is_empty());
         add_java_home(&mut homes, complete.clone());
         add_java_home(&mut homes, complete.clone());
-        assert_eq!(homes, vec![fs::canonicalize(complete).unwrap()]);
+        assert_eq!(homes, vec![dunce::canonicalize(complete).unwrap()]);
     }
 
     #[test]

@@ -30,7 +30,7 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = tempfile::tempdir().unwrap();
-    let base = fixture.path().canonicalize().unwrap();
+    let base = dunce::canonicalize(fixture.path()).unwrap();
     let root = base.join("project");
     let runtime = base.join("runtime");
     let stdlib = runtime.join("lib/ruby/stdlib");
@@ -133,7 +133,7 @@ async fn runtime_stdlib_resolves_every_shipped_feature() {
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = tempfile::tempdir().unwrap();
-    let base = fixture.path().canonicalize().unwrap();
+    let base = dunce::canonicalize(fixture.path()).unwrap();
     let root = base.join("project");
     let runtime = base.join("runtime");
     let stdlib = runtime.join("lib/ruby/stdlib");
@@ -719,7 +719,7 @@ async fn gemspec_require_paths_resolve_project_requires() {
     use std::time::Duration;
 
     let fixture = tempfile::tempdir().unwrap();
-    let root = fixture.path().canonicalize().unwrap().join("project");
+    let root = dunce::canonicalize(fixture.path()).unwrap().join("project");
     let jar = root.join("lib/jars/org/example/widget/1.0/widget-1.0.jar");
     std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
     std::fs::write(&jar, b"PK\x03\x04").unwrap();

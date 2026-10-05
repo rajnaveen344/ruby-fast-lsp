@@ -135,7 +135,10 @@ end
             1,
             "Cucumber World helper did not resolve at {line}:{character}: {helper:?}"
         );
-        assert_eq!(helper[0].uri.path(), support.as_str());
+        assert_eq!(
+            helper[0].uri,
+            tower_lsp::lsp_types::Url::from_file_path(&support).unwrap()
+        );
         assert_eq!(helper[0].range.start.line, 1);
     }
     let marker = editor.goto_definition(&steps, 5, 3).await;

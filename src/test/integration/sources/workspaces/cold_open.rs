@@ -11,7 +11,7 @@ const SOURCE: &str = "class Box\n  def initialize(size:)\n    @size = size\n  en
 #[tokio::test]
 async fn opening_an_indexed_file_keeps_local_variable_navigation_and_types() {
     let fixture = tempfile::tempdir().unwrap();
-    let root = fixture.path().canonicalize().unwrap().join("project");
+    let root = dunce::canonicalize(fixture.path()).unwrap().join("project");
     std::fs::create_dir(&root).unwrap();
     let path = root.join("box.rb");
     std::fs::write(&path, SOURCE).unwrap();
@@ -63,7 +63,7 @@ async fn position_queries_wait_for_the_in_flight_open_of_an_indexed_file() {
     use tower_lsp::LanguageServer;
 
     let fixture = tempfile::tempdir().unwrap();
-    let root = fixture.path().canonicalize().unwrap().join("project");
+    let root = dunce::canonicalize(fixture.path()).unwrap().join("project");
     std::fs::create_dir(&root).unwrap();
     let path = root.join("box.rb");
     std::fs::write(&path, SOURCE).unwrap();

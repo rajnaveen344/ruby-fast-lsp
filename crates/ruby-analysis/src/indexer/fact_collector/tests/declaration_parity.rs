@@ -19,7 +19,12 @@ use url::Url;
 /// core namespaces, and the collector also sees every namespace the seed
 /// declares in the file, as the loader wires it once the seed has run.
 fn walk_declarations(source: &str) -> (BTreeSet<String>, BTreeSet<String>) {
-    let path = PathBuf::from("/workspace/lib/parity.rb");
+    // Absolute on every platform, so it forms a file URI; never read from disk.
+    let path = PathBuf::from(if cfg!(windows) {
+        r"C:\workspace\lib\parity.rb"
+    } else {
+        "/workspace/lib/parity.rb"
+    });
     let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: path.clone(),

@@ -200,7 +200,7 @@ async fn legacy_rhtml_templates_use_the_same_embedded_ruby_mapping() {
 #[tokio::test]
 async fn erb_require_diagnostics_read_only_ruby_regions_at_template_positions() {
     let root = tempfile::TempDir::new().expect("create project root");
-    let root = root.path().canonicalize().expect("canonical project root");
+    let root = dunce::canonicalize(root.path()).expect("canonical project root");
     let template = root.join("show.html.erb");
     let template = template.to_string_lossy();
     let source = "<p>require_relative \"host_text_feature\"</p><% require_relative \"missing_template_feature\" %>\n";

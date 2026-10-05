@@ -47,10 +47,8 @@ impl RspecEditor {
         let mut projects = Vec::new();
         for locked in locked {
             let dir = TempDir::new().expect("RSpec project directory must exist");
-            let root = dir
-                .path()
-                .canonicalize()
-                .expect("RSpec project directory must canonicalize");
+            let root =
+                dunce::canonicalize(dir.path()).expect("RSpec project directory must canonicalize");
             std::fs::write(root.join("Gemfile"), GEMFILE).expect("Gemfile must be written");
             if *locked {
                 std::fs::write(root.join("Gemfile.lock"), GEMFILE_LOCK)

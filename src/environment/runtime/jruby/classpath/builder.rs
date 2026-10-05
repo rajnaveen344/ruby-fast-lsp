@@ -3,7 +3,6 @@
 use crate::invariant::ExpectInvariant;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use walkdir::WalkDir;
@@ -321,7 +320,7 @@ impl ClasspathBuilder {
                     continue;
                 }
                 let canonical =
-                    fs::canonicalize(&candidate).map_err(|error| ClasspathError::Io {
+                    dunce::canonicalize(&candidate).map_err(|error| ClasspathError::Io {
                         path: candidate.clone(),
                         message: error.to_string(),
                     })?;
@@ -338,7 +337,7 @@ impl ClasspathBuilder {
     }
 
     fn add_source(&mut self, path: &Path, origin: SourceOrigin) -> Result<(), ClasspathError> {
-        let path = fs::canonicalize(path).map_err(|error| ClasspathError::Io {
+        let path = dunce::canonicalize(path).map_err(|error| ClasspathError::Io {
             path: path.to_path_buf(),
             message: error.to_string(),
         })?;

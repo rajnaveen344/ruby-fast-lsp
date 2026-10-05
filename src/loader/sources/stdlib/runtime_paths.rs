@@ -22,7 +22,7 @@ pub(crate) struct RuntimeStdlibPathKey {
 
 impl RuntimeStdlibPathKey {
     pub(crate) fn new(executable: &Path, java_home: Option<&Path>) -> Result<Self> {
-        let executable = std::fs::canonicalize(executable).with_context(|| {
+        let executable = dunce::canonicalize(executable).with_context(|| {
             format!(
                 "failed to canonicalize selected Ruby executable {} for stdlib discovery",
                 executable.display()
@@ -31,7 +31,7 @@ impl RuntimeStdlibPathKey {
         let executable_identity = runtime_executable_identity(&executable)?;
         let java_home = java_home
             .map(|path| {
-                let canonical = std::fs::canonicalize(path).with_context(|| {
+                let canonical = dunce::canonicalize(path).with_context(|| {
                     format!(
                         "failed to canonicalize selected Java home {} for stdlib discovery",
                         path.display()
@@ -128,7 +128,7 @@ impl RuntimeStdlibPathKey {
                 );
                 continue;
             }
-            let path = std::fs::canonicalize(&path).with_context(|| {
+            let path = dunce::canonicalize(&path).with_context(|| {
                 format!(
                     "failed to canonicalize exact-runtime stdlib path {} from {}",
                     path.display(),

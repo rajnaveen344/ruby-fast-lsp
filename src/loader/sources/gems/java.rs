@@ -18,7 +18,7 @@ pub fn discover_locked_java_gem_roots(
     jruby_executable: &Path,
     compatibility_version: &str,
 ) -> Result<Vec<PathBuf>> {
-    let project_root = project_root.canonicalize().with_context(|| {
+    let project_root = dunce::canonicalize(project_root).with_context(|| {
         format!(
             "failed to canonicalize owning project root {}",
             project_root.display()
@@ -30,7 +30,7 @@ pub fn discover_locked_java_gem_roots(
             project_root.display()
         ));
     }
-    let jruby_executable = jruby_executable.canonicalize().with_context(|| {
+    let jruby_executable = dunce::canonicalize(jruby_executable).with_context(|| {
         format!(
             "failed to canonicalize selected JRuby executable {}",
             jruby_executable.display()
@@ -218,7 +218,7 @@ fn find_project_java_gem_matches(
         {
             continue;
         }
-        let canonical = entry.path().canonicalize().with_context(|| {
+        let canonical = dunce::canonicalize(entry.path()).with_context(|| {
             format!(
                 "failed to canonicalize project-local Java gem {}",
                 entry.path().display()
@@ -245,8 +245,7 @@ fn exact_java_gem_directory(repository: &Path, exact_directory: &str) -> Result<
     if !candidate.is_dir() {
         return Ok(None);
     }
-    candidate
-        .canonicalize()
+    dunce::canonicalize(&candidate)
         .map(Some)
         .with_context(|| format!("failed to canonicalize Java gem {}", candidate.display()))
 }

@@ -851,7 +851,7 @@ impl IndexerGem {
             Some(root) => root.clone(),
             None => crate::utils::cache::ruby_fast_lsp_user_cache_root()?,
         };
-        let canonical_project_root = project_root.canonicalize().with_context(|| {
+        let canonical_project_root = dunce::canonicalize(project_root).with_context(|| {
             format!(
                 "failed to canonicalize Ruby project root {} for cached gem isolation",
                 project_root.display()

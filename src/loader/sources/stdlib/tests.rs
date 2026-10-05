@@ -464,7 +464,7 @@ fn runtime_stdlib_discovery_uses_the_exact_selected_executable() {
 
     assert_eq!(
         indexer.stdlib_paths,
-        vec![fs::canonicalize(runtime_stdlib).expect("runtime stdlib must canonicalize")],
+        vec![dunce::canonicalize(runtime_stdlib).expect("runtime stdlib must canonicalize")],
         "stdlib discovery must use only the exact selected runtime's load path"
     );
 }

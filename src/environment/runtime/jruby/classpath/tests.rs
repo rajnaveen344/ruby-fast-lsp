@@ -201,7 +201,7 @@ fn changed_files_miss_the_cache_and_hit_paths_still_enforce_consumer_limits() {
     let first_fingerprint = first
         .artifacts
         .iter()
-        .find(|artifact| artifact.path == explicit_path.canonicalize().unwrap())
+        .find(|artifact| artifact.path == dunce::canonicalize(&explicit_path).unwrap())
         .expect("initial explicit artifact must exist")
         .fingerprint_sha256
         .clone();
@@ -216,7 +216,7 @@ fn changed_files_miss_the_cache_and_hit_paths_still_enforce_consumer_limits() {
     let second_fingerprint = second
         .artifacts
         .iter()
-        .find(|artifact| artifact.path == explicit_path.canonicalize().unwrap())
+        .find(|artifact| artifact.path == dunce::canonicalize(&explicit_path).unwrap())
         .expect("changed explicit artifact must exist")
         .fingerprint_sha256
         .clone();
@@ -343,7 +343,7 @@ fn indexes_jars_only_below_the_exact_selected_java_gem_root() {
     assert_eq!(java_gems.len(), 1);
     assert_eq!(
         java_gems[0].path,
-        selected.join("lib/bson.jar").canonicalize().unwrap()
+        dunce::canonicalize(selected.join("lib/bson.jar")).unwrap()
     );
     assert!(!classpath
         .artifacts
@@ -369,12 +369,12 @@ fn expands_bounded_manifest_class_path_without_cycles_or_parent_traversal() {
         classpath
             .artifacts
             .iter()
-            .filter(|artifact| artifact.path == root_jar.canonicalize().unwrap())
+            .filter(|artifact| artifact.path == dunce::canonicalize(&root_jar).unwrap())
             .count(),
         1
     );
     assert!(classpath.artifacts.iter().any(|artifact| {
-        artifact.path == dependency_jar.canonicalize().unwrap()
+        artifact.path == dunce::canonicalize(&dependency_jar).unwrap()
             && artifact.origin == ArtifactOrigin::ManifestClassPath
     }));
 
@@ -382,7 +382,7 @@ fn expands_bounded_manifest_class_path_without_cycles_or_parent_traversal() {
     assert!(matches!(
         discover_project_classpath(&inputs, ClasspathLimits::default()),
         Err(ClasspathError::InvalidManifestEntry { artifact, entry })
-            if artifact == root_jar.canonicalize().unwrap() && entry == "../escape.jar"
+            if artifact == dunce::canonicalize(&root_jar).unwrap() && entry == "../escape.jar"
     ));
 }
 
@@ -550,8 +550,8 @@ fn keeps_conflicting_project_classpaths_isolated() {
         .find(|artifact| artifact.origin == ArtifactOrigin::Lockfile)
         .expect("right lock artifact must exist");
     assert_ne!(left_demo.fingerprint_sha256, right_demo.fingerprint_sha256);
-    let left_root = fs::canonicalize(left_root).expect("left fixture root must canonicalize");
-    let right_root = fs::canonicalize(right_root).expect("right fixture root must canonicalize");
+    let left_root = dunce::canonicalize(left_root).expect("left fixture root must canonicalize");
+    let right_root = dunce::canonicalize(right_root).expect("right fixture root must canonicalize");
     assert!(left
         .artifacts
         .iter()

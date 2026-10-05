@@ -89,7 +89,12 @@ const METHODS: &[&str] = &[
 ];
 
 fn project() -> Project {
-    let path = PathBuf::from("/workspace/lib/lookup_fixture.rb");
+    // Absolute on every platform, so it forms a file URI; never read from disk.
+    let path = PathBuf::from(if cfg!(windows) {
+        r"C:\workspace\lib\lookup_fixture.rb"
+    } else {
+        "/workspace/lib/lookup_fixture.rb"
+    });
     let uri = Url::from_file_path(&path).unwrap();
     let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {

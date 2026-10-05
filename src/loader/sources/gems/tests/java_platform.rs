@@ -35,7 +35,7 @@ fn discovers_only_exact_locked_java_platform_gem_roots_for_selected_jruby() {
 
     assert_eq!(
         discover_locked_java_gem_roots(&project, &executable, "2.5").unwrap(),
-        vec![exact.canonicalize().unwrap()]
+        vec![dunce::canonicalize(exact).unwrap()]
     );
 }
 
@@ -67,7 +67,7 @@ fn project_local_locked_java_gem_precedes_the_selected_rvm_runtime_copy() {
 
     assert_eq!(
         discover_locked_java_gem_roots(&project, &executable, "2.5").unwrap(),
-        vec![local.canonicalize().unwrap()]
+        vec![dunce::canonicalize(local).unwrap()]
     );
 }
 

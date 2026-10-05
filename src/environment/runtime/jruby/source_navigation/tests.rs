@@ -180,7 +180,7 @@ fn resolves_project_source_before_archives_even_when_roots_are_unsorted() {
         .expect("source resolution must succeed")
         .expect("project source must resolve");
 
-    assert_eq!(resolved.path, project_source.canonicalize().unwrap());
+    assert_eq!(resolved.path, dunce::canonicalize(project_source).unwrap());
     assert_eq!(resolved.origin, SourceOrigin::Project);
     assert_eq!(resolved.content, source);
     assert_eq!(resolved.location.internal_name, "fixtures/RichFixture");

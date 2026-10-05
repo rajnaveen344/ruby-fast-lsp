@@ -39,7 +39,7 @@ pub(super) fn project_pattern_matches(
             "walk from project_root only",
         );
         if matcher.is_match(relative) {
-            let canonical = fs::canonicalize(path).map_err(|error| ClasspathError::Io {
+            let canonical = dunce::canonicalize(path).map_err(|error| ClasspathError::Io {
                 path: path.to_path_buf(),
                 message: error.to_string(),
             })?;
@@ -71,7 +71,7 @@ fn validate_project_pattern(pattern: &str) -> Result<(), ClasspathError> {
 }
 
 pub(super) fn canonical_directory(path: &Path) -> std::io::Result<PathBuf> {
-    let path = fs::canonicalize(path)?;
+    let path = dunce::canonicalize(path)?;
     if !path.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -82,7 +82,7 @@ pub(super) fn canonical_directory(path: &Path) -> std::io::Result<PathBuf> {
 }
 
 pub(super) fn canonical_file(path: &Path) -> std::io::Result<PathBuf> {
-    let path = fs::canonicalize(path)?;
+    let path = dunce::canonicalize(path)?;
     if !path.is_file() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,

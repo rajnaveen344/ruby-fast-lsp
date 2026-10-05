@@ -261,8 +261,8 @@ fn runtime_reindex_requests_are_scoped_to_related_workspace_roots() {
     .expect("a related workspace-relative runtime reindex request must be accepted");
     assert_eq!(uris.len(), 1);
     assert_eq!(
-        fs::canonicalize(uris[0].to_file_path().expect("file URI")).expect("model path"),
-        fs::canonicalize(model).expect("model fixture must canonicalize")
+        dunce::canonicalize(uris[0].to_file_path().expect("file URI")).expect("model path"),
+        dunce::canonicalize(model).expect("model fixture must canonicalize")
     );
 
     let traversal = vec![ruby_fast_lsp_extension_api::ReindexFile {

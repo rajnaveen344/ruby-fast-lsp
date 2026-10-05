@@ -1,0 +1,6 @@
+# Prebuilt mruby Wasm packages record a fingerprint of their exact build-input
+# bytes (crates/devtools/src/package_sources.rs); check those inputs out
+# unconverted so the fingerprint matches on every platform.
+extensions/mruby-sdk/** -text
+extensions/*/extension.rb -text
+extensions/*/runtime.rb -text

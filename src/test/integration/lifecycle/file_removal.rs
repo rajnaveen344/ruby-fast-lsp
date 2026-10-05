@@ -23,7 +23,7 @@ struct Project {
 impl Project {
     fn new() -> Self {
         let root = tempfile::TempDir::new().expect("create project root");
-        let path = root.path().canonicalize().expect("canonical project root");
+        let path = dunce::canonicalize(root.path()).expect("canonical project root");
         Self {
             _root: root,
             root: path,

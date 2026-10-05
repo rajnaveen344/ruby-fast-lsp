@@ -1,6 +1,5 @@
 use crate::invariant::ExpectInvariant;
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -358,14 +357,14 @@ pub(super) fn validate_extension_reindex_files(
                 request.path
             )));
         }
-        let canonical_root = fs::canonicalize(root).map_err(|err| {
+        let canonical_root = dunce::canonicalize(root).map_err(|err| {
             ExtensionLoadError::new(format!(
                 "extension `{extension_id}` runtime reindex workspace root `{}` could not be canonicalized: {err}",
                 request.workspace_root
             ))
         })?;
         let requested_path = root.join(relative);
-        let canonical_path = fs::canonicalize(&requested_path).map_err(|err| {
+        let canonical_path = dunce::canonicalize(&requested_path).map_err(|err| {
             ExtensionLoadError::new(format!(
                 "extension `{extension_id}` runtime reindex path `{}` is not an existing file: {err}",
                 request.path

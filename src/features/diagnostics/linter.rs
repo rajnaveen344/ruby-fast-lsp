@@ -574,8 +574,8 @@ mod tests {
             assert!(args.contains("--format json --force-exclusion --stdin"));
             assert!(args.ends_with("sample.rb"), "actual argv: {args}");
             assert_eq!(
-                fs::canonicalize(fs::read_to_string(captured_pwd).unwrap().trim()).unwrap(),
-                fs::canonicalize(temp.path()).unwrap()
+                dunce::canonicalize(fs::read_to_string(captured_pwd).unwrap().trim()).unwrap(),
+                dunce::canonicalize(temp.path()).unwrap()
             );
             let resources = indexing_resources.snapshot();
             assert_eq!(resources.completed_tasks, 1);

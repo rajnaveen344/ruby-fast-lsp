@@ -18,10 +18,8 @@ pub struct ProjectDir {
 impl ProjectDir {
     pub fn write(corpus: &Corpus) -> Self {
         let dir = tempfile::tempdir().expect("create robustness project directory");
-        let root = dir
-            .path()
-            .canonicalize()
-            .expect("canonicalize robustness project directory");
+        let root =
+            dunce::canonicalize(dir.path()).expect("canonicalize robustness project directory");
         for file in &corpus.files {
             let path = root.join(&file.name);
             std::fs::create_dir_all(path.parent().expect("corpus files live under the root"))

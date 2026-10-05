@@ -120,7 +120,7 @@ fn jruby_cache_root_for_project(
         Some(root) => root.to_path_buf(),
         None => crate::utils::cache::ruby_fast_lsp_user_cache_root()?,
     };
-    let canonical_project_root = workspace_root.canonicalize().with_context(|| {
+    let canonical_project_root = dunce::canonicalize(workspace_root).with_context(|| {
         format!(
             "failed to canonicalize JRuby project root {} for cache isolation",
             workspace_root.display()

@@ -149,7 +149,7 @@ impl JavaSourceResolver {
                 else {
                     continue;
                 };
-                let canonical_path = fs::canonicalize(&candidate).map_err(|error| {
+                let canonical_path = dunce::canonicalize(&candidate).map_err(|error| {
                     JavaSourceResolutionError::Read {
                         path: candidate,
                         message: error.to_string(),
