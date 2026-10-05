@@ -1,4 +1,5 @@
 use ruby_fast_lsp::lsp::check::{render_report, CheckOutputFormat, CheckSession};
+use ruby_fast_lsp::lsp::stdio::{client_input, CLOSED_INPUT_DRAIN};
 use ruby_fast_lsp::server::Server;
 use std::path::PathBuf;
 use std::process::exit;
@@ -41,7 +42,7 @@ async fn main() -> Result<()> {
 
     info!("Starting Ruby Fast LSP server");
 
-    let stdin = tokio::io::stdin();
+    let (stdin, input_closed) = client_input(tokio::io::stdin());
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::build(|client| {
@@ -73,15 +74,25 @@ async fn main() -> Result<()> {
 
     info!("Ruby LSP server initialized, waiting for client connections");
 
-    tower_lsp::Server::new(stdin, stdout, socket)
+    let serve = tower_lsp::Server::new(stdin, stdout, socket)
         // tower-lsp defaults to 4 concurrent request handlers. Completed handlers
         // that are waiting on a backpressured stdout response slot still occupy
         // those slots, so a small limit turns client IO stalls into multi-second
         // goto/hover delays. Keep CPU-heavy work off the reactor; this only
         // bounds how many LSP futures may be in flight.
         .concurrency_level(64)
-        .serve(service)
-        .await;
+        .serve(service);
+    tokio::select! {
+        () = serve => {}
+        () = async {
+            input_closed.closed().await;
+            tokio::time::sleep(CLOSED_INPUT_DRAIN).await;
+        } => {
+            // `serve` still waits on a handler that needs the departed client.
+            info!("Client input closed; exiting Ruby Fast LSP server");
+            exit(0);
+        }
+    }
 
     Ok(())
 }

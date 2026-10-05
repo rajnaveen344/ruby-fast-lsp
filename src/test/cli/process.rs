@@ -98,3 +98,96 @@ fn check_json_uses_stable_output_and_failure_exit_code() {
     assert_eq!(report["diagnostics"][0]["code"], "wrong-arity");
     assert_eq!(report["diagnostics"][0]["path"], "main.rb");
 }
+
+fn lsp_frame(message: &Value) -> Vec<u8> {
+    let body = message.to_string();
+    format!("Content-Length: {}\r\n\r\n{body}", body.len()).into_bytes()
+}
+
+fn read_lsp_frame(output: &mut impl std::io::BufRead) -> Value {
+    let mut length = None;
+    loop {
+        let mut header = String::new();
+        assert_ne!(
+            output
+                .read_line(&mut header)
+                .expect("server output must be readable"),
+            0,
+            "stdio server closed its output mid-session"
+        );
+        if header == "\r\n" {
+            break;
+        }
+        if let Some(value) = header.strip_prefix("Content-Length: ") {
+            length = value.trim().parse::<usize>().ok();
+        }
+    }
+    let mut body = vec![0; length.expect("server frame must carry Content-Length")];
+    output
+        .read_exact(&mut body)
+        .expect("server frame body must be readable");
+    serde_json::from_slice(&body).expect("server frame must be JSON")
+}
+
+#[test]
+fn stdio_server_exits_when_client_input_closes_with_a_request_unanswered() {
+    use std::io::{BufReader, Write};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let workspace = tempfile::tempdir().expect("stdio workspace must be created");
+    let mut server = Command::new(env!("CARGO_BIN_EXE_ruby-fast-lsp"))
+        .arg("--stdio")
+        .current_dir(workspace.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("stdio server must start");
+    let mut input = server.stdin.take().expect("server input must be piped");
+    let mut output = BufReader::new(server.stdout.take().expect("server output must be piped"));
+    let dynamic = serde_json::json!({ "dynamicRegistration": true });
+    input
+        .write_all(&lsp_frame(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "capabilities": {
+                    "textDocument": { "typeHierarchy": dynamic, "callHierarchy": dynamic }
+                }
+            }
+        })))
+        .expect("initialize must reach the stdio server");
+    while read_lsp_frame(&mut output)["id"] != 1 {}
+    input
+        .write_all(&lsp_frame(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "initialized",
+            "params": {}
+        })))
+        .expect("initialized must reach the stdio server");
+    // Leave the server waiting on a client request this client never answers.
+    while read_lsp_frame(&mut output)["method"] != "client/registerCapability" {}
+    drop(input);
+
+    // A hang is the failure; the deadline only bounds how long the test waits for it.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = server.try_wait().expect("server status must be readable") {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    if status.is_none() {
+        let _ = server.kill();
+        let _ = server.wait();
+    }
+    assert!(
+        status.is_some(),
+        "a stdio server must exit once its client input closes, even while a request to that client is unanswered"
+    );
+}

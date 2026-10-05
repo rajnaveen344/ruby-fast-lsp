@@ -99,6 +99,12 @@ function finish(error) {
     if (settled) return;
     settled = true;
     if (timer) clearTimeout(timer);
+    // Killing the wrapper does not reach the native server it spawned with
+    // inherited pipes; close stdin so the server exits on EOF, and release the
+    // pipes so an orphaned server cannot keep this smoke alive.
+    child.stdin.end();
+    child.stdout.destroy();
+    child.stderr.destroy();
     child.kill();
     fs.rmSync(temp, { recursive: true, force: true });
     if (error) {

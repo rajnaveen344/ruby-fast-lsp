@@ -220,6 +220,11 @@ function runPackagedJrubyNavigationSmoke(options) {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            // A wrapper command does not forward the kill to its server child;
+            // EOF on stdin ends the server either way.
+            child.stdin.end();
+            child.stdout.destroy();
+            child.stderr.destroy();
             child.kill();
             fs.rmSync(temp, { recursive: true, force: true });
             if (error) reject(new Error(`${error.message}\n${stderr}`));
