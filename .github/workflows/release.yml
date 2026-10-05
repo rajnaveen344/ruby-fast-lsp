@@ -94,6 +94,18 @@ jobs:
       - name: Test on native target
         run: cargo test --locked --workspace --no-fail-fast --target ${{ matrix.target }}
 
+      # A test binary that aborts prints nothing; the system crash report has its stack.
+      - name: Show macOS crash reports
+        if: failure() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          for report in ~/Library/Logs/DiagnosticReports/*.ips; do
+            [[ -f "$report" ]] || continue
+            echo "::group::$report"
+            head -c 200000 "$report"
+            echo "::endgroup::"
+          done
+
       - name: Copy binary to npm package
         shell: bash
         run: |

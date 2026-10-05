@@ -90,13 +90,17 @@ impl Session<'_> {
             .collect::<Vec<_>>();
         let files = files.iter().map(String::as_str).collect::<Vec<_>>();
         let prefix = editor_name(&self.project.root);
+        // Hover text shows the native path, which JSON escapes on Windows.
+        let native = serde_json::to_string(&self.project.root.to_string_lossy())
+            .expect("a path string serializes to JSON");
+        let native = native.trim_matches('"');
         observe::snapshot(&self.editor, &files)
             .await
             .into_iter()
             .map(|(key, value)| {
                 (
                     key.replace(&prefix, "<root>"),
-                    value.replace(&prefix, "<root>"),
+                    value.replace(native, "<root>").replace(&prefix, "<root>"),
                 )
             })
             .collect()
