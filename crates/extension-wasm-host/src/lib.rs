@@ -513,6 +513,11 @@ fn engine() -> Result<Engine> {
     config.consume_fuel(true);
     config.epoch_interruption(true);
     config.wasm_exceptions(true);
+    // Wasmtime's Mach exception thread aborts the whole process when a signal
+    // interrupts its receive, and the server handles `SIGCHLD` for every child
+    // it spawns. Unix signal handlers trap guests the same way Linux does.
+    #[cfg(target_os = "macos")]
+    config.macos_use_mach_ports(false);
     map_wasmtime(
         Engine::new(&config),
         "failed to create Wasm extension engine",

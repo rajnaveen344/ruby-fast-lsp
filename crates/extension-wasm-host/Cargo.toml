@@ -22,5 +22,6 @@ wasmtime-wasi = { version = "44.0.3", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+libc = "0.2.177"
 tempfile = "3.8.0"
 wat = "1.248.0"

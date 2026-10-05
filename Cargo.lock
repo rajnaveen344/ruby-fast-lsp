@@ -2216,6 +2216,7 @@ name = "ruby-fast-lsp-extension-wasm-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "ruby-fast-lsp-extension-api",
  "serde_json",
  "tempfile",
