@@ -59,12 +59,7 @@ function createFixture(parent) {
     const classRoot = path.join(parent, 'classes');
     const classFile = path.join(classRoot, 'fixtures', 'RichFixture.class');
     const jarFile = path.join(project, 'lib', 'rich.jar');
-    const jrubyExecutable = path.join(
-        parent,
-        'jruby-9.2.21.0',
-        'bin',
-        executableName('jruby')
-    );
+    const jrubyExecutable = path.join(parent, 'jruby-9.2.21.0', 'bin', 'jruby');
     const javaSourceFile = path.join(project, 'src', 'main', 'java', 'fixtures', 'RichFixture.java');
     const javaSource = [
         'package fixtures;',
@@ -99,19 +94,17 @@ function createFixture(parent) {
     fs.writeFileSync(javaSourceFile, javaSource);
     fs.writeFileSync(
         jrubyExecutable,
-        process.platform === 'win32'
-            ? ''
-            : [
-                '#!/bin/sh',
-                'case "$*" in',
-                '  *"print RUBY_ENGINE"*) printf \'%s\' \'jruby\' ;;',
-                '  *"RUBY_FAST_LSP_GEM_DISCOVERY"*) printf \'%s\\n\' \'RUBY_FAST_LSP_GEM_DISCOVERY={"source":"bundler","gems":[]}\' ;;',
-                '  *) printf \'[]\\n\' ;;',
-                'esac',
-                ''
-            ].join('\n')
+        [
+            '#!/bin/sh',
+            'case "$*" in',
+            '  *"print RUBY_ENGINE"*) printf \'%s\' \'jruby\' ;;',
+            '  *"RUBY_FAST_LSP_GEM_DISCOVERY"*) printf \'%s\\n\' \'RUBY_FAST_LSP_GEM_DISCOVERY={"source":"bundler","gems":[]}\' ;;',
+            '  *) printf \'[]\\n\' ;;',
+            'esac',
+            ''
+        ].join('\n')
     );
-    if (process.platform !== 'win32') fs.chmodSync(jrubyExecutable, 0o755);
+    fs.chmodSync(jrubyExecutable, 0o755);
 
     const javaHome = discoverJdkHome();
     execFileSync(
@@ -167,7 +160,48 @@ function lspFrame(message) {
     return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
 }
 
+/**
+ * Ends a smoke server and removes its working directory. Resolves with the
+ * removal error, if any, so a caller can still report its own failure first.
+ */
+function stopAndRemove(child, directory) {
+    // A wrapper command does not forward the kill to its server child;
+    // EOF on stdin ends the server either way.
+    child.stdin.end();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    child.kill();
+    return new Promise(resolve => {
+        let removed = false;
+        const remove = () => {
+            if (removed) return;
+            removed = true;
+            clearTimeout(fallback);
+            // Windows refuses to delete a directory that a process still uses
+            // as its working directory until that process has fully exited.
+            try {
+                fs.rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+                resolve(null);
+            } catch (error) {
+                resolve(error);
+            }
+        };
+        // A process that failed to spawn never emits `exit`.
+        const fallback = setTimeout(remove, 5000);
+        if (child.exitCode !== null || child.signalCode !== null) remove();
+        else child.once('exit', remove);
+    });
+}
+
+/**
+ * Resolves with `{ skipped }`: null once navigation is verified, otherwise why
+ * this platform cannot run the check.
+ */
 function runPackagedJrubyNavigationSmoke(options) {
+    if (process.platform === 'win32') {
+        // A selected runtime that cannot answer gem discovery fails indexing.
+        return Promise.resolve({ skipped: 'its stand-in JRuby runtime is a POSIX shell script' });
+    }
     const {
         command,
         args = [],
@@ -220,15 +254,11 @@ function runPackagedJrubyNavigationSmoke(options) {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
-            // A wrapper command does not forward the kill to its server child;
-            // EOF on stdin ends the server either way.
-            child.stdin.end();
-            child.stdout.destroy();
-            child.stderr.destroy();
-            child.kill();
-            fs.rmSync(temp, { recursive: true, force: true });
-            if (error) reject(new Error(`${error.message}\n${stderr}`));
-            else resolve();
+            stopAndRemove(child, temp).then(removal => {
+                if (error) reject(new Error(`${error.message}\n${stderr}`));
+                else if (removal) reject(removal);
+                else resolve({ skipped: null });
+            });
         }
 
         function send(message) {
@@ -598,5 +628,6 @@ function runPackagedJrubyNavigationSmoke(options) {
 }
 
 module.exports = {
-    runPackagedJrubyNavigationSmoke
+    runPackagedJrubyNavigationSmoke,
+    stopAndRemove
 };

@@ -7,7 +7,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const AdmZip = require(path.resolve(__dirname, '../vscode/vsix/node_modules/adm-zip'));
 const {
-    runPackagedJrubyNavigationSmoke
+    runPackagedJrubyNavigationSmoke,
+    stopAndRemove
 } = require('./smoke_jruby_navigation');
 
 const platformKey = `${process.platform}-${process.arch}`;
@@ -143,18 +144,22 @@ function frame(message) {
     return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
 }
 
-function finish(error) {
+function finish(error, navigation = {}) {
     if (settled) return;
     settled = true;
     if (timer) clearTimeout(timer);
-    child.kill();
-    fs.rmSync(temp, { recursive: true, force: true });
-    if (error) {
-        process.stderr.write(`${error.message}\n${stderr}`);
-        process.exitCode = 1;
-    } else {
-        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber, packaged ERB HTML features, and verified JRuby implementation navigation on ${platformKey}.\n`);
-    }
+    stopAndRemove(child, temp).then(removal => {
+        const failure = error || removal;
+        if (failure) {
+            process.stderr.write(`${failure.message}\n${stderr}`);
+            process.exitCode = 1;
+        } else {
+            const jruby = navigation.skipped
+                ? `skipped JRuby implementation navigation on ${platformKey} because ${navigation.skipped}`
+                : `verified JRuby implementation navigation on ${platformKey}`;
+            process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber, packaged ERB HTML features, and ${jruby}.\n`);
+        }
+    });
 }
 
 function handleResponse(response) {
@@ -205,7 +210,7 @@ function handleResponse(response) {
     runPackagedJrubyNavigationSmoke({
         command: binary,
         label: 'Packaged VSIX Ruby Fast LSP'
-    }).then(() => finish()).catch(error => finish(error));
+    }).then(navigation => finish(null, navigation)).catch(error => finish(error));
 }
 
 child.stderr.on('data', chunk => { stderr += chunk.toString(); });

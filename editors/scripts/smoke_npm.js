@@ -6,7 +6,8 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const {
-    runPackagedJrubyNavigationSmoke
+    runPackagedJrubyNavigationSmoke,
+    stopAndRemove
 } = require('./smoke_jruby_navigation');
 
 const root = path.resolve(__dirname, '../..');
@@ -95,24 +96,25 @@ let navigationStarted = false;
 let initialized = false;
 let timer;
 
-function finish(error) {
+function finish(error, navigation = {}) {
     if (settled) return;
     settled = true;
     if (timer) clearTimeout(timer);
     // Killing the wrapper does not reach the native server it spawned with
-    // inherited pipes; close stdin so the server exits on EOF, and release the
-    // pipes so an orphaned server cannot keep this smoke alive.
-    child.stdin.end();
-    child.stdout.destroy();
-    child.stderr.destroy();
-    child.kill();
-    fs.rmSync(temp, { recursive: true, force: true });
-    if (error) {
-        process.stderr.write(`${error.message}\n${stderr}`);
-        process.exitCode = 1;
-    } else {
-        process.stdout.write(`npm wrapper initialized Ruby Fast LSP with its bundled RSpec extension and verified JRuby implementation navigation on ${platformKey}.\n`);
-    }
+    // inherited pipes; stopAndRemove closes stdin so the server exits on EOF,
+    // and releases the pipes so an orphaned server cannot keep this smoke alive.
+    stopAndRemove(child, temp).then(removal => {
+        const failure = error || removal;
+        if (failure) {
+            process.stderr.write(`${failure.message}\n${stderr}`);
+            process.exitCode = 1;
+        } else {
+            const jruby = navigation.skipped
+                ? `skipped JRuby implementation navigation on ${platformKey} because ${navigation.skipped}`
+                : `verified JRuby implementation navigation on ${platformKey}`;
+            process.stdout.write(`npm wrapper initialized Ruby Fast LSP with its bundled RSpec extension and ${jruby}.\n`);
+        }
+    });
 }
 
 child.stderr.on('data', chunk => { stderr += chunk.toString(); });
@@ -161,7 +163,7 @@ function handleResponse(response) {
         args: [wrapper, '--stdio'],
         env: { NODE_PATH: moduleRoot },
         label: 'Packaged npm Ruby Fast LSP'
-    }).then(() => finish()).catch(error => finish(error));
+    }).then(navigation => finish(null, navigation)).catch(error => finish(error));
 }
 
 child.stdout.on('data', chunk => {
