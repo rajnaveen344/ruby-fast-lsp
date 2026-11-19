@@ -30,7 +30,9 @@ use tempfile::TempDir;
 mod exact_sources;
 mod java_platform;
 mod locked_requirements;
+mod platform_variants;
 mod runtime_discovery;
+mod rvm_gem_home;
 mod shared_products;
 
 fn create_test_indexer() -> IndexerGem {

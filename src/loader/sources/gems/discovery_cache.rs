@@ -15,18 +15,20 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const SCHEMA: &str = "rflsp-gem-discovery-v2";
+const SCHEMA: &str = "rflsp-gem-discovery-v3";
 
 /// Project files Bundler or a runtime version manager reads at startup.
 const PROJECT_INPUTS: &[&str] = &[
     "Gemfile.lock",
     ".bundle/config",
     ".ruby-version",
+    ".ruby-gemset",
     ".tool-versions",
 ];
 
 /// Environment read by Bundler, RubyGems, the runtime, or a version manager.
-/// The discovery command removes `GEM_HOME`, `GEM_PATH`, and `RUBY_VERSION`.
+/// The discovery command removes `GEM_HOME`, `GEM_PATH`, and `RUBY_VERSION`,
+/// and gives an RVM runtime the gem folders derived from its executable.
 const ENVIRONMENT_PREFIXES: &[&str] = &[
     "BUNDLE_", "BUNDLER_", "GEM_", "RUBY", "JRUBY_", "JAVA_", "RBENV_", "ASDF_", "MISE_",
 ];
@@ -216,6 +218,13 @@ impl Inputs {
         );
         if let Ok(resolved) = dunce::canonicalize(&self.ruby_executable) {
             field("runtime target", file_identity(&resolved).as_bytes());
+        }
+        // The gem folders the discovery command derives for an RVM runtime.
+        let rvm = super::rvm::rvm_gem_environment(&self.ruby_executable, Some(&self.project_root));
+        field("rvm gem home", &[u8::from(rvm.is_some())]);
+        if let Some(rvm) = rvm {
+            field("rvm gem home", rvm.gem_home.to_string_lossy().as_bytes());
+            field("rvm gem path", rvm.gem_path.to_string_lossy().as_bytes());
         }
         field(
             "java home",

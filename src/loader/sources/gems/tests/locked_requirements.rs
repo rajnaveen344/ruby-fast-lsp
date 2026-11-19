@@ -49,7 +49,10 @@ fn valid_ruby_and_java_lock_variants_are_not_duplicate_source_identities() {
         .load_locked_gems()
         .expect("Bundler multi-platform variants must be accepted");
     assert_eq!(
-        indexer.locked_gems["bcrypt-ruby"].locked_version, "3.0.1-java",
+        indexer.locked_gems["bcrypt-ruby"]
+            .sole_variant()
+            .map(|locked| locked.locked_version.as_str()),
+        Some("3.0.1-java"),
         "JRuby must select the java lock variant"
     );
 }

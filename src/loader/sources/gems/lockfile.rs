@@ -39,11 +39,55 @@ pub(super) fn compare_versions(a: &str, b: &str) -> Ordering {
     parts_a.len().cmp(&parts_b.len())
 }
 
-pub(super) fn select_locked_identity_for_engine(
+/// The lock identities of one gem that the active engine may load.
+///
+/// Bundler locks one specification per platform, so a gem with native builds
+/// has several identities at one version. Which of them applies is decided by
+/// the selected runtime's own resolution, never guessed from the host: the
+/// installed or vendored candidate that carries one of these identities is the
+/// evidence. A gem with no such candidate stays unavailable.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct LockedGem {
+    variants: Vec<LockedGemIdentity>,
+}
+
+impl LockedGem {
+    pub(super) fn source(&self) -> LockedGemSource {
+        self.variants[0].source
+    }
+
+    pub(super) fn variants(&self) -> &[LockedGemIdentity] {
+        &self.variants
+    }
+
+    /// The identity when the lockfile leaves no platform choice.
+    pub(super) fn sole_variant(&self) -> Option<&LockedGemIdentity> {
+        match self.variants.as_slice() {
+            [identity] => Some(identity),
+            _ => None,
+        }
+    }
+
+    fn locks(&self, locked_version: &str) -> bool {
+        self.variants
+            .iter()
+            .any(|identity| identity.locked_version == locked_version)
+    }
+}
+
+/// The version part of a locked `version[-platform]`; gem versions never
+/// contain `-`.
+fn locked_version_number(locked_version: &str) -> &str {
+    locked_version
+        .split_once('-')
+        .map_or(locked_version, |(version, _)| version)
+}
+
+pub(super) fn locked_gem_for_engine(
     name: &str,
     identities: &[LockedGemIdentity],
     engine: ActiveRubyEngine,
-) -> Result<LockedGemIdentity> {
+) -> Result<LockedGem> {
     invariant!(
         !identities.is_empty(),
         what = "lock identity selection received no candidates for `{name}`",
@@ -67,29 +111,45 @@ pub(super) fn select_locked_identity_for_engine(
     }
 
     if identities.len() == 1 {
-        return Ok(identities[0].clone());
+        return Ok(LockedGem {
+            variants: identities.to_vec(),
+        });
     }
     if source != LockedGemSource::Registry {
         return Err(anyhow!(
             "Gemfile.lock contains multiple non-registry identities for `{name}`: {identities:?}"
         ));
     }
+    let version = locked_version_number(&identities[0].locked_version);
+    if identities
+        .iter()
+        .any(|identity| locked_version_number(&identity.locked_version) != version)
+    {
+        return Err(anyhow!(
+            "Gemfile.lock locks `{name}` at conflicting versions: {identities:?}"
+        ));
+    }
+    let mut seen = HashSet::new();
+    if !identities
+        .iter()
+        .all(|identity| seen.insert(identity.locked_version.as_str()))
+    {
+        return Err(anyhow!(
+            "Gemfile.lock repeats a platform identity for `{name}`: {identities:?}"
+        ));
+    }
 
     let (java, non_java): (Vec<_>, Vec<_>) = identities
         .iter()
+        .cloned()
         .partition(|identity| identity.locked_version.ends_with("-java"));
-    let preferred = match engine {
-        ActiveRubyEngine::JRuby if java.len() == 1 => java[0],
-        ActiveRubyEngine::JRuby if java.is_empty() && non_java.len() == 1 => non_java[0],
-        ActiveRubyEngine::Other if non_java.len() == 1 => non_java[0],
-        ActiveRubyEngine::Other if non_java.is_empty() && java.len() == 1 => java[0],
-        ActiveRubyEngine::JRuby | ActiveRubyEngine::Other => {
-            return Err(anyhow!(
-                "Gemfile.lock contains ambiguous platform identities for `{name}` and active engine {engine:?}: {identities:?}"
-            ));
-        }
+    let variants = match engine {
+        ActiveRubyEngine::JRuby if !java.is_empty() => java,
+        ActiveRubyEngine::JRuby => non_java,
+        ActiveRubyEngine::Other if !non_java.is_empty() => non_java,
+        ActiveRubyEngine::Other => java,
     };
-    Ok(preferred.clone())
+    Ok(LockedGem { variants })
 }
 
 pub(super) fn parse_locked_gems(content: &str) -> Result<Vec<LockedGemIdentity>> {
@@ -217,9 +277,8 @@ impl IndexerGem {
                 .push(identity);
         }
         for (name, identities) in identities_by_name {
-            let selected =
-                select_locked_identity_for_engine(&name, &identities, self.active_ruby_engine)?;
-            self.locked_gems.insert(name, selected);
+            let locked = locked_gem_for_engine(&name, &identities, self.active_ruby_engine)?;
+            self.locked_gems.insert(name, locked);
         }
         Ok(())
     }
@@ -290,6 +349,17 @@ impl IndexerGem {
         &self,
         versions: &'a [GemInfo],
     ) -> Option<&'a GemInfo> {
+        self.select_version(versions, true)
+    }
+
+    /// The selected identity of a gem. A gem that only groups other gems has
+    /// no library folder to index, but its dependencies are still required;
+    /// `needs_library` is false only when reading those dependencies.
+    fn select_version<'a>(
+        &self,
+        versions: &'a [GemInfo],
+        needs_library: bool,
+    ) -> Option<&'a GemInfo> {
         let name = versions.first()?.name.as_str();
         invariant!(
             versions.iter().all(|candidate| candidate.name == name),
@@ -299,20 +369,27 @@ impl IndexerGem {
         );
 
         if let Some(locked) = self.locked_gems.get(name) {
+            // Candidates of one source must agree on the locked identity;
+            // different platform variants give no evidence of which one the
+            // runtime loads.
             let exact = |source| {
-                versions.iter().find(|candidate| {
+                let mut matching = versions.iter().filter(|candidate| {
                     candidate.source == source
-                        && candidate.locked_version == locked.locked_version
+                        && locked.locks(&candidate.locked_version)
                         && self.gem_platform_matches_active_engine(&candidate.platform)
-                        && !candidate.lib_paths.is_empty()
-                })
+                        && !(needs_library && candidate.lib_paths.is_empty())
+                });
+                let selected = matching.next()?;
+                matching
+                    .all(|candidate| candidate.locked_version == selected.locked_version)
+                    .then_some(selected)
             };
 
             if let Some(installed) = exact(GemSource::BundlerInstalled) {
                 return Some(installed);
             }
 
-            return match locked.source {
+            return match locked.source() {
                 LockedGemSource::Registry => {
                     exact(GemSource::GlobalInstalled).or_else(|| exact(GemSource::VendorArchive))
                 }
@@ -364,7 +441,10 @@ impl IndexerGem {
             let Some(gem_versions) = self.discovered_gems.get(&name) else {
                 continue;
             };
-            let Some(gem_info) = self.select_preferred_version(gem_versions) else {
+            let Some(gem_info) = self
+                .select_preferred_version(gem_versions)
+                .or_else(|| self.select_version(gem_versions, false))
+            else {
                 continue;
             };
 

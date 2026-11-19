@@ -426,6 +426,14 @@ impl IndexerGem {
         command.env_remove("GEM_HOME");
         command.env_remove("GEM_PATH");
         command.env_remove("RUBY_VERSION");
+        // An RVM runtime keeps its gems outside its own prefix. Their location
+        // comes from the selected executable, never from the inherited shell.
+        if let Some(rvm) =
+            super::rvm::rvm_gem_environment(executable, self.workspace_root.as_deref())
+        {
+            command.env("GEM_HOME", rvm.gem_home);
+            command.env("GEM_PATH", rvm.gem_path);
+        }
         if let Some(java_home) = &self.java_home {
             command.env("JAVA_HOME", java_home);
         }

@@ -10,7 +10,7 @@ use super::LockedGemSource;
 use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use flate2::read::GzDecoder;
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -708,11 +708,15 @@ impl IndexerGem {
                 continue;
             }
             for (name, version) in specs {
-                let locked = self.locked_gems.get(&name).ok_or_else(|| {
-                    anyhow!(
+                let locked = self
+                    .locked_gems
+                    .get(&name)
+                    .and_then(|locked| locked.sole_variant())
+                    .ok_or_else(|| {
+                        anyhow!(
                         "Gemfile.lock Git cache parser produced `{name}` without a locked identity"
                     )
-                })?;
+                    })?;
                 if locked.source != LockedGemSource::Git || locked.locked_version != version {
                     return Err(anyhow!(
                         "Gemfile.lock Git cache identity for `{name}` disagrees with the unified lock parser"
@@ -776,40 +780,52 @@ impl IndexerGem {
         let mut locked_registry_gems = self
             .locked_gems
             .values()
-            .filter(|identity| identity.source == LockedGemSource::Registry)
+            .filter(|locked| locked.source() == LockedGemSource::Registry)
             .cloned()
             .collect::<Vec<_>>();
-        locked_registry_gems.sort_by(|left, right| left.name.cmp(&right.name));
+        locked_registry_gems
+            .sort_by(|left, right| left.variants()[0].name.cmp(&right.variants()[0].name));
 
-        for locked in &locked_registry_gems {
+        for locked_gem in &locked_registry_gems {
+            let name = &locked_gem.variants()[0].name;
             if priority_keys.is_some_and(|keys| {
-                !keys.contains(&crate::loader::coordinator::dependency_priority_key(
-                    &locked.name,
-                ))
+                !keys.contains(&crate::loader::coordinator::dependency_priority_key(name))
             }) {
                 continue;
             }
             let exact_installed_source_exists =
-                self.discovered_gems
-                    .get(&locked.name)
-                    .is_some_and(|candidates| {
-                        candidates.iter().any(|candidate| {
-                            matches!(
-                                candidate.source,
-                                GemSource::BundlerInstalled
-                                    | GemSource::GlobalInstalled
-                                    | GemSource::VendorArchive
-                            ) && candidate.locked_version == locked.locked_version
-                                && candidate.lib_paths.iter().any(|path| path.is_dir())
-                        })
-                    });
+                self.discovered_gems.get(name).is_some_and(|candidates| {
+                    candidates.iter().any(|candidate| {
+                        matches!(
+                            candidate.source,
+                            GemSource::BundlerInstalled
+                                | GemSource::GlobalInstalled
+                                | GemSource::VendorArchive
+                        ) && locked_gem
+                            .variants()
+                            .iter()
+                            .any(|locked| candidate.locked_version == locked.locked_version)
+                            && candidate.lib_paths.iter().any(|path| path.is_dir())
+                    })
+                });
             if exact_installed_source_exists {
                 continue;
             }
 
-            let archive_name = format!("{}-{}.gem", locked.name, locked.locked_version);
-            let archive_path = cache_root.join(&archive_name);
-            if !archive_path.is_file() {
+            // The project vendors the platform it runs on. Several vendored
+            // platform variants leave that undecided, so none is read.
+            let mut vendored = locked_gem.variants().iter().filter_map(|locked| {
+                let archive_path =
+                    cache_root.join(format!("{}-{}.gem", locked.name, locked.locked_version));
+                archive_path.is_file().then_some((locked, archive_path))
+            });
+            let Some((locked, archive_path)) = vendored.next() else {
+                continue;
+            };
+            if vendored.next().is_some() {
+                debug!(
+                    "Skipping vendored `{name}`: several locked platform variants are cached and no installed gem selects one"
+                );
                 continue;
             }
 

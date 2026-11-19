@@ -1,6 +1,6 @@
 //! Exact discovery of locked Java-platform gem roots for JRuby projects.
 
-use super::lockfile::{parse_locked_gems, select_locked_identity_for_engine};
+use super::lockfile::{locked_gem_for_engine, parse_locked_gems};
 use super::ActiveRubyEngine;
 use super::LockedGemIdentity;
 use super::LockedGemSource;
@@ -87,15 +87,20 @@ pub fn discover_locked_java_gem_roots(
             .or_default()
             .push(identity);
     }
-    let mut selected = identities_by_name
-        .into_iter()
-        .map(|(name, identities)| {
-            select_locked_identity_for_engine(&name, &identities, ActiveRubyEngine::JRuby)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    selected.retain(|identity| {
-        identity.source == LockedGemSource::Registry && identity.locked_version.ends_with("-java")
-    });
+    let mut selected = Vec::new();
+    for (name, identities) in identities_by_name {
+        let locked = locked_gem_for_engine(&name, &identities, ActiveRubyEngine::JRuby)?;
+        selected.extend(
+            locked
+                .variants()
+                .iter()
+                .filter(|identity| {
+                    identity.source == LockedGemSource::Registry
+                        && identity.locked_version.ends_with("-java")
+                })
+                .cloned(),
+        );
+    }
     selected.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -111,14 +116,11 @@ pub fn discover_locked_java_gem_roots(
                 jruby_executable.display()
             )
         })?;
-    let runtime_name = jruby_home
-        .file_name()
-        .ok_or_else(|| anyhow!("selected JRuby runtime home has no directory name"))?;
-    let rvm_repository = jruby_home
-        .parent()
-        .filter(|parent| parent.file_name().is_some_and(|name| name == "rubies"))
-        .and_then(Path::parent)
-        .map(|rvm| rvm.join("gems").join(runtime_name).join("gems"));
+    if jruby_home.file_name().is_none() {
+        return Err(anyhow!("selected JRuby runtime home has no directory name"));
+    }
+    let rvm_repository = super::rvm::rvm_gem_repository(&jruby_executable)
+        .map(|(repository, runtime)| repository.join(runtime).join("gems"));
     let runtime_repositories = [
         jruby_home.join("lib/ruby/gems/shared/gems"),
         jruby_home.join(format!("lib/ruby/gems/{compatibility_version}.0/gems")),

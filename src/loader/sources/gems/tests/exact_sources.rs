@@ -93,7 +93,7 @@ fn create_cached_gem_with_source(
     std::fs::write(path, package.into_inner().unwrap()).unwrap();
 }
 
-fn create_cached_gem(path: &Path, name: &str, version: &str, platform: &str) {
+pub(super) fn create_cached_gem(path: &Path, name: &str, version: &str, platform: &str) {
     create_cached_gem_with_require_path(path, name, version, platform, "lib");
 }
 

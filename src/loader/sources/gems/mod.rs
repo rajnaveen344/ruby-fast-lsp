@@ -17,6 +17,7 @@ mod discovery_cache;
 mod java;
 mod lockfile;
 mod products;
+mod rvm;
 mod vendor_cache;
 
 pub use java::discover_locked_java_gem_roots;
@@ -110,7 +111,7 @@ pub struct IndexerGem {
     explicitly_included_gems: HashSet<String>,
     excluded_gems: HashSet<String>,
     discovered_gems: HashMap<String, Vec<GemInfo>>,
-    locked_gems: HashMap<String, LockedGemIdentity>,
+    locked_gems: HashMap<String, lockfile::LockedGem>,
     active_ruby_engine: ActiveRubyEngine,
     ruby_executable: Option<PathBuf>,
     java_home: Option<PathBuf>,
