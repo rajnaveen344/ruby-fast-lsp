@@ -14,12 +14,13 @@ use crate::core::storage::reference_store::{MethodCallDiagnostics, MethodCallSig
 use crate::core::{
     ArgumentCandidate, ArgumentForm, ArgumentSlot, DiagnosticFact, FullyQualifiedName,
     GraphNodeKind, MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, NamespaceKind,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange, TypeInferenceOutcome,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, SourceKind, TextRange, TypeInferenceOutcome,
     TypeProvenance, TypeSubject,
 };
 use crate::engine::lookup::MethodAnswer;
 use crate::engine::resolution::method_lookup_chain;
 use crate::engine::{Project, View};
+use crate::invariant::ExpectInvariant;
 
 /// Argument type checks of one resolve pass. A check waits until every call
 /// of the pass has an outcome, because an argument that is itself a call is
@@ -313,9 +314,9 @@ impl Project {
         }
     }
 
-    /// The single type the method's documentation declares for one parameter.
-    /// Inferred parameter types are evidence, not a contract, and never
-    /// answer here.
+    /// The single type the method's documentation or signature declares for
+    /// one parameter. Inferred parameter types are evidence, not a contract,
+    /// and never answer here.
     fn declared_parameter_type(
         &self,
         fact: &MethodFact,
@@ -325,9 +326,10 @@ impl Project {
             method: fact.fqn.clone(),
             name: parameter,
         };
-        // Documented overloads give one parameter several types; only a
-        // single agreed type is a contract this check can hold a call to.
-        let mut documented = self
+        // Documented overloads, or documentation and a signature that
+        // disagree, give one parameter several types; only a single agreed
+        // type is a contract this check can hold a call to.
+        let mut declared = self
             .type_store()
             .facts_for(&subject)
             .into_iter()
@@ -335,19 +337,50 @@ impl Project {
                 stored.range.file_id == fact.range.file_id
                     && fact.range.start_byte <= stored.range.start_byte
                     && stored.range.end_byte <= fact.range.end_byte
-                    && stored.provenance == TypeProvenance::Yard
+                    && matches!(
+                        stored.provenance,
+                        TypeProvenance::Yard | TypeProvenance::Rbs
+                    )
             })
-            .map(|stored| stored.ruby_type);
-        let declared = match documented.next() {
-            Some(first) => {
-                if documented.any(|other| other != first) {
-                    return None;
-                }
-                first
-            }
-            None => return None,
-        };
-        (declared != RubyType::Unknown).then_some(declared)
+            .map(|stored| stored.ruby_type)
+            .collect::<Vec<_>>();
+        // A definition's signature is read as it stands now, not as it stood
+        // when the definition was indexed.
+        let signature =
+            View::new(self).rbs_parameter_contract_type(&fact.fqn, &fact.owner, parameter.as_str());
+        let has_signature = signature.is_some();
+        declared.extend(signature);
+        let first = declared.first()?;
+        if declared.iter().any(|other| other != first) {
+            return None;
+        }
+        let declared = first.clone();
+        if declared == RubyType::Unknown {
+            return None;
+        }
+        // A definition with a signature keeps only the signature's type, so
+        // its documented type survives as the parameter's label. A label
+        // that reads differently is a second declaration.
+        let defined_in_source = has_signature
+            && self
+                .files
+                .get(fact.range.file_id)
+                .expect_invariant(
+                    "a method fact references an unregistered source file",
+                    "method facts must never outlive their file metadata",
+                    "remove method facts through the per-file replacement lifecycle",
+                )
+                .kind
+                != SourceKind::Signature;
+        let documented = fact
+            .param_facts
+            .iter()
+            .find(|candidate| candidate.name == parameter)
+            .and_then(|candidate| candidate.type_label);
+        match documented {
+            Some(label) if defined_in_source && label.as_str() != declared.to_string() => None,
+            Some(_) | None => Some(declared),
+        }
     }
 
     /// Report each queued argument whose proven type lies outside its

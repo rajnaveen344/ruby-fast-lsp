@@ -76,13 +76,13 @@ impl TypeTracker {
                         String::from_utf8_lossy(const_read.name().as_slice()).to_string();
                     if let Ok(constant) = RubyConstant::new(&class_name) {
                         let fqn = FullyQualifiedName::constant(vec![constant]);
-                        return seed_constructor_type(&fqn).unwrap_or(RubyType::Unknown);
+                        return self.constructed_type(&fqn);
                     }
                 }
                 // Handle namespaced constant like Foo::Bar.new
                 if let Some(const_path) = receiver.as_constant_path_node() {
                     if let Some(fqn) = Self::resolve_constant_path(&const_path) {
-                        return seed_constructor_type(&fqn).unwrap_or(RubyType::Unknown);
+                        return self.constructed_type(&fqn);
                     }
                 }
             }
@@ -275,6 +275,18 @@ impl TypeTracker {
                 self.analysis.method_returns.get(super_method).cloned()
             })
             .unwrap_or(RubyType::Unknown)
+    }
+
+    /// What `class.new` returns: the project's constructor answer when
+    /// project state is available, otherwise the seed for the class alone.
+    fn constructed_type(&self, class: &FullyQualifiedName) -> RubyType {
+        match self.analysis.project.as_ref() {
+            Some(project) => project
+                .constructor_result(class)
+                .into_type_outcome(RubyType::Class(class.clone()))
+                .into_ruby_type(),
+            None => seed_constructor_type(class).unwrap_or(RubyType::Unknown),
+        }
     }
 
     pub(in crate::inference::type_tracker) fn implicit_self_call_fqn(

@@ -269,6 +269,7 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
             })
             .collect(),
         parameter_shape_complete: fact.parameter_shape_complete,
+        normalized_from_initialize: fact.normalized_from_initialize,
         delegate_receiver: fact
             .delegate_receiver
             .as_ref()
@@ -350,6 +351,7 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
         name_range,
         param_facts,
         parameter_shape_complete: fact.parameter_shape_complete,
+        normalized_from_initialize: fact.normalized_from_initialize,
         delegate_receiver,
         visibility: restore_visibility(fact.visibility),
         availability: restore_availability(fact.availability)?,

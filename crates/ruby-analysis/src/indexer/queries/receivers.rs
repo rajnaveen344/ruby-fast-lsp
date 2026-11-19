@@ -215,9 +215,16 @@ fn method_call_receiver_type<S: Semantics + ?Sized>(
 ) -> Option<RubyType> {
     let inner_namespace = resolve_receiver_to_namespace(inner_receiver, context)?;
     if method_name == "new" && inner_namespace.namespace_kind() == Some(NamespaceKind::Singleton) {
-        return Some(RubyType::Class(FullyQualifiedName::constant(
-            inner_namespace.namespace_parts(),
-        )));
+        let class = FullyQualifiedName::constant(inner_namespace.namespace_parts());
+        let instance = RubyType::Class(class.clone());
+        // Without project state only the default constructor is known.
+        return match context.query {
+            Some(query) => query
+                .constructor_result(&class)
+                .into_type_outcome(instance)
+                .into_proven_type(),
+            None => Some(instance),
+        };
     }
 
     let method = RubyMethod::new(method_name).ok()?;

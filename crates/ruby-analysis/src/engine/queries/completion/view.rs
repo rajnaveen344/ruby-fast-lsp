@@ -21,6 +21,12 @@ impl CompletionSemanticQuery for View<'_> {
             .or_else(|| View::constant_reference_type(self, resolved.namespace_parts_slice()))
     }
 
+    fn constructed_type(&self, class: &FullyQualifiedName) -> Option<RubyType> {
+        View::constructor_result(self, class)
+            .into_type_outcome(RubyType::Class(class.clone()))
+            .into_proven_type()
+    }
+
     fn method_return_type_for_receiver(
         &self,
         namespace: &FullyQualifiedName,

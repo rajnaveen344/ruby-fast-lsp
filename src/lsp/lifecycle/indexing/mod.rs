@@ -105,6 +105,46 @@ fn reanalyze_open_file(
     Ok(loaded.commit(&ctx))
 }
 
+/// Reanalyze `open_documents` after `trigger` changed something they may
+/// read, and publish their diagnostics. A refreshed file may itself export
+/// something that another of them, or the trigger, reads, and that reader may
+/// already have been analyzed, so passes repeat until one changes no exports.
+/// The trigger joins every pass after the first. Each pass settles at least
+/// one more link of the longest chain, which bounds the passes by the
+/// document count. Returns the number of refreshes run.
+fn refresh_open_files_until_settled(
+    processor: &FileProcessor,
+    server: &Server,
+    open_documents: &[(Url, String)],
+    trigger: Option<&Url>,
+) -> usize {
+    let trigger = trigger
+        .filter(|uri| analysis_file_kind(server, uri).is_some_and(|kind| !kind.is_external()))
+        .and_then(|uri| Some((uri.clone(), server.open_document_content(uri)?)));
+    let mut refreshed = 0;
+    for pass in 0..=open_documents.len() {
+        let mut exports_changed = false;
+        let rereads = trigger.iter().filter(|_| pass > 0);
+        for (uri, content) in open_documents.iter().chain(rereads) {
+            match reanalyze_open_file(processor, server, uri, content) {
+                Ok(result) => {
+                    exports_changed |= result.semantic_change
+                        == ruby_analysis::engine::SemanticChange::ExportsChanged;
+                    server.publish_document_diagnostics(uri.clone(), result.diagnostics);
+                    refreshed += 1;
+                }
+                Err(error) => {
+                    log::warn!("Failed to refresh open file {}: {error}", uri.path());
+                }
+            }
+        }
+        if !exports_changed {
+            break;
+        }
+    }
+    refreshed
+}
+
 /// Initialize workspace and run complete indexing.
 ///
 pub async fn init_workspace(
@@ -284,15 +324,7 @@ async fn refresh_open_project_files_after_dependency_open(
     };
     open_docs.sort_unstable_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
-    for (uri, content) in open_docs {
-        match reanalyze_open_file(indexer, server, &uri, &content) {
-            Ok(result) => server.publish_document_diagnostics(uri, result.diagnostics),
-            Err(err) => log::warn!(
-                "Failed to refresh open file after dependency open: {}: {err}",
-                uri.path()
-            ),
-        }
-    }
+    refresh_open_files_until_settled(indexer, server, &open_docs, Some(opened_uri));
 }
 
 fn source_kind_for_new_open_file(server: &Server, uri: &Url) -> SourceKind {
@@ -423,16 +455,7 @@ async fn refresh_bounded_open_diagnostics(
 ) -> usize {
     let open_documents = bounded_open_diagnostic_refresh_targets(server, changed_uri);
 
-    let mut refreshed = 0;
-    for (uri, content) in open_documents {
-        let Ok(result) = reanalyze_open_file(indexer, server, &uri, &content) else {
-            log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
-            continue;
-        };
-        server.publish_document_diagnostics(uri, result.diagnostics);
-        refreshed += 1;
-    }
-    refreshed
+    refresh_open_files_until_settled(indexer, server, &open_documents, Some(changed_uri))
 }
 
 fn bounded_open_diagnostic_refresh_targets(
@@ -667,15 +690,7 @@ async fn refresh_open_project_files_for_dependency_engines(
     };
     open_project_files.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
-    for (uri, content) in open_project_files {
-        match reanalyze_open_file(processor, server, &uri, &content) {
-            Ok(result) => server.publish_document_diagnostics(uri, result.diagnostics),
-            Err(error) => log::warn!(
-                "Failed to refresh open project consumer after dependency change: {}: {error}",
-                uri.path()
-            ),
-        }
-    }
+    refresh_open_files_until_settled(processor, server, &open_project_files, None);
 }
 
 fn remove_project_file(server: &Server, uri: &Url) -> bool {

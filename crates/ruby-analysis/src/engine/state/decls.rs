@@ -15,7 +15,7 @@ use crate::core::storage::method_store::{
 use crate::core::storage::symbol_store::{StoredSymbolFact, SymbolStore};
 use crate::core::{
     ExecutionContextFact, FullyQualifiedName, MethodAvailability, MethodFact,
-    MethodVisibilityOverrideFact, RubyMethod, SourceFileId, SymbolFact,
+    MethodVisibilityOverrideFact, RubyMethod, SourceFileId, SourceKind, SymbolFact,
 };
 
 use super::names::Names;
@@ -243,10 +243,11 @@ impl DeclIndex {
         names: &Names,
         owner_id: FqnId,
         method: &RubyMethod,
+        is_signature: impl Fn(SourceFileId) -> bool,
     ) -> EffectiveMethodFactMatch {
         match self
             .methods
-            .effective_fact_matching_owner_name(owner_id, method)
+            .effective_fact_matching_owner_name(owner_id, method, is_signature)
         {
             StoredMethodFactMatch::Missing => EffectiveMethodFactMatch::Missing,
             StoredMethodFactMatch::Unique(fact) => {
@@ -340,8 +341,22 @@ impl Project {
         owner_id: FqnId,
         method: &RubyMethod,
     ) -> EffectiveMethodFactMatch {
-        self.decls
-            .effective_method_fact_matching_owner_id(&self.names, owner_id, method)
+        self.decls.effective_method_fact_matching_owner_id(
+            &self.names,
+            owner_id,
+            method,
+            |file_id| {
+                self.files
+                    .get(file_id)
+                    .expect_invariant(
+                        "a method fact references an unregistered source file",
+                        "method facts must never outlive their file metadata",
+                        "remove method facts through the per-file replacement lifecycle",
+                    )
+                    .kind
+                    == SourceKind::Signature
+            },
+        )
     }
 
     pub(in crate::engine) fn ruby_method_names_for_owner_id(

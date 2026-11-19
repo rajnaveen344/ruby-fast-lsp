@@ -264,6 +264,7 @@ impl Visit<'_> for AnalysisIndexer<'_> {
             kind: owner_kind,
             visibility,
             module_function_copy,
+            normalized_from_initialize,
         } = method_declaration(
             method,
             node.receiver().is_none(),
@@ -324,6 +325,7 @@ impl Visit<'_> for AnalysisIndexer<'_> {
                 )
                 .with_availability(availability.clone())
                 .with_visibility(visibility)
+                .with_initialize_origin(normalized_from_initialize)
                 .with_forwarded_block_call(forwarded_block_call.clone())
                 .with_direct_yield_call(direct_yield_call.clone()),
         );

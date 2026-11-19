@@ -117,6 +117,9 @@ pub struct MethodFact {
     pub name_range: TextRange,
     pub param_facts: Vec<MethodParamFact>,
     pub(crate) parameter_shape_complete: bool,
+    /// Whether this singleton `new` stands for an instance `initialize`
+    /// rather than a `new` the source defines itself.
+    pub(crate) normalized_from_initialize: bool,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
     pub availability: MethodAvailability,
@@ -138,6 +141,7 @@ impl MethodFact {
             name_range: range,
             param_facts: Vec::new(),
             parameter_shape_complete: false,
+            normalized_from_initialize: false,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -173,6 +177,7 @@ impl MethodFact {
             name_range: range,
             param_facts,
             parameter_shape_complete: true,
+            normalized_from_initialize: false,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -195,6 +200,7 @@ impl MethodFact {
             name_range: range,
             param_facts: Vec::new(),
             parameter_shape_complete: false,
+            normalized_from_initialize: false,
             delegate_receiver: Some(delegate_receiver),
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -207,6 +213,27 @@ impl MethodFact {
     pub fn with_visibility(mut self, visibility: MethodVisibility) -> Self {
         self.visibility = visibility;
         self
+    }
+
+    /// Keep the listed parameters for presentation while recording that
+    /// they do not decide how the method may be called.
+    pub(crate) fn with_undecided_parameter_shape(mut self) -> Self {
+        self.parameter_shape_complete = false;
+        self
+    }
+
+    /// Record whether this singleton `new` is the normalized form of an
+    /// instance `initialize`, so the language constructor still builds the
+    /// object.
+    pub(crate) fn with_initialize_origin(mut self, normalized: bool) -> Self {
+        self.normalized_from_initialize = normalized;
+        self
+    }
+
+    /// Whether the source itself defines this method, as opposed to a
+    /// singleton `new` standing for an instance `initialize`.
+    pub fn is_normalized_from_initialize(&self) -> bool {
+        self.normalized_from_initialize
     }
 
     pub fn has_complete_parameter_shape(&self) -> bool {
@@ -393,6 +420,7 @@ pub struct StoredMethodFact {
     rare: Option<Box<RareMethodDetails>>,
     pub visibility: MethodVisibility,
     pub(crate) parameter_shape_complete: bool,
+    pub(crate) normalized_from_initialize: bool,
 }
 
 /// Details that only runtime stubs, delegations and block-calling methods set.
@@ -418,6 +446,7 @@ impl StoredMethodFact {
             name_range,
             param_facts,
             parameter_shape_complete,
+            normalized_from_initialize,
             delegate_receiver,
             visibility,
             availability,
@@ -453,6 +482,7 @@ impl StoredMethodFact {
             rare: has_rare.then(|| Box::new(rare)),
             visibility,
             parameter_shape_complete,
+            normalized_from_initialize,
         }
     }
 
@@ -466,6 +496,7 @@ impl StoredMethodFact {
             name_range: self.name_range(),
             param_facts: self.param_facts.to_vec(),
             parameter_shape_complete: self.parameter_shape_complete,
+            normalized_from_initialize: self.normalized_from_initialize,
             delegate_receiver: self.delegate_receiver(),
             visibility: self.visibility,
             availability: self.availability().clone(),
@@ -560,10 +591,15 @@ impl MethodStore {
     /// sort-and-dedup behavior after expansion. Runtime `Absent` facts mask the
     /// method completely; otherwise `Unavailable` facts override available
     /// declarations for the same exact method identity.
+    ///
+    /// `is_signature` names the files that only declare signatures. A
+    /// signature describes a definition and does not compete with it, so
+    /// signature facts are set aside whenever a definition is present.
     pub(crate) fn effective_fact_matching_owner_name(
         &self,
         owner: FqnId,
         method: &RubyMethod,
+        is_signature: impl Fn(SourceFileId) -> bool,
     ) -> StoredMethodFactMatch<'_> {
         let ids = self.facts_by_owner_name.get(&(owner, *method));
         if self
@@ -575,10 +611,27 @@ impl MethodStore {
         let unavailable_wins = self
             .indexed(ids)
             .any(|fact| matches!(fact.availability(), MethodAvailability::Unavailable { .. }));
-        let mut effective = self.indexed(ids).filter(|fact| {
+        let available = |fact: &&StoredMethodFact| {
             !unavailable_wins
                 || matches!(fact.availability(), MethodAvailability::Unavailable { .. })
-        });
+        };
+        // The common bucket holds one fact, or exact duplicates of one: no
+        // file kind can change that answer, so none is looked up.
+        let mut candidates = self.indexed(ids).filter(available);
+        let Some(first) = candidates.next() else {
+            return StoredMethodFactMatch::Missing;
+        };
+        if candidates.all(|fact| fact == first) {
+            return StoredMethodFactMatch::Unique(first);
+        }
+        let definition_wins = self
+            .indexed(ids)
+            .filter(available)
+            .any(|fact| !is_signature(fact.range.file_id));
+        let mut effective = self
+            .indexed(ids)
+            .filter(available)
+            .filter(|fact| !definition_wins || !is_signature(fact.range.file_id));
         let Some(first) = effective.next() else {
             return StoredMethodFactMatch::Missing;
         };

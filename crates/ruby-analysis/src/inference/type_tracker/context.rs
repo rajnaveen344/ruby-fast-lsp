@@ -12,6 +12,10 @@ pub(in crate::inference::type_tracker) struct MethodContext {
     /// the flow environment before the body is visited; a later assignment can
     /// still replace or invalidate that proof normally.
     pub(in crate::inference::type_tracker) parameter_types: HashMap<String, RubyType>,
+    /// Parameters whose contract is documented on the method itself, in the
+    /// file being tracked. A contract read from a signature file is a
+    /// snapshot of another file and is left out.
+    pub(in crate::inference::type_tracker) same_file_parameters: HashSet<String>,
     /// Current class/module context for resolving implicit self
     pub(in crate::inference::type_tracker) class: Option<FullyQualifiedName>,
     /// Current method context for resolving `super`.
@@ -74,6 +78,12 @@ impl TypeTracker {
         parameter_types: HashMap<String, RubyType>,
     ) -> Self {
         self.context.parameter_types = parameter_types;
+        self
+    }
+
+    /// Name the parameters whose contract the tracked file itself documents.
+    pub(crate) fn with_same_file_parameters(mut self, names: HashSet<String>) -> Self {
+        self.context.same_file_parameters = names;
         self
     }
 

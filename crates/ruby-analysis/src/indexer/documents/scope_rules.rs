@@ -341,6 +341,8 @@ pub struct MethodDeclaration {
     /// The `def` follows a bare `module_function`, so the module also gets a
     /// public singleton copy.
     pub module_function_copy: bool,
+    /// The declared singleton `new` stands for an instance `initialize`.
+    pub normalized_from_initialize: bool,
 }
 
 /// The current visibility state a `def` sees.
@@ -371,6 +373,7 @@ pub fn method_declaration(
         kind,
         visibility,
         module_function_copy,
+        normalized_from_initialize: false,
     };
     if kind == NamespaceKind::Singleton {
         return declared(method, kind, current.default, false);
@@ -382,12 +385,15 @@ pub fn method_declaration(
             "constructor normalization relies on RubyMethod validation",
             "update RubyMethod validation to accept `new`",
         );
-        return declared(
-            new,
-            NamespaceKind::Singleton,
-            MethodVisibility::Public,
-            false,
-        );
+        return MethodDeclaration {
+            normalized_from_initialize: true,
+            ..declared(
+                new,
+                NamespaceKind::Singleton,
+                MethodVisibility::Public,
+                false,
+            )
+        };
     }
     let module_function_copy = receiverless && current.module_function_mode;
     let always_private = matches!(

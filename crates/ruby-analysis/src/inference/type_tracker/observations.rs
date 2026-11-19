@@ -106,6 +106,9 @@ impl TypeTracker {
     /// reads inside loops and blocks are skipped. A local whose value is
     /// Unknown, carries an Unknown reason, or depends on a constant equation
     /// that resolves later is left unrecorded: no record means no proof.
+    /// So is a local whose value came from a method or constant lookup: that
+    /// type is a snapshot of other files, and an edit there would leave the
+    /// recorded proof stale.
     pub(in crate::inference::type_tracker) fn observe_argument_local_reads(
         &mut self,
         call: &ruby_prism::CallNode,
@@ -140,6 +143,7 @@ impl TypeTracker {
         if RubyType::contains_unknown(ruby_type)
             || self.environment.unknown_reason(&name).is_some()
             || !self.environment.dependencies(&name).is_empty()
+            || !self.environment.is_self_evident(&name)
         {
             return;
         }
@@ -170,4 +174,57 @@ pub fn get_var_type_at(
         .range(..=offset)
         .next_back()
         .and_then(|(_, vars)| vars.get(var_name).cloned())
+}
+
+impl TypeTracker {
+    /// Whether `value` has a type this file alone decides: a scalar literal,
+    /// a constructor call on a constant, a read of a local written from one
+    /// of those, or a two-way choice between such values.
+    pub(in crate::inference::type_tracker) fn value_is_self_evident(
+        &self,
+        value: &ruby_prism::Node<'_>,
+    ) -> bool {
+        if let Some(read) = value.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(read.name().as_slice());
+            return self.environment.is_self_evident(&name);
+        }
+        if let Some(choice) = value.as_if_node() {
+            let otherwise = choice
+                .subsequent()
+                .and_then(|subsequent| subsequent.as_else_node())
+                .and_then(|otherwise| only_statement(otherwise.statements()));
+            return match (only_statement(choice.statements()), otherwise) {
+                (Some(then), Some(otherwise)) => {
+                    self.value_is_self_evident(&then) && self.value_is_self_evident(&otherwise)
+                }
+                _ => false,
+            };
+        }
+        if let Some(call) = value.as_call_node() {
+            return call.name().as_slice() == b"new"
+                && call.block().is_none()
+                && call.receiver().is_some_and(|receiver| {
+                    receiver.as_constant_read_node().is_some()
+                        || receiver.as_constant_path_node().is_some()
+                });
+        }
+        value.as_string_node().is_some()
+            || value.as_interpolated_string_node().is_some()
+            || value.as_symbol_node().is_some()
+            || value.as_interpolated_symbol_node().is_some()
+            || value.as_integer_node().is_some()
+            || value.as_float_node().is_some()
+            || value.as_true_node().is_some()
+            || value.as_false_node().is_some()
+            || value.as_regular_expression_node().is_some()
+            || value.as_interpolated_regular_expression_node().is_some()
+    }
+}
+
+fn only_statement<'pr>(
+    statements: Option<ruby_prism::StatementsNode<'pr>>,
+) -> Option<ruby_prism::Node<'pr>> {
+    let mut body = statements?.body().iter();
+    let first = body.next()?;
+    body.next().is_none().then_some(first)
 }

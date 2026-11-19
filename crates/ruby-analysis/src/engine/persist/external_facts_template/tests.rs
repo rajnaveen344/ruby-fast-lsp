@@ -132,7 +132,8 @@ fn template_rebinds_declarations_and_drops_file_local_evidence() {
                 SymbolFact::new(owner.clone(), SymbolKind::LocalVariable, expression),
             ],
             methods: vec![MethodFact::new(method_fqn.clone(), owner.clone(), range)
-                .with_name_range(TextRange::new(source, 8, 12))],
+                .with_name_range(TextRange::new(source, 8, 12))
+                .with_initialize_origin(true)],
             method_visibility_overrides: vec![MethodVisibilityOverrideFact::new(
                 owner.clone(),
                 method,
@@ -193,6 +194,7 @@ fn template_rebinds_declarations_and_drops_file_local_evidence() {
     assert_range_file(facts.symbols[0].name_range, target);
     assert_range_file(facts.methods[0].range, target);
     assert_range_file(facts.methods[0].name_range, target);
+    assert!(facts.methods[0].is_normalized_from_initialize());
     assert_range_file(facts.method_visibility_overrides[0].range, target);
     assert_eq!(facts.types.len(), 1);
     assert_range_file(facts.types[0].range, target);

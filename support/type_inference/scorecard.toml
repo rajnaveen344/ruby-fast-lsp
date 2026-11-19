@@ -248,7 +248,7 @@ end
 path = "main.rb"
 fixture = '''
 Widget.new.label<hover label="String">
-Factory.new.to_s<hover label="Unknown[unresolved_method_return]">
+Factory.new.to_s<hover label="Unknown[unknown_receiver]">
 '''
 
 [[cases]]

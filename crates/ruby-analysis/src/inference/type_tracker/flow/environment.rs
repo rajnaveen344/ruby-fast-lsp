@@ -7,7 +7,7 @@ use crate::inference::type_tracker::flow::shapes::values::{
     non_shape_alternatives, shape_alternatives,
 };
 use crate::inference::type_tracker::TypeTracker;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::inference::type_tracker) struct FlowEnvironment {
@@ -19,6 +19,10 @@ pub(in crate::inference::type_tracker) struct FlowEnvironment {
     pub(in crate::inference::type_tracker) shape_containments: BTreeSet<ShapeContainment>,
     pub(in crate::inference::type_tracker) array_shape_aliases: HashMap<String, ArrayShapeAliases>,
     pub(in crate::inference::type_tracker) unknown_reasons: HashMap<String, UnknownReason>,
+    /// Locals whose current value this file alone decides: a literal, a
+    /// constructor call, or a copy of such a local. Every other write removes
+    /// the name, so a type read from other project files never counts.
+    self_evident: HashSet<String>,
     pub(in crate::inference::type_tracker) callables: LocalCallables,
     pub(in crate::inference::type_tracker) max_live_shape_aliases: usize,
 }
@@ -33,6 +37,7 @@ impl FlowEnvironment {
         self.shape_bindings.remove(&name);
         self.array_shape_aliases.remove(&name);
         self.unknown_reasons.remove(&name);
+        self.self_evident.remove(&name);
         self.types.insert(name, ruby_type)
     }
 
@@ -44,6 +49,7 @@ impl FlowEnvironment {
         self.constant_dependencies.remove(&name);
         self.shape_bindings.remove(&name);
         self.array_shape_aliases.remove(&name);
+        self.self_evident.remove(&name);
         self.unknown_reasons.insert(name.clone(), reason);
         self.types.insert(name, RubyType::Unknown)
     }
@@ -63,6 +69,7 @@ impl FlowEnvironment {
         self.constant_dependencies.remove(&name);
         self.unknown_reasons.remove(&name);
         self.array_shape_aliases.remove(&name);
+        self.self_evident.remove(&name);
         self.types.insert(name.clone(), ruby_type);
         self.shape_bindings.insert(name, identities);
         self.enforce_alias_bound();
@@ -122,6 +129,7 @@ impl FlowEnvironment {
         self.shape_containments.clear();
         self.array_shape_aliases.clear();
         self.unknown_reasons.clear();
+        self.self_evident.clear();
         self.callables.clear();
         self.max_live_shape_aliases = 0;
     }
@@ -363,6 +371,16 @@ impl FlowEnvironment {
         }
     }
 
+    /// Record that `name` was just written from a value this file alone
+    /// decides. Call after the write that installed its type.
+    pub(in crate::inference::type_tracker) fn mark_self_evident(&mut self, name: &str) {
+        self.self_evident.insert(name.to_string());
+    }
+
+    pub(in crate::inference::type_tracker) fn is_self_evident(&self, name: &str) -> bool {
+        self.self_evident.contains(name)
+    }
+
     pub(in crate::inference::type_tracker) fn dependencies(
         &self,
         name: &str,
@@ -458,6 +476,13 @@ impl TypeTracker {
             }
         }
         self.environment.constant_dependencies = merged_dependencies;
+        // A joined local stays self-evident only when every branch wrote it
+        // from a value this file alone decides.
+        self.environment.self_evident = this_env
+            .self_evident
+            .intersection(&other_env.self_evident)
+            .cloned()
+            .collect();
 
         // Merge abstract Hash identity state independently from displayed
         // local types. The same identity can be mutated differently on two

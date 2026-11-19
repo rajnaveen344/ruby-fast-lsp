@@ -28,6 +28,9 @@ pub trait CompletionSemanticQuery {
         current_namespace: &[RubyConstant],
     ) -> Option<RubyType>;
 
+    /// The proven result of `class.new`, as the constructor owner decides it.
+    fn constructed_type(&self, class: &FullyQualifiedName) -> Option<RubyType>;
+
     fn method_return_type_for_receiver(
         &self,
         namespace: &FullyQualifiedName,
@@ -137,7 +140,7 @@ pub fn receiver_type_from_context(
         if let Some(inner_type) = inner_type {
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
-                    return crate::inference::method::constructor::seed_constructor_type(fqn);
+                    return query.constructed_type(fqn);
                 }
             }
 
@@ -386,7 +389,7 @@ fn resolve_method_receiver_type(
             )?;
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
-                    return crate::inference::method::constructor::seed_constructor_type(fqn);
+                    return query.constructed_type(fqn);
                 }
             }
             infer_method_call_return_type(query, &inner_type, method_name)

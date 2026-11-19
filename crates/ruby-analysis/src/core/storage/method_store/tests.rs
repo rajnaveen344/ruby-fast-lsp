@@ -121,7 +121,7 @@ fn exact_owner_name_match_borrows_one_effective_fact_and_deduplicates() {
     let mut store = MethodStore::default();
     store.replace_file(fact.range.file_id, [fact.clone(), fact]);
 
-    let match_result = store.effective_fact_matching_owner_name(owner, &method);
+    let match_result = store.effective_fact_matching_owner_name(owner, &method, |_| false);
     let StoredMethodFactMatch::Unique(selected) = match_result else {
         panic!("identical stored method facts must collapse to one borrowed match")
     };
@@ -154,7 +154,7 @@ fn exact_owner_name_match_preserves_availability_and_ambiguity() {
     store.replace_file(available.range.file_id, [available]);
     store.replace_file(unavailable.range.file_id, [unavailable]);
     assert!(matches!(
-        store.effective_fact_matching_owner_name(owner, &method),
+        store.effective_fact_matching_owner_name(owner, &method, |_| false),
         StoredMethodFactMatch::Unique(fact)
             if matches!(fact.availability(), MethodAvailability::Unavailable { .. })
     ));
@@ -170,7 +170,7 @@ fn exact_owner_name_match_preserves_availability_and_ambiguity() {
     );
     store.replace_file(absent.range.file_id, [absent]);
     assert!(matches!(
-        store.effective_fact_matching_owner_name(owner, &method),
+        store.effective_fact_matching_owner_name(owner, &method, |_| false),
         StoredMethodFactMatch::Missing
     ));
 
@@ -194,7 +194,7 @@ fn exact_owner_name_match_preserves_availability_and_ambiguity() {
         )],
     );
     assert!(matches!(
-        ambiguous.effective_fact_matching_owner_name(owner, &method),
+        ambiguous.effective_fact_matching_owner_name(owner, &method, |_| false),
         StoredMethodFactMatch::Ambiguous
     ));
 }

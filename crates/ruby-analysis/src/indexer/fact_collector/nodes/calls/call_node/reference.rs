@@ -217,12 +217,20 @@ impl FactCollector {
             } else if let Some(outcome) = self.shape_call_outcome(node, receiver_type) {
                 Some(outcome)
             } else {
-                let syntax_outcome =
-                    crate::inference::method::return_type::method_call_type_outcome(
+                // Only the constructor consults the project: a class whose
+                // Ruby code replaces `new` has no assumed instance result.
+                let syntax_outcome = match receiver_type {
+                    RubyType::ClassReference(class) if method_name == "new" => self
+                        .semantics
+                        .project
+                        .constructor_result(class)
+                        .into_type_outcome(RubyType::Class(class.clone())),
+                    _ => crate::inference::method::return_type::method_call_type_outcome(
                         None::<&dyn crate::inference::semantics::Semantics>,
                         receiver_type,
                         method_name,
-                    );
+                    ),
+                };
                 let outcome = if matches!(receiver_type, RubyType::Union(_))
                     && syntax_outcome.unknown_reason() == Some(UnknownReason::IncompleteUnionMember)
                 {

@@ -29,8 +29,12 @@ impl TypeTracker {
         // Identity allocation order must not depend on HashMap iteration.
         parameters.sort_by(|left, right| left.0.cmp(&right.0));
         for (name, ruby_type) in parameters {
+            let same_file = self.context.same_file_parameters.contains(&name);
             if !type_is_shape_only(&ruby_type) {
-                self.environment.insert(name, ruby_type);
+                self.environment.insert(name.clone(), ruby_type);
+                if same_file {
+                    self.environment.mark_self_evident(&name);
+                }
                 continue;
             }
             let identity = self.allocate_shape_identity(ruby_type.clone());
@@ -42,8 +46,14 @@ impl TypeTracker {
                     UnknownReason::MutableShapeInvalidated,
                 );
             }
-            self.environment
-                .bind_shape_identities(name, ruby_type, BTreeSet::from([identity]));
+            self.environment.bind_shape_identities(
+                name.clone(),
+                ruby_type,
+                BTreeSet::from([identity]),
+            );
+            if same_file {
+                self.environment.mark_self_evident(&name);
+            }
             self.environment.synchronize_shape_aliases();
         }
     }
@@ -327,6 +337,9 @@ impl TypeTracker {
         }
         self.environment
             .set_constant_dependencies(var_name.clone(), constant_dependencies);
+        if self.value_is_self_evident(&value) {
+            self.environment.mark_self_evident(&var_name);
+        }
         if !self.control_flow.rescue_entries.is_empty() {
             self.observe_rescue_entry_type(&var_name, &var_type);
         }

@@ -249,7 +249,15 @@ fn push_method(
     let fact = MethodFact::with_param_facts(fqn.clone(), owner, range, params)
         .with_visibility(method_visibility(method.visibility))
         .with_signature_metadata(None, return_type_label)
+        .with_initialize_origin(is_constructor)
         .with_callable_signatures(callable_signatures);
+    // The listed parameters are the first overload's. They decide the call
+    // shape only when every overload accepts the same argument lists.
+    let fact = if overloads_share_call_shape(method) {
+        fact
+    } else {
+        fact.with_undecided_parameter_shape()
+    };
     facts.methods.push(fact);
     for (name, ruby_type) in complete_parameter_contracts(method) {
         facts.types.push(TypeFact::new(
@@ -278,6 +286,28 @@ fn push_method(
         ));
     }
     Ok(())
+}
+
+/// Whether every overload takes the same parameter kinds in the same order,
+/// with the same keyword names. Blocks do not change the argument list.
+fn overloads_share_call_shape(method: &MethodDecl) -> bool {
+    let call_shape = |overload: &rbs_parser::MethodType| {
+        overload
+            .params
+            .iter()
+            .filter(|parameter| parameter.kind != ParamKind::Block)
+            .map(|parameter| {
+                let keyword = matches!(parameter.kind, ParamKind::Keyword | ParamKind::KeywordOpt)
+                    .then(|| parameter.name.clone());
+                (param_kind(&parameter.kind), keyword)
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut shapes = method.overloads.iter().map(call_shape);
+    let Some(first) = shapes.next() else {
+        return true;
+    };
+    shapes.all(|shape| shape == first)
 }
 
 fn complete_parameter_contracts(method: &MethodDecl) -> Vec<(String, RubyType)> {

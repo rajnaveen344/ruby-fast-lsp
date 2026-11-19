@@ -1,7 +1,8 @@
 use crate::core::{
     ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind,
-    MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, MethodVisibility,
-    NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
+    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodReturnEquation,
+    MethodVisibility, NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    UnknownReason,
 };
 use crate::indexer::documents::scope_rules::{
     method_declaration, namespace_is_proven_class, self_definition_namespace, DefinitionVisibility,
@@ -98,6 +99,7 @@ impl FactCollector {
             kind: actual_namespace_kind,
             visibility,
             module_function_copy,
+            normalized_from_initialize,
         } = method_declaration(
             source_method,
             node.receiver().is_none(),
@@ -108,7 +110,7 @@ impl FactCollector {
                 module_function_mode: self.scope_tracker.module_function_mode_enabled(),
             },
         );
-        let is_constructor = method != source_method;
+        let is_constructor = normalized_from_initialize;
 
         let name_location = node.name_loc();
         // Use full method body range (def to end) for entry.location, consistent with class/module
@@ -180,19 +182,26 @@ impl FactCollector {
             },
             None => MethodAvailability::Available,
         };
-        self.direct_push_method_fact_with_signature_name_range_and_availability(
-            namespace_parts.clone(),
-            actual_namespace_kind,
-            method,
-            self.direct_range(&full_location),
-            self.direct_range(&name_location),
-            direct_params,
-            yard_doc.as_ref().and_then(|doc| doc.description.clone()),
-            yard_doc
-                .as_ref()
-                .and_then(YardMethodDoc::format_return_type),
-            availability.clone(),
-            visibility,
+        self.push_direct_method_fact(
+            MethodFact::with_param_facts(
+                FullyQualifiedName::method(namespace_parts.clone(), method),
+                FullyQualifiedName::namespace_with_kind(
+                    namespace_parts.clone(),
+                    actual_namespace_kind,
+                ),
+                self.direct_range(&full_location),
+                direct_params,
+            )
+            .with_name_range(self.direct_range(&name_location))
+            .with_signature_metadata(
+                yard_doc.as_ref().and_then(|doc| doc.description.clone()),
+                yard_doc
+                    .as_ref()
+                    .and_then(YardMethodDoc::format_return_type),
+            )
+            .with_availability(availability.clone())
+            .with_visibility(visibility)
+            .with_initialize_origin(normalized_from_initialize),
         );
         if module_function_copy {
             self.direct_push_method_fact_with_signature_name_range_and_availability(
@@ -622,6 +631,14 @@ impl FactCollector {
                 .param_types
                 .iter()
                 .map(|(name, ruby_type, _range, _provenance)| (name.clone(), ruby_type.clone()))
+                .collect(),
+        );
+        tracker = tracker.with_same_file_parameters(
+            pending
+                .param_types
+                .iter()
+                .filter(|(_, _, _, provenance)| matches!(provenance, TypeProvenance::Yard))
+                .map(|(name, _, _, _)| name.clone())
                 .collect(),
         );
         if self.options.record_local_read_unknown_reasons {

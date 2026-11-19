@@ -246,6 +246,7 @@ struct SnapshotMethodFact {
     name_range: SnapshotRange,
     param_facts: Vec<SnapshotMethodParamFact>,
     parameter_shape_complete: bool,
+    normalized_from_initialize: bool,
     delegate_receiver: Option<String>,
     visibility: SnapshotMethodVisibility,
     availability: SnapshotMethodAvailability,
