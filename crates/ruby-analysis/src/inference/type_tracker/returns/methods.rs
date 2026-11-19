@@ -64,8 +64,11 @@ impl TypeTracker {
         self.analysis.method_candidates = Arc::new(HashSet::new());
 
         let constant_dependencies = std::mem::take(&mut self.returns.constant_dependencies);
+        let observations = std::mem::take(self.returns.observations.get_mut());
+        let local_callees = std::mem::take(self.returns.local_callees.get_mut());
         MethodReturnEquation::new(method_fqn, base, dependencies)
             .with_constant_dependencies(constant_dependencies)
+            .with_observations(observations, local_callees)
     }
 
     /// `None` collects symbolic equations; `Some` evaluates one iteration of
@@ -91,6 +94,8 @@ impl TypeTracker {
         self.returns.explicit_values.clear();
         self.returns.dependencies.clear();
         self.returns.constant_dependencies.clear();
+        self.returns.observations.get_mut().clear();
+        self.returns.local_callees.get_mut().clear();
         self.returns.direct_call_proofs.clear();
         self.returns.saw_direct_recursion = false;
         self.returns.approximation = recursive_return_approximation;

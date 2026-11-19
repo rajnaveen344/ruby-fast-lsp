@@ -62,6 +62,9 @@ pub struct IndexerProject {
     pending_project_files: Option<Vec<PathBuf>>,
     processed_project_files: HashSet<PathBuf>,
     exhaustive_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
+    /// Every class and module the project's files declare, for method bodies
+    /// that name a class collected later in the same generation.
+    exhaustive_project_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
     exhaustive_semantic_context: Option<Arc<parking_lot::RwLock<Project>>>,
     exhaustive_collection_started: bool,
     jruby_replay_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
@@ -107,6 +110,7 @@ impl IndexerProject {
             pending_project_files: None,
             processed_project_files: HashSet::new(),
             exhaustive_known_namespaces: None,
+            exhaustive_project_namespaces: None,
             exhaustive_semantic_context: None,
             exhaustive_collection_started: false,
             jruby_replay_known_namespaces: None,

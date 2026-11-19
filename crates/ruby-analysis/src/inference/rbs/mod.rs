@@ -17,6 +17,7 @@ use rbs_parser::Loader;
 pub use catalog::{get_rbs_class_methods, rbs_class_method_exists};
 pub use conversion::rbs_type_to_ruby_type;
 pub(crate) use prepare_cache::prepare_higher_order_call_with_fallbacks;
+pub(crate) use signatures::block_selects_another_result;
 pub use signatures::{
     get_rbs_method_return_type, get_rbs_method_return_type_as_ruby_type,
     get_rbs_method_return_type_with_type_args, get_rbs_method_signatures, RbsMethodSignature,

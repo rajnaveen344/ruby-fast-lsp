@@ -90,7 +90,7 @@ impl TypeTracker {
                 .unwrap_or_default(),
         );
         let project = self.analysis.project.clone();
-        let prepared = call_site::prepare_call(
+        let prepared = match call_site::prepare_call(
             project.as_deref(),
             receiver_type.as_ref(),
             &namespace,
@@ -106,8 +106,16 @@ impl TypeTracker {
                     })
                     .unwrap_or_default()
             },
-        )
-        .ok()?;
+        ) {
+            Ok(prepared) => prepared,
+            Err(_) => {
+                return call_site::unprepared_block_result_is_unknown(
+                    receiver_type.as_ref(),
+                    method_name,
+                )
+                .then_some(RubyType::Unknown);
+            }
+        };
         if let Some(block) = block_expression.as_block_node() {
             if block
                 .body()

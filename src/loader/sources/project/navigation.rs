@@ -156,6 +156,7 @@ impl IndexerProject {
         self.project_file_total = None;
         self.project_file_completed.store(0, Ordering::Relaxed);
         self.exhaustive_known_namespaces = None;
+        self.exhaustive_project_namespaces = None;
         self.exhaustive_semantic_context = None;
         self.exhaustive_collection_started = false;
         self.jruby_replay_known_namespaces = None;

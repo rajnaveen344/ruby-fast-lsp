@@ -181,10 +181,35 @@ pub fn rbs_method_exists_for_type(
     false
 }
 
+/// Whether bundled signatures know every class this receiver can be. One
+/// known member of a union says nothing about the others, so an unknown
+/// member keeps the whole receiver outside signature knowledge.
 pub fn rbs_class_exists_for_type(receiver_type: &RubyType) -> bool {
-    rbs_class_names_for_type(receiver_type)
-        .iter()
-        .any(|class_name| crate::inference::rbs::has_rbs_class(class_name))
+    match receiver_type {
+        RubyType::Union(members) => {
+            !members.is_empty() && members.iter().all(rbs_class_exists_for_type)
+        }
+        // A nested name is known only under its full path: a project class
+        // sharing its last segment with a core class is a different class.
+        RubyType::Class(fqn)
+        | RubyType::ClassReference(fqn)
+        | RubyType::Module(fqn)
+        | RubyType::ModuleReference(fqn) => {
+            let full_name = fqn
+                .namespace_parts()
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            !full_name.is_empty() && crate::inference::rbs::has_rbs_class(&full_name)
+        }
+        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) | RubyType::Literal(_) => {
+            rbs_class_names_for_type(receiver_type)
+                .iter()
+                .any(|class_name| crate::inference::rbs::has_rbs_class(class_name))
+        }
+        RubyType::Unknown => false,
+    }
 }
 
 fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {

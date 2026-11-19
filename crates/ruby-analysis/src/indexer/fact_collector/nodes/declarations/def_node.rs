@@ -326,7 +326,23 @@ impl FactCollector {
                 .iter()
                 .zip(contracts)
                 .filter_map(|(parameter, contract)| {
-                    contract.map(|ruby_type| (parameter.name.clone(), ruby_type, parameter.range))
+                    // A signature types each collected argument; the body
+                    // reads the collection Ruby builds from them.
+                    let ruby_type = match parameter.kind {
+                        MethodParamKind::Rest => RubyType::Array(vec![contract?]),
+                        MethodParamKind::KeywordRest => {
+                            RubyType::Hash(vec![RubyType::symbol()], vec![contract?])
+                        }
+                        MethodParamKind::Required
+                        | MethodParamKind::Optional
+                        | MethodParamKind::RequiredKeyword
+                        | MethodParamKind::OptionalKeyword
+                        | MethodParamKind::Block
+                        | MethodParamKind::AnonymousRest
+                        | MethodParamKind::AnonymousKeywordRest
+                        | MethodParamKind::Forwarding => contract?,
+                    };
+                    Some((parameter.name.clone(), ruby_type, parameter.range))
                 })
                 .collect::<Vec<_>>()
         };

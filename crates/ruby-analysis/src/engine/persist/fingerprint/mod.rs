@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use crate::core::equations::method_return_equation::MethodReturnBase;
-use crate::core::{FileAnalysis, SourceFileId, SymbolKind, TypeSubject};
+use crate::core::{FileAnalysis, ObservedReceiverAccess, SourceFileId, SymbolKind, TypeSubject};
 
 use crate::engine::View;
 use stable_hash::{
@@ -105,6 +105,24 @@ impl SemanticExportFingerprint {
                 stable_len(hasher, equation.dependencies().len());
                 for dependency in equation.dependencies() {
                     stable_fqn(hasher, dependency);
+                }
+                stable_len(hasher, equation.observations().len());
+                for observation in equation.observations() {
+                    stable_fqn(hasher, &observation.receiver);
+                    stable_string(hasher, observation.method.as_str());
+                    match &observation.access {
+                        ObservedReceiverAccess::Any => stable_u8(hasher, 0),
+                        ObservedReceiverAccess::Protected(caller) => {
+                            stable_u8(hasher, 1);
+                            stable_fqn(hasher, caller);
+                        }
+                        ObservedReceiverAccess::Public => stable_u8(hasher, 2),
+                    }
+                    stable_ruby_type(hasher, &observation.observed);
+                }
+                stable_len(hasher, equation.local_callees().len());
+                for callee in equation.local_callees() {
+                    stable_fqn(hasher, callee);
                 }
             }));
         }

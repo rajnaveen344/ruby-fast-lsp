@@ -326,9 +326,14 @@ impl FactCollector {
             let rbs_resolves_method = inferred_expr_type.as_ref().is_some_and(|ruby_type| {
                 rbs_method_exists_for_type(ruby_type, &method, namespace_kind)
             });
-            let rbs_receiver_class_exists = inferred_expr_type
-                .as_ref()
-                .is_some_and(rbs_class_exists_for_type);
+            // Judge the receiver the message is sent to: behind `&.` the nil
+            // alternative is skipped and proves nothing about the other class.
+            let rbs_receiver_class_exists = if nil_skips_dispatch {
+                dispatch_receiver_type.as_ref()
+            } else {
+                inferred_expr_type.as_ref()
+            }
+            .is_some_and(rbs_class_exists_for_type);
             self.facts
                 .analysis
                 .reference_candidates

@@ -638,3 +638,101 @@ async fn incomplete_union_call_reason_matches_cli_and_lsp() {
         "LSP hover must project the same union proof failure as CLI, got `{actual}`"
     );
 }
+
+/// A method body runs after its file loads, so a nested class declared
+/// below the method wins over a same-named outer class from a signature
+/// file, in a cold check as well as in an open document.
+#[tokio::test]
+async fn cold_check_binds_a_nested_class_declared_below_its_use() {
+    let signature = "module Shop\n  class Sorter\n    def run: () -> void\n  end\nend\n";
+    let source = r#"module Shop
+  class Builder
+    class Methods
+      def each
+        Sorter.new(1).each_part
+        sorter = Sorter.new(1)
+        sorter.each_part
+      end
+
+      class Sorter
+        def initialize(methods)
+        end
+
+        def each_part
+        end
+      end
+    end
+  end
+end
+"#;
+    let project = tempfile::tempdir().expect("temporary nested-class project must be created");
+    let sig_dir = project.path().join("sig");
+    std::fs::create_dir(&sig_dir).expect("the synthetic sig directory must be created");
+    std::fs::write(sig_dir.join("sorter.rbs"), signature)
+        .expect("the outer-class signature must be written");
+    std::fs::write(project.path().join("builder.rb"), source)
+        .expect("the nested-class fixture must be written");
+
+    let check_report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must analyze the nested-class fixture");
+    assert!(
+        check_report.diagnostics.is_empty(),
+        "both calls reach the nested class, which defines the method; got {:?}",
+        check_report.diagnostics
+    );
+}
+
+/// Another project file may declare the nearer class, so an outer class from
+/// a signature file does not decide the call while the project is still
+/// being read.
+#[tokio::test]
+async fn cold_check_binds_a_nested_class_declared_in_another_file() {
+    let signature = "module Shop\n  class Sorter\n    def run: () -> void\n  end\nend\n";
+    let caller = r#"module Shop
+  class Builder
+    class Methods
+      def each
+        Sorter.new(1).each_part
+        sorter = Sorter.new(1)
+        sorter.each_part
+      end
+    end
+  end
+end
+"#;
+    let nested = r#"module Shop
+  class Builder
+    class Methods
+      class Sorter
+        def initialize(methods)
+        end
+
+        def each_part
+        end
+      end
+    end
+  end
+end
+"#;
+    let project = tempfile::tempdir().expect("temporary two-file project must be created");
+    let sig_dir = project.path().join("sig");
+    std::fs::create_dir(&sig_dir).expect("the synthetic sig directory must be created");
+    std::fs::write(sig_dir.join("sorter.rbs"), signature)
+        .expect("the outer-class signature must be written");
+    std::fs::write(project.path().join("builder.rb"), caller)
+        .expect("the calling fixture must be written");
+    std::fs::write(project.path().join("nested_sorter.rb"), nested)
+        .expect("the nested-class fixture must be written");
+
+    let check_report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must analyze the two-file fixture");
+    assert!(
+        check_report.diagnostics.is_empty(),
+        "both calls reach the nested class from the other file; got {:?}",
+        check_report.diagnostics
+    );
+}

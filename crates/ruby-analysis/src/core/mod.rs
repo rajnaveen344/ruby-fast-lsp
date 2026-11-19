@@ -18,6 +18,7 @@ pub use equations::constant_type_equation::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
 };
 pub use equations::method_return_equation::MethodReturnEquation;
+pub use equations::method_return_observation::{MethodReturnObservation, ObservedReceiverAccess};
 pub use method_resolution::{
     receiver_type_to_method_namespaces, MethodCalleeResolution, ResolvedMethodCallee,
 };

@@ -3,6 +3,7 @@
 use super::IndexerProject;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadContext, LoadTarget};
+use crate::loader::file_processor::ProjectSemanticSeed;
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use rayon::prelude::*;
@@ -111,12 +112,13 @@ impl IndexerProject {
             let engine = semantic_context.read();
             engine.view().known_namespace_fqns()
         });
+        let mut project_namespaces = Vec::new();
         let requires_direct_semantic_seed = !project_files.is_empty();
         if requires_direct_semantic_seed {
             let semantic_seed_started = Instant::now();
             let outcomes = project_files
                 .par_iter()
-                .map(|path| -> Result<(PathBuf, Option<FileAnalysis>)> {
+                .map(|path| -> Result<(PathBuf, ProjectSemanticSeed)> {
                     let (content, _) = Self::read_authoritative_project_source(ctx, path)
                         .with_context(|| {
                             format!(
@@ -144,8 +146,9 @@ impl IndexerProject {
             let mut engine = semantic_context.write();
             let mut seeded = false;
             for outcome in outcomes {
-                let (path, facts) = outcome?;
-                let Some(facts) = facts else { continue };
+                let (path, seed) = outcome?;
+                project_namespaces.extend(seed.namespaces);
+                let Some(facts) = seed.facts else { continue };
                 let file_id = engine.view().file_id(&path).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "project semantic seed lost the registered identity for {}",
@@ -191,6 +194,8 @@ impl IndexerProject {
             known_namespaces.len()
         );
         self.exhaustive_known_namespaces = Some(known_namespaces);
+        self.exhaustive_project_namespaces =
+            Some(Arc::new(project_namespaces.into_iter().collect()));
         self.exhaustive_semantic_context = Some(semantic_context);
         Ok(())
     }

@@ -203,12 +203,22 @@ fn push_method(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let complete_return_type = complete_rbs_type_union(
-        method
-            .overloads
-            .iter()
-            .map(|overload| &overload.return_type),
-    );
+    // `void` promises no value to read; it does not promise nil. A method
+    // with a void overload therefore has no complete result type.
+    let returns_void = method
+        .overloads
+        .iter()
+        .any(|overload| matches!(overload.return_type, RbsType::Void));
+    let complete_return_type = if returns_void {
+        None
+    } else {
+        complete_rbs_type_union(
+            method
+                .overloads
+                .iter()
+                .map(|overload| &overload.return_type),
+        )
+    };
     let return_type_label = if is_constructor {
         Some(
             parts

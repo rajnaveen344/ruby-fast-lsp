@@ -56,6 +56,11 @@ impl IndexerProject {
             "providerless and provider-aware collection see the same facts",
             "keep the collection baseline through replay; consume it once",
         );
+        // Replayed bodies name later-declared project classes exactly as the
+        // batches they replace did; the stored processor stays without the set.
+        let replay_processor = file_processor
+            .clone()
+            .with_project_declared_namespaces(self.exhaustive_project_namespaces.take());
         let replay_started = Instant::now();
         let outcomes = files
             .par_iter()
@@ -107,7 +112,7 @@ impl IndexerProject {
                             file_path.display()
                         )
                     })?;
-                    let collected = file_processor
+                    let collected = replay_processor
                     .collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
                         &uri,
                         content,
@@ -186,6 +191,7 @@ impl IndexerProject {
     pub(crate) fn discard_jruby_replay_semantic_context(&mut self) {
         let known_namespaces = self.jruby_replay_known_namespaces.take();
         let semantic_engine = self.jruby_replay_semantic_context.take();
+        self.exhaustive_project_namespaces = None;
         invariant_eq!(
             known_namespaces.is_some(),
             semantic_engine.is_some(),

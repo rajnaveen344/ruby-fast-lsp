@@ -10,8 +10,8 @@ use std::mem::size_of;
 use crate::core::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
     FullyQualifiedName, GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodReturnEquation,
-    MethodReturnOutcomes, RubyType, SourceFileId, TextRange, TypeFact, TypeProvenance, TypeSubject,
-    UnknownReason,
+    MethodReturnOutcomes, ObservedReceiverAccess, RubyType, SourceFileId, TextRange, TypeFact,
+    TypeProvenance, TypeSubject, UnknownReason,
 };
 
 use super::types::{TypeInferenceOutcomeRef, TypeTable};
@@ -25,6 +25,7 @@ use crate::inference::method::constructor::ConstructorResult;
 use crate::inference::method::recursive::{
     solve_method_return_equations_with_telemetry, MethodReturnSolveResult,
 };
+use crate::inference::semantics::{ReceiverAccess, Semantics};
 
 fn resolve_constant_dependency(
     query: &View<'_>,
@@ -103,6 +104,13 @@ pub(in crate::engine) struct Solver {
     method_return_equations_dirty: bool,
     constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
+    /// Whether a file changed since recorded return observations were last
+    /// compared with the project.
+    return_observations_unchecked: bool,
+    /// Methods whose equation relied on a return that no longer holds. Their
+    /// base is withheld until the observation holds again or the owning file
+    /// is collected afresh.
+    withheld_methods: BTreeSet<FullyQualifiedName>,
 }
 
 /// The read-only result of planning a constant-type equation solve.
@@ -188,6 +196,7 @@ impl Solver {
         }
         self.method_return_equations_dirty |= equations_changed;
         self.constant_type_equations_dirty = self.constant_solve_files > 0;
+        self.return_observations_unchecked = true;
     }
 
     /// Drop one file's inference evidence. Its method-return equations, if
@@ -200,6 +209,7 @@ impl Solver {
         self.count_constant_inputs(&previous, -1);
         self.method_return_equations_dirty |= !previous.method_return_equations.is_empty();
         self.constant_type_equations_dirty = self.constant_solve_files > 0;
+        self.return_observations_unchecked = true;
     }
 
     /// Add (`delta` 1) or remove (`delta` -1) one file's evidence from the
@@ -430,6 +440,7 @@ impl Solver {
         if file_ids.len() == 1
             && !self.method_return_solution_spans_files
             && !has_constant_dependencies
+            && self.withheld_methods.is_empty()
         {
             return MethodReturnEquationPlan::FileLocal;
         }
@@ -447,6 +458,9 @@ impl Solver {
                     .method_return_equations
                     .iter()
                     .map(|equation| {
+                        if self.withheld_methods.contains(equation.method()) {
+                            return equation.with_withheld_base();
+                        }
                         equation.with_resolved_constant_types(
                             equation.constant_dependencies().iter().map(|dependency| {
                                 resolve_constant_dependency_type(query, dependency)
@@ -567,6 +581,87 @@ impl Solver {
         true
     }
 
+    /// Compare every recorded return observation with the project as it is
+    /// now. Returns the methods whose equation relied on an answer that no
+    /// longer holds, or `None` when no file changed since the last check.
+    pub(in crate::engine) fn failed_return_observations(
+        &self,
+        query: &View<'_>,
+    ) -> Option<BTreeSet<FullyQualifiedName>> {
+        if !self.return_observations_unchecked {
+            return None;
+        }
+        let mut failed = BTreeSet::new();
+        for evidence in self.evidence_by_file.values() {
+            for equation in &evidence.method_return_equations {
+                if failed.contains(equation.method()) {
+                    continue;
+                }
+                let holds = equation.observations().iter().all(|observation| {
+                    let access = match &observation.access {
+                        ObservedReceiverAccess::Any => ReceiverAccess::Any,
+                        ObservedReceiverAccess::Protected(caller) => {
+                            ReceiverAccess::Protected { caller }
+                        }
+                        ObservedReceiverAccess::Public => ReceiverAccess::Public,
+                    };
+                    Semantics::receiver_method_return_type(
+                        query,
+                        &observation.receiver,
+                        &observation.method,
+                        access,
+                    )
+                    .is_some_and(|current| observation_holds(&observation.observed, &current))
+                });
+                if !holds {
+                    failed.insert(equation.method().clone());
+                }
+            }
+        }
+        // A base typed with a same-file return holds no longer than that
+        // return does.
+        let mut grew = !failed.is_empty();
+        while grew {
+            grew = false;
+            for evidence in self.evidence_by_file.values() {
+                for equation in &evidence.method_return_equations {
+                    if !failed.contains(equation.method())
+                        && equation
+                            .local_callees()
+                            .iter()
+                            .any(|callee| failed.contains(callee))
+                    {
+                        failed.insert(equation.method().clone());
+                        grew = true;
+                    }
+                }
+            }
+        }
+        Some(failed)
+    }
+
+    /// Withhold the equations in `failed`. `only_add` keeps earlier
+    /// withholdings, which bounds the number of rounds. Returns whether the
+    /// withheld set changed; a change marks the equations for another solve.
+    pub(in crate::engine) fn withhold_methods(
+        &mut self,
+        mut failed: BTreeSet<FullyQualifiedName>,
+        only_add: bool,
+    ) -> bool {
+        if only_add {
+            failed.extend(self.withheld_methods.iter().cloned());
+        }
+        if failed == self.withheld_methods {
+            self.return_observations_unchecked = false;
+            return false;
+        }
+        self.withheld_methods = failed;
+        self.method_return_equations_dirty = true;
+        // A withheld solution is not the file-local one the collector wrote.
+        self.method_return_solution_spans_files = true;
+        true
+    }
+
     /// Telemetry merged over every file in file-id order.
     pub(in crate::engine) fn telemetry(&self) -> InferenceTelemetry {
         let mut file_ids = self.evidence_by_file.keys().copied().collect::<Vec<_>>();
@@ -633,6 +728,32 @@ impl Solver {
     }
 }
 
+/// An observed return still holds when the project gives the same answer, or
+/// when the observed type is the generic view of a more precise current one:
+/// a base built from the generic view stays true of the precise value.
+fn observation_holds(observed: &RubyType, current: &RubyType) -> bool {
+    observed == current || *observed == generic_view(current)
+}
+
+fn generic_view(ruby_type: &RubyType) -> RubyType {
+    match ruby_type {
+        RubyType::Shape(shape) => shape.generic_hash_type(),
+        RubyType::Literal(value) => value.widened_type(),
+        RubyType::Union(members) => RubyType::union(members.iter().map(generic_view)),
+        RubyType::Array(_)
+        | RubyType::Hash(_, _)
+        | RubyType::Class(_)
+        | RubyType::Module(_)
+        | RubyType::ClassReference(_)
+        | RubyType::ModuleReference(_)
+        | RubyType::Unknown => ruby_type.clone(),
+    }
+}
+
+/// Rounds in which a withheld equation may be restored before the withheld
+/// set may only grow.
+const FREE_OBSERVATION_ROUNDS: usize = 4;
+
 impl Project {
     pub(super) fn resolve_constant_type_equations(&mut self) -> bool {
         let plan = self
@@ -647,9 +768,26 @@ impl Project {
     ///
     /// Ordinary `resolve()` calls are O(1) when method bodies did not change.
     pub(super) fn resolve_method_return_equations(&mut self) -> bool {
-        let plan = self.solver.plan_method_return_equations(&View::new(self));
-        self.solver
-            .apply_method_return_equations(&mut self.types, plan)
+        let mut solved = false;
+        let mut round = 0usize;
+        loop {
+            let plan = self.solver.plan_method_return_equations(&View::new(self));
+            solved |= self
+                .solver
+                .apply_method_return_equations(&mut self.types, plan);
+            // A withheld equation can restore or break observations made on
+            // it. Free rounds follow such chains in both directions; later
+            // rounds only withhold more, so the loop ends.
+            let only_add = round >= FREE_OBSERVATION_ROUNDS;
+            let Some(failed) = self.solver.failed_return_observations(&View::new(self)) else {
+                return solved;
+            };
+            let changed = self.solver.withhold_methods(failed, only_add);
+            if !changed {
+                return solved;
+            }
+            round += 1;
+        }
     }
 
     pub(in crate::engine) fn constant_callable_body(

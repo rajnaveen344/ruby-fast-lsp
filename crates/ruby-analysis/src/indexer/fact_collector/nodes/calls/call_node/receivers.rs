@@ -91,6 +91,7 @@ impl FactCollector {
                     .graph_nodes
                     .iter()
                     .any(|fact| fact.fqn == namespace_fqn)
+                    || self.direct_namespace_is_known(&namespace_fqn)
                     || self.semantics.project.has_graph_node(&namespace_fqn);
                 if is_namespace {
                     return (

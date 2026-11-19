@@ -9,8 +9,8 @@ use std::mem::size_of;
 
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, ruby_type_heap_bytes};
 use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, RubyConstant, RubyType, TypeInferenceOutcome,
-    UnknownReason,
+    ConstantTypeDependency, FullyQualifiedName, MethodReturnObservation, RubyConstant, RubyType,
+    TypeInferenceOutcome, UnknownReason,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -32,6 +32,12 @@ pub struct MethodReturnEquation {
     dependencies: Box<[FullyQualifiedName]>,
     /// Sorted and unique.
     constant_dependencies: Box<[ConstantTypeDependency]>,
+    /// Sorted and unique. Returns of other methods the base was derived
+    /// from; the base holds only while each lookup still gives that answer.
+    observations: Box<[MethodReturnObservation]>,
+    /// Sorted and unique. Same-file methods whose collected return the base
+    /// was derived from; the base is withheld whenever one of theirs is.
+    local_callees: Box<[FullyQualifiedName]>,
 }
 
 impl MethodReturnEquation {
@@ -45,6 +51,42 @@ impl MethodReturnEquation {
             base,
             dependencies: dependencies.into_iter().collect(),
             constant_dependencies: Box::default(),
+            observations: Box::default(),
+            local_callees: Box::default(),
+        }
+    }
+
+    pub(crate) fn with_observations(
+        mut self,
+        observations: BTreeSet<MethodReturnObservation>,
+        local_callees: BTreeSet<FullyQualifiedName>,
+    ) -> Self {
+        self.observations = observations.into_iter().collect();
+        self.local_callees = local_callees
+            .into_iter()
+            .filter(|callee| *callee != self.method)
+            .collect();
+        self
+    }
+
+    pub(crate) fn local_callees(&self) -> &[FullyQualifiedName] {
+        &self.local_callees
+    }
+
+    pub(crate) fn observations(&self) -> &[MethodReturnObservation] {
+        &self.observations
+    }
+
+    /// The equation once an observation no longer holds: its base was
+    /// derived from an answer that changed, so nothing is proven.
+    pub(crate) fn with_withheld_base(&self) -> Self {
+        Self {
+            method: self.method.clone(),
+            base: MethodReturnBase::Unknown(UnknownReason::UnresolvedMethodReturn),
+            dependencies: Box::default(),
+            constant_dependencies: Box::default(),
+            observations: self.observations.clone(),
+            local_callees: self.local_callees.clone(),
         }
     }
 
@@ -179,5 +221,12 @@ impl MethodReturnEquation {
                         * size_of::<RubyConstant>()
                 })
                 .sum::<usize>()
+            + self
+                .observations
+                .iter()
+                .map(MethodReturnObservation::estimated_heap_bytes)
+                .sum::<usize>()
+            + self.local_callees.len() * size_of::<FullyQualifiedName>()
+            + self.local_callees.iter().map(fqn_heap_bytes).sum::<usize>()
     }
 }

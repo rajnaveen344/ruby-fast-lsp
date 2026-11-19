@@ -44,6 +44,7 @@ use syntax_diagnostics::generate_diagnostics;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 mod collection;
+pub use collection::ProjectSemanticSeed;
 mod compose;
 mod extension_facts;
 mod extension_host;
@@ -115,6 +116,8 @@ pub struct FileProcessor {
     extension_registry: ExtensionRegistryHandle,
     extension_project_context_seed: Option<Arc<parking_lot::RwLock<ProjectContextSeed>>>,
     jruby_import_provider: Option<Arc<JrubyImportProvider>>,
+    /// Every class and module the project declares, read before collection.
+    project_declared_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
     /// Owning project root used for require-path diagnostics during batch collection.
     require_project_root: Option<PathBuf>,
     /// Per-project configured load paths for require-path diagnostics.
@@ -131,6 +134,7 @@ impl FileProcessor {
             extension_registry: ExtensionRegistryHandle::from_environment(),
             extension_project_context_seed: None,
             jruby_import_provider: None,
+            project_declared_namespaces: None,
             require_project_root: None,
             require_load_paths: Vec::new(),
             require_dependency_roots: Vec::new(),
@@ -143,6 +147,7 @@ impl FileProcessor {
             extension_registry,
             extension_project_context_seed: None,
             jruby_import_provider: None,
+            project_declared_namespaces: None,
             require_project_root: None,
             require_load_paths: Vec::new(),
             require_dependency_roots: Vec::new(),
@@ -155,6 +160,16 @@ impl FileProcessor {
         seed: Arc<parking_lot::RwLock<ProjectContextSeed>>,
     ) -> Self {
         self.extension_project_context_seed = Some(seed);
+        self
+    }
+
+    /// Let project method bodies name classes declared in files that are
+    /// collected later in the same pass.
+    pub(crate) fn with_project_declared_namespaces(
+        mut self,
+        namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
+    ) -> Self {
+        self.project_declared_namespaces = namespaces;
         self
     }
 

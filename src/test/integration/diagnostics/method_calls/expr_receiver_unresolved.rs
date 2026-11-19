@@ -838,3 +838,77 @@ Bag.new&.<warn code="unresolved-method">missing</warn>
     )
     .await;
 }
+
+/// A declared type naming a class the project cannot resolve stays unknown
+/// behind `&.`: the nil alternative must not turn it into a missing method.
+#[tokio::test]
+async fn safe_navigation_does_not_claim_absence_on_an_unresolved_declared_class() {
+    crate::test::harness::check_project(&[(
+        "lib/shop.rb",
+        r#"module Shop
+  class Place
+    def label
+      "place"
+    end
+  end
+
+  class Finder
+    # @return [Place, nil]
+    def place
+      nil
+    end
+
+    # @return [Missing, nil]
+    def other
+      nil
+    end
+
+    def run
+      place&.<warn none>label</warn>
+      place&.<warn none>nope</warn>
+      other&.<warn none>label</warn>
+    end
+  end
+end
+"#,
+    )])
+    .await;
+}
+
+/// The same holds when a signature file declares the nilable result.
+#[tokio::test]
+async fn safe_navigation_does_not_claim_absence_on_an_unresolved_signature_class() {
+    crate::test::harness::check_project(&[
+        (
+            "sig/shop.rbs",
+            r#"module Shop
+  class Finder
+    def place: () -> Place?
+  end
+end
+"#,
+        ),
+        (
+            "lib/shop.rb",
+            r#"module Shop
+  class Place
+    def label
+      "place"
+    end
+  end
+
+  class Finder
+    def place
+      nil
+    end
+
+    def run
+      place&.<warn none>label</warn>
+    end
+  end
+end
+"#,
+        ),
+    ])
+    .await;
+}

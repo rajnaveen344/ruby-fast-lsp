@@ -3,7 +3,10 @@
 use crate::core::equations::method_return_equation::MethodReturnBase;
 #[cfg(test)]
 use crate::core::TypeInferenceOutcome;
-use crate::core::{ConstantTypeDependency, FullyQualifiedName, RubyType, UnknownReason};
+use crate::core::{
+    ConstantTypeDependency, FullyQualifiedName, MethodReturnObservation, RubyType, UnknownReason,
+};
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub(in crate::inference::type_tracker) mod dependencies;
@@ -81,6 +84,12 @@ pub(in crate::inference::type_tracker) struct ReturnEvidence {
     /// Value-constant terms returned by the current method. These stay
     /// private until attached to the file-owned method equation.
     pub(in crate::inference::type_tracker) constant_dependencies: BTreeSet<ConstantTypeDependency>,
+    /// Returns of other methods the current body was typed with. Lookups run
+    /// behind shared borrows of the tracker, so the record is interior.
+    pub(in crate::inference::type_tracker) observations: RefCell<BTreeSet<MethodReturnObservation>>,
+    /// Same-file methods whose collected return the current body was typed
+    /// with through an explicit receiver.
+    pub(in crate::inference::type_tracker) local_callees: RefCell<BTreeSet<FullyQualifiedName>>,
     /// Call locations whose result was proven directly from a modeled block or
     /// proc body. These are expression proofs, not dependencies on the
     /// ordinary return equation of the invoked method.

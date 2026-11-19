@@ -31,6 +31,24 @@ pub fn get_rbs_method_return_type(
         .cloned()
 }
 
+/// Whether attaching a block selects a different overload than the one the
+/// plain result lookup reads: the first overload takes no block while another
+/// takes one and returns something else.
+pub(crate) fn block_selects_another_result(class_name: &str, method_name: &str) -> bool {
+    let loader = RBS_LOADER.read();
+    let Some(method) = loader.get_instance_method(class_name, method_name) else {
+        return false;
+    };
+    let Some(first) = method.overloads.first() else {
+        return false;
+    };
+    first.block.is_none()
+        && method
+            .overloads
+            .iter()
+            .any(|overload| overload.block.is_some() && overload.return_type != first.return_type)
+}
+
 pub fn get_rbs_method_signatures(
     class_name: &str,
     method_name: &str,

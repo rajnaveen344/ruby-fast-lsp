@@ -8,7 +8,7 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::context::{
     LoadContext, LoadSink, LoadTarget, PathFacts, ProjectSourceCandidate,
 };
-use crate::loader::file_processor::ProjectFileCollectionTiming;
+use crate::loader::file_processor::{ProjectFileCollectionTiming, ProjectSemanticSeed};
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
@@ -476,10 +476,11 @@ impl IndexerProject {
         let requires_direct_semantic_seed =
             !uses_immutable_semantic_context && !registered_inputs.is_empty();
         let semantic_seed_started = Instant::now();
+        let mut project_namespaces = Vec::new();
         if requires_direct_semantic_seed {
             let semantic_seed_outcomes = registered_inputs
                 .par_iter()
-                .map(|registered| -> Result<(PathBuf, Option<FileAnalysis>)> {
+                .map(|registered| -> Result<(PathBuf, ProjectSemanticSeed)> {
                     let uri = Url::from_file_path(&registered.input.path).map_err(|_| {
                         anyhow!(
                             "project source path is not a valid file URI: {}",
@@ -504,11 +505,13 @@ impl IndexerProject {
             let mut failure = None;
             for outcome in semantic_seed_outcomes {
                 match outcome {
-                    Ok((path, Some(facts))) => {
-                        seed_paths.push(path);
-                        seed_facts.push(PathFacts::Facts(facts));
+                    Ok((path, seed)) => {
+                        project_namespaces.extend(seed.namespaces);
+                        if let Some(facts) = seed.facts {
+                            seed_paths.push(path);
+                            seed_facts.push(PathFacts::Facts(facts));
+                        }
                     }
-                    Ok((_, None)) => {}
                     Err(error) => {
                         failure = Some(error);
                         break;
@@ -532,6 +535,17 @@ impl IndexerProject {
         } else {
             baseline_known_namespaces
         };
+        let project_declared_namespaces = if requires_direct_semantic_seed {
+            Some(Arc::new(project_namespaces.into_iter().collect()))
+        } else if uses_immutable_semantic_context {
+            self.exhaustive_project_namespaces.clone()
+        } else {
+            None
+        };
+        let file_processor = file_processor
+            .clone()
+            .with_project_declared_namespaces(project_declared_namespaces);
+        let file_processor_ref = &file_processor;
 
         let project_file_completed = &self.project_file_completed;
         let project_file_total = self.project_file_total;

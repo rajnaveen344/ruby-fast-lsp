@@ -198,4 +198,49 @@ end
             RbsType::generic("Array", vec![RbsType::Class("String".to_string())])
         );
     }
+
+    #[test]
+    fn attribute_members_keep_their_name_kind_and_receiver() {
+        let source = "class Space\n  attr_reader path: String\n  attr_accessor self.depth: Integer\n  attr_writer attr_reader_self: self\nend\n";
+        let decls = Parser::new().parse(source).expect("attributes parse");
+        let Declaration::Class(class) = &decls[0] else {
+            panic!("Expected class");
+        };
+        let attributes = class
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                crate::types::Member::Attr(attribute) => Some((
+                    attribute.name.as_str(),
+                    attribute.kind,
+                    attribute.is_singleton,
+                    attribute.r#type.clone(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            attributes,
+            vec![
+                (
+                    "path",
+                    crate::types::AttrKind::Reader,
+                    false,
+                    RbsType::Class("String".to_string())
+                ),
+                (
+                    "depth",
+                    crate::types::AttrKind::Accessor,
+                    true,
+                    RbsType::Class("Integer".to_string())
+                ),
+                (
+                    "attr_reader_self",
+                    crate::types::AttrKind::Writer,
+                    false,
+                    RbsType::SelfType
+                ),
+            ]
+        );
+    }
 }

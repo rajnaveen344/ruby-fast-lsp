@@ -1,6 +1,6 @@
 use crate::core::{
-    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType, TypeInferenceOutcome,
-    UnknownReason,
+    FullyQualifiedName, MethodReturnObservation, NamespaceKind, ObservedReceiverAccess,
+    RubyConstant, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::method::return_type::receiver_rbs_return_type;
@@ -179,11 +179,6 @@ impl TypeTracker {
     ) -> Option<RubyType> {
         let project = self.analysis.project.as_ref()?;
         let method = crate::core::RubyMethod::new(method_name).ok()?;
-        if let Some(return_type) =
-            self.local_method_return_type_for_receiver(receiver_type, &method, !allow_private)
-        {
-            return Some(return_type);
-        }
         let (receiver_fqn, namespace_kind) = match receiver_type {
             RubyType::Class(fqn) | RubyType::Module(fqn) => {
                 (fqn.clone(), crate::core::NamespaceKind::Instance)
@@ -221,7 +216,48 @@ impl TypeTracker {
         } else {
             ReceiverAccess::Public
         };
-        project.receiver_method_return_type(&namespace, &method, access)
+        // A same-file answer is recollected together with this body; only an
+        // answer taken from the rest of the project can go stale under it.
+        if let Some(local) =
+            self.local_method_return_type_for_receiver(receiver_type, &method, !allow_private)
+        {
+            return Some(local);
+        }
+        let return_type = project.receiver_method_return_type(&namespace, &method, access)?;
+        self.observe_method_return(receiver_type, namespace, method, access, &return_type);
+        Some(return_type)
+    }
+
+    /// Remember a dispatched return the current method body relied on. The
+    /// bundled core signatures never change, so an answer they also give
+    /// needs no record.
+    fn observe_method_return(
+        &self,
+        receiver_type: &RubyType,
+        receiver: FullyQualifiedName,
+        method: crate::core::RubyMethod,
+        access: ReceiverAccess<'_>,
+        observed: &RubyType,
+    ) {
+        if receiver_rbs_return_type(receiver_type, method.as_str()).as_ref() == Some(observed) {
+            return;
+        }
+        let access = match access {
+            ReceiverAccess::Any => ObservedReceiverAccess::Any,
+            ReceiverAccess::Protected { caller } => {
+                ObservedReceiverAccess::Protected(caller.clone())
+            }
+            ReceiverAccess::Public => ObservedReceiverAccess::Public,
+        };
+        self.returns
+            .observations
+            .borrow_mut()
+            .insert(MethodReturnObservation {
+                receiver,
+                method,
+                access,
+                observed: observed.clone(),
+            });
     }
 
     pub(in crate::inference::type_tracker) fn local_method_return_type_for_receiver(
@@ -244,7 +280,9 @@ impl TypeTracker {
         if require_public && !self.analysis.public_methods.contains(&method_fqn) {
             return None;
         }
-        self.analysis.method_returns.get(&method_fqn).cloned()
+        let return_type = self.analysis.method_returns.get(&method_fqn).cloned()?;
+        self.returns.local_callees.borrow_mut().insert(method_fqn);
+        Some(return_type)
     }
 
     pub(in crate::inference::type_tracker) fn infer_super_return_type(&self) -> RubyType {

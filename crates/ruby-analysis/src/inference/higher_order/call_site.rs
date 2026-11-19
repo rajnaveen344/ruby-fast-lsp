@@ -42,6 +42,39 @@ pub(crate) fn prepare_call(
     }
 }
 
+/// Whether a block call that could not be prepared must stay unknown. The
+/// plain result lookup reads the overload without a block, so its answer is
+/// wrong whenever the block selects another one on any possible receiver.
+pub(crate) fn unprepared_block_result_is_unknown(
+    receiver_type: Option<&RubyType>,
+    method_name: &str,
+) -> bool {
+    let class_name = match receiver_type {
+        Some(RubyType::Union(members)) => {
+            return members
+                .iter()
+                .any(|member| unprepared_block_result_is_unknown(Some(member), method_name));
+        }
+        Some(RubyType::Array(_)) => "Array".to_string(),
+        Some(RubyType::Hash(_, _) | RubyType::Shape(_)) => "Hash".to_string(),
+        Some(RubyType::Class(fqn)) => fqn
+            .namespace_parts()
+            .iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        Some(
+            RubyType::ClassReference(_)
+            | RubyType::Module(_)
+            | RubyType::ModuleReference(_)
+            | RubyType::Literal(_)
+            | RubyType::Unknown,
+        )
+        | None => return false,
+    };
+    crate::inference::rbs::block_selects_another_result(&class_name, method_name)
+}
+
 impl PreparedCallableSet {
     /// The block's positional parameters bound to the yielded types; a
     /// parameter the signature does not yield is nil.

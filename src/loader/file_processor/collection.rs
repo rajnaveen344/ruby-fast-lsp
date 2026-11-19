@@ -18,7 +18,6 @@ use ruby_analysis::core::{
 };
 use ruby_analysis::engine::ProjectNeutralFileFactsTemplate;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use ruby_prism::Visit;
@@ -27,6 +26,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
+
+/// One project file's contribution to the pre-collection skeleton.
+#[derive(Default)]
+pub struct ProjectSemanticSeed {
+    /// Facts the skeleton engine stores for this file, when it has any.
+    pub facts: Option<FileAnalysis>,
+    /// Every class and module the file declares.
+    pub namespaces: Vec<FullyQualifiedName>,
+}
 
 pub(super) fn replace_analysis_facts_for_file(
     target: &dyn LoadTarget,
@@ -250,24 +258,29 @@ impl FileProcessor {
     /// Collect the direct, extension-independent declarations that form the
     /// semantic skeleton for one deterministic project batch.
     ///
-    /// Every project seeds value-constant symbols and types before body
-    /// traversal. Extension-aware projects also retain their namespace and
-    /// method skeleton. This keeps generic receiver/block inference independent
-    /// of discovery order without broadening the extension lookup policy.
+    /// Every project file names its classes and modules, and seeds
+    /// value-constant symbols and types, before body traversal.
+    /// Extension-aware projects also retain their namespace and method
+    /// skeleton. This keeps constant lookup and generic receiver/block
+    /// inference independent of discovery order without broadening the
+    /// extension lookup policy.
     pub fn collect_project_direct_semantic_seed(
         &self,
         uri: &Url,
         content: &str,
         analysis_engine: &Arc<dyn LoadTarget>,
         known_namespaces: &HashSet<FullyQualifiedName>,
-    ) -> Option<FileAnalysis> {
+    ) -> ProjectSemanticSeed {
         let extension_namespace_seed = self.requires_extension_namespace_seed(uri);
-        // The direct collector emits value-constant symbols only for Prism's
-        // constant write nodes, whose assignment token contains '='. This is
-        // a conservative parse prefilter; extension skeletons still run even
-        // when the source contains no assignment.
-        if !extension_namespace_seed && !content.contains('=') {
-            return None;
+        // A namespace needs a `class` or `module` keyword, or a constant
+        // write whose assignment token contains '='. This is a conservative
+        // parse prefilter; extension skeletons still run without either.
+        if !extension_namespace_seed
+            && !content.contains('=')
+            && !content.contains("class")
+            && !content.contains("module")
+        {
+            return ProjectSemanticSeed::default();
         }
         let path = uri
             .to_file_path()
@@ -282,11 +295,6 @@ impl FileProcessor {
         });
         let source = analysis_source(uri, content);
         let parse = ruby_prism::parse(source.as_bytes());
-        if !extension_namespace_seed
-            && !AnalysisIndexer::has_value_constant_declarations(&parse.node())
-        {
-            return None;
-        }
         let direct = collect_direct_facts(
             &**analysis_engine,
             &parse.node(),
@@ -294,13 +302,29 @@ impl FileProcessor {
             file_id,
             Some(known_namespaces),
         );
+        // A nearer class another file declares must be nameable before any
+        // body binds a constant, or a same-named outer class would win.
+        let namespaces = direct
+            .symbols
+            .iter()
+            .filter(|symbol| {
+                matches!(
+                    symbol.kind,
+                    AnalysisSymbolKind::Class | AnalysisSymbolKind::Module
+                )
+            })
+            .map(|symbol| symbol.fqn.clone())
+            .collect::<Vec<_>>();
         let symbols = direct
             .symbols
             .into_iter()
             .filter(|symbol| symbol.kind == AnalysisSymbolKind::Constant)
             .collect::<Vec<_>>();
         if symbols.is_empty() && !extension_namespace_seed {
-            return None;
+            return ProjectSemanticSeed {
+                facts: None,
+                namespaces,
+            };
         }
         let constants = symbols
             .iter()
@@ -323,7 +347,10 @@ impl FileProcessor {
             facts.graph_edges = direct.graph_edges;
             facts.unresolved_graph_edges = direct.unresolved_graph_edges;
         }
-        Some(facts)
+        ProjectSemanticSeed {
+            facts: Some(facts),
+            namespaces,
+        }
     }
 
     fn requires_extension_namespace_seed(&self, uri: &Url) -> bool {
@@ -640,6 +667,13 @@ impl FileProcessor {
             }
             None => fact_collector.with_project_known_namespaces(),
         };
+        if let Some(project_namespaces) = extensions_enabled
+            .then_some(self.project_declared_namespaces.as_ref())
+            .flatten()
+        {
+            fact_collector =
+                fact_collector.with_project_declared_namespaces(project_namespaces.clone());
+        }
         fact_collector.extend_direct_known_namespaces(
             direct_facts_seed
                 .iter()

@@ -24,6 +24,11 @@ pub(in crate::indexer::fact_collector) struct SemanticContext {
     /// node. Method bodies run after the file loads and may name them; a
     /// class body runs in order and must not.
     pub(in crate::indexer::fact_collector) file_namespaces: HashSet<FullyQualifiedName>,
+    /// Namespaces the whole project declares, read before any file is
+    /// collected. Method bodies may name them like `file_namespaces`; a class
+    /// body must not, because load order is unknown.
+    pub(in crate::indexer::fact_collector) project_namespaces:
+        Option<Arc<HashSet<FullyQualifiedName>>>,
 }
 
 /// Where a walk learns the namespaces declared outside it.
@@ -55,6 +60,7 @@ impl SemanticContext {
             known_namespaces: HashSet::new(),
             outside_namespaces: OutsideNamespaces::None,
             file_namespaces: HashSet::new(),
+            project_namespaces: None,
         }
     }
 }
@@ -84,11 +90,28 @@ impl FactCollector {
         self.semantics.file_namespaces.extend(file_namespaces);
     }
 
+    /// Namespaces declared anywhere in the project, which method bodies may
+    /// name before their file is collected. Class-body declarations ignore
+    /// them.
+    pub fn with_project_declared_namespaces(
+        mut self,
+        project_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Self {
+        self.semantics.project_namespaces = Some(project_namespaces);
+        self
+    }
+
     pub(in crate::indexer::fact_collector) fn direct_namespace_is_known(
         &self,
         fqn: &FullyQualifiedName,
     ) -> bool {
-        self.direct_namespace_is_declared(fqn) || self.semantics.file_namespaces.contains(fqn)
+        self.direct_namespace_is_declared(fqn)
+            || self.semantics.file_namespaces.contains(fqn)
+            || self
+                .semantics
+                .project_namespaces
+                .as_ref()
+                .is_some_and(|namespaces| namespaces.contains(fqn))
     }
 
     /// Whether `fqn` exists at this point of a top-to-bottom load: shared

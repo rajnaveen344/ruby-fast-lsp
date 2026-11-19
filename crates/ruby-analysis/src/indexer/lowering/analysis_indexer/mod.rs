@@ -7,10 +7,7 @@ use crate::core::{
     FileAnalysis, FullyQualifiedName, NamespaceKind, RubyConstant, RubyType, SourceFileId,
     TextRange,
 };
-use ruby_prism::{
-    ConstantPathTargetNode, ConstantPathWriteNode, ConstantTargetNode, ConstantWriteNode, Node,
-    Visit,
-};
+use ruby_prism::{Node, Visit};
 
 use self::syntax::{constant_parts, u32_offset};
 use crate::indexer::documents::scope_tracker::ScopeTracker;
@@ -96,34 +93,6 @@ pub struct AnalysisIndexer<'k> {
 }
 
 impl<'k> AnalysisIndexer<'k> {
-    /// Whether the direct declaration pass can emit a value-constant symbol.
-    /// Keep this aligned with the constant-write visitors in `visitor.rs`. Callers can
-    /// reuse an existing parse before preparing the more expensive semantic
-    /// lookup context for files with no value declarations.
-    pub fn has_value_constant_declarations(node: &Node<'_>) -> bool {
-        struct Finder(bool);
-        impl<'pr> Visit<'pr> for Finder {
-            fn visit_constant_write_node(&mut self, _node: &ConstantWriteNode<'pr>) {
-                self.0 = true;
-            }
-
-            fn visit_constant_path_write_node(&mut self, _node: &ConstantPathWriteNode<'pr>) {
-                self.0 = true;
-            }
-
-            fn visit_constant_target_node(&mut self, _node: &ConstantTargetNode<'pr>) {
-                self.0 = true;
-            }
-
-            fn visit_constant_path_target_node(&mut self, _node: &ConstantPathTargetNode<'pr>) {
-                self.0 = true;
-            }
-        }
-        let mut finder = Finder(false);
-        finder.visit(node);
-        finder.0
-    }
-
     pub fn new(file_id: SourceFileId) -> Self {
         Self::with_known_semantics(file_id, &NoKnownSemantics)
     }

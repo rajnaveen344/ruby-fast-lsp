@@ -119,40 +119,49 @@ impl<'a> Visitor<'a> {
         }
     }
 
-    /// Visit an attribute declaration
+    /// Visit an attribute declaration. The keyword, the `self.` marker, and
+    /// the name are read from their own nodes: the declared type may itself
+    /// spell `self` or a name that contains a keyword.
     fn visit_attribute(&self, node: Node) -> Result<AttrDecl, ParseError> {
-        let text = self.node_text(&node);
-        let kind = if text.contains("attr_accessor") {
-            AttrKind::Accessor
-        } else if text.contains("attr_writer") {
-            AttrKind::Writer
-        } else {
-            AttrKind::Reader
-        };
-
-        let mut attr = AttrDecl {
-            name: String::new(),
-            kind,
-            r#type: RbsType::Untyped,
-            is_singleton: text.contains("self."),
-            location: Some(self.node_location(&node)),
-        };
+        let mut kind = AttrKind::Reader;
+        let mut name = None;
+        let mut is_singleton = false;
+        let mut declared_type = RbsType::Untyped;
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "attr_name" | "name" | "identifier" => {
-                    attr.name = self.node_text(&child).to_string();
+                "attribyte_type" => {
+                    kind = match self.node_text(&child) {
+                        "attr_accessor" => AttrKind::Accessor,
+                        "attr_writer" => AttrKind::Writer,
+                        _ => AttrKind::Reader,
+                    };
                 }
-                _ => {
-                    if let Ok(t) = self.visit_type(child) {
-                        attr.r#type = t;
+                "self" => is_singleton = true,
+                "method_name" => name = Some(self.node_text(&child).to_string()),
+                "type" => {
+                    if let Ok(parsed) = self.visit_type(child) {
+                        declared_type = parsed;
                     }
                 }
+                _ => {}
             }
         }
+        let name = name.ok_or_else(|| {
+            ParseError::with_location(
+                "RBS attribute member has no name",
+                self.node_location(&node),
+            )
+        })?;
 
-        Ok(attr)
+        Ok(AttrDecl {
+            name,
+            kind,
+            r#type: declared_type,
+            is_singleton,
+            location: Some(self.node_location(&node)),
+        })
     }
 
     /// Visit an alias declaration

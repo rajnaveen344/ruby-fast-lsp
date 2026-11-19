@@ -57,9 +57,24 @@ impl FactCollector {
         if method_name.ends_with('!') {
             return None;
         }
-        let prepared = prepared
+        let prepared = match prepared
             .unwrap_or_else(|| self.prepare_higher_order_call_for_node(call_node, local_types))
-            .ok()?;
+        {
+            Ok(prepared) => prepared,
+            Err(reason) => {
+                let receiver_type = call_node.receiver().map(|receiver| {
+                    project_immediate_hash_receiver_type(
+                        &receiver,
+                        self.infer_type_from_value_with_locals(&receiver, local_types),
+                    )
+                });
+                return call_site::unprepared_block_result_is_unknown(
+                    receiver_type.as_ref(),
+                    &method_name,
+                )
+                .then(|| TypeInferenceOutcome::unknown(reason));
+            }
+        };
         if let Some(block) = block_expression.as_block_node() {
             if block.body().as_ref().is_some_and(|body| {
                 crate::inference::control_flow::has_unsupported_higher_order_exit(body)

@@ -3,6 +3,7 @@
 
 mod argument_type;
 mod clean_receivers;
+mod declared_types;
 mod expr_receiver_unresolved;
 mod missing_kwarg;
 mod misspelled_method;
