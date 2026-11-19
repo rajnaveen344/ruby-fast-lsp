@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::grouped_methods::grouped_method_targets;
+use super::method_checks::PendingArgumentChecks;
 use super::policy::{MethodAbsenceClaims, UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
 use super::{constant_name, MethodCallOutcomeCaches, MethodReferenceCacheKey};
 use crate::core::names::fqn_id::ConstLookupId;
@@ -49,6 +50,7 @@ impl Project {
         let mut method_lookup_chain_cache = MethodLookupChainCache::new();
         let mut method_absence_claims = MethodAbsenceClaims::new(self);
         let mut resolved_call_outcomes = HashMap::new();
+        let mut argument_checks = PendingArgumentChecks::default();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
         self.uses.clear_resolved();
         let candidate_loop_started = Instant::now();
@@ -331,6 +333,7 @@ impl Project {
                                         &owner_fqn,
                                         &method,
                                         diagnostics,
+                                        Some(&mut argument_checks),
                                         &mut unresolved_constants,
                                     );
                                 }
@@ -476,6 +479,11 @@ impl Project {
         drop(method_absence_claims);
         drop(call_outcome_caches);
 
+        self.push_argument_type_diagnostics(
+            argument_checks,
+            &resolved_call_outcomes,
+            &mut unresolved_constants,
+        );
         self.uses.restore_candidates(reference_candidate_store);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         let sort_started = Instant::now();

@@ -356,6 +356,16 @@ impl YardMethodDoc {
     pub fn find_param(&self, name: &str) -> Option<&YardParam> {
         self.params.iter().find(|p| p.name == name)
     }
+
+    /// The one documented type contract for a parameter. Overloads may
+    /// document the same name with different types; then no single type
+    /// holds for every call and the parameter has no declared contract.
+    pub fn declared_param(&self, name: &str) -> Option<&YardParam> {
+        let mut tags = self.params.iter().filter(|p| p.name == name);
+        let first = tags.next()?;
+        tags.all(|other| other.types == first.types)
+            .then_some(first)
+    }
 }
 
 #[cfg(test)]

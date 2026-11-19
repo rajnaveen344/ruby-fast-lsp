@@ -135,7 +135,7 @@ impl TypeTracker {
             }
             let block_return_type = block
                 .body()
-                .map(|body| self.track_node(&body))
+                .map(|body| self.track_repeatable_body(|tracker| tracker.track_node(&body)))
                 .unwrap_or_else(RubyType::nil_class);
             let post_block_parameter_types = parameter_bindings
                 .iter()
@@ -268,7 +268,7 @@ impl TypeTracker {
         }
         let return_type = block
             .body()
-            .map(|body| self.track_node(&body))
+            .map(|body| self.track_repeatable_body(|tracker| tracker.track_node(&body)))
             .unwrap_or_else(RubyType::nil_class);
         self.environment = env_before;
 

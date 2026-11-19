@@ -3,7 +3,7 @@
 //! Ordinary calls keep every field inline: ranges inside the call's own file
 //! are byte spans, receiver classes and modules are interned names, and the
 //! receiver label is either the receiver type itself or interned identifier
-//! text. Rare payloads (keyword arguments, structural receiver types,
+//! text. Rare payloads (keyword arguments, typed argument evidence, structural receiver types,
 //! rendered labels, explicit definition ranges, and a diagnostic range that
 //! differs from the reference range) live in one cold box allocated only when
 //! present.
@@ -13,8 +13,8 @@ use std::mem::size_of;
 use ustr::Ustr;
 
 use super::candidate::{
-    KeywordArgCandidate, MethodCallSignatureCandidate, MethodReceiverLabel,
-    MethodReferenceDiagnostics,
+    ArgumentCandidate, ArgumentForm, KeywordArgCandidate, MethodCallSignatureCandidate,
+    MethodReceiverLabel, MethodReferenceDiagnostics,
 };
 use super::MethodReferenceAccess;
 use crate::core::names::fqn_id::{ConstLookupId, FqnId, OptionalFqnId};
@@ -93,6 +93,7 @@ struct ColdMethodReference {
     receiver_label: Option<Box<str>>,
     receiver_type: Option<RubyType>,
     keyword_args: Box<[KeywordArgCandidate]>,
+    arguments: Box<[ArgumentCandidate]>,
 }
 
 impl ColdMethodReference {
@@ -102,6 +103,7 @@ impl ColdMethodReference {
             && self.receiver_label.is_none()
             && self.receiver_type.is_none()
             && self.keyword_args.is_empty()
+            && self.arguments.is_empty()
     }
 }
 
@@ -170,6 +172,7 @@ pub struct MethodCallSignature<'a> {
     pub trailing_positional_may_be_options_hash: bool,
     pub keyword_args: &'a [KeywordArgCandidate],
     pub has_keyword_splat: bool,
+    pub arguments: &'a [ArgumentCandidate],
 }
 
 /// Diagnostic evidence of one method reference, borrowed from its row.
@@ -288,6 +291,7 @@ impl StoredMethodReferenceCandidate {
                     "reject such sources before indexing",
                 );
                 cold.keyword_args = signature.keyword_args.into_boxed_slice();
+                cold.arguments = signature.arguments.into_boxed_slice();
             }
         }
         row.flags = flags;
@@ -359,6 +363,27 @@ impl StoredMethodReferenceCandidate {
                 + cold.receiver_label.as_ref().map_or(0, |label| label.len())
                 + cold.receiver_type.as_ref().map_or(0, ruby_type_heap_bytes)
                 + std::mem::size_of_val::<[KeywordArgCandidate]>(&cold.keyword_args)
+                + std::mem::size_of_val::<[ArgumentCandidate]>(&cold.arguments)
+                + cold
+                    .arguments
+                    .iter()
+                    .map(|argument| match &argument.form {
+                        ArgumentForm::Local(ruby_type) => {
+                            size_of::<RubyType>() + ruby_type_heap_bytes(ruby_type)
+                        }
+                        ArgumentForm::Call
+                        | ArgumentForm::String
+                        | ArgumentForm::Symbol
+                        | ArgumentForm::Integer
+                        | ArgumentForm::Float
+                        | ArgumentForm::True
+                        | ArgumentForm::False
+                        | ArgumentForm::Array
+                        | ArgumentForm::Hash
+                        | ArgumentForm::Range
+                        | ArgumentForm::Regexp => 0,
+                    })
+                    .sum::<usize>()
         })
     }
 
@@ -463,6 +488,7 @@ impl<'a> MethodCallDiagnostics<'a> {
                 .flag(TRAILING_POSITIONAL_MAY_BE_OPTIONS_HASH),
             keyword_args: row.cold.as_ref().map_or(&[], |cold| &cold.keyword_args),
             has_keyword_splat: row.flag(HAS_KEYWORD_SPLAT),
+            arguments: row.cold.as_ref().map_or(&[], |cold| &cold.arguments),
         })
     }
 }

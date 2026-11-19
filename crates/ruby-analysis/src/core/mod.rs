@@ -43,9 +43,10 @@ pub use storage::method_store::{
     MethodVisibilityOverrideFact,
 };
 pub use storage::reference_store::{
-    ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate, MethodReceiverLabel,
-    MethodReferenceAccess, MethodReferenceCandidate, MethodReferenceDiagnostics,
-    ReferenceCandidate, ReferenceCandidateKind, ReferenceFact,
+    ArgumentCandidate, ArgumentForm, ArgumentSlot, ConstantPath, KeywordArgCandidate,
+    MethodCallSignatureCandidate, MethodReceiverLabel, MethodReferenceAccess,
+    MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate,
+    ReferenceCandidateKind, ReferenceFact,
 };
 pub use storage::symbol_store::{SymbolFact, SymbolKind};
 pub use storage::type_store::{

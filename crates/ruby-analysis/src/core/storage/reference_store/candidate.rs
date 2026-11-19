@@ -50,6 +50,9 @@ pub struct MethodCallSignatureCandidate {
     pub trailing_positional_may_be_options_hash: bool,
     pub keyword_args: Vec<KeywordArgCandidate>,
     pub has_keyword_splat: bool,
+    /// Arguments whose type a later pass can prove, in source order.
+    /// Arguments of any other form are absent.
+    pub arguments: Vec<ArgumentCandidate>,
 }
 
 impl MethodCallSignatureCandidate {
@@ -116,6 +119,44 @@ pub struct MethodReferenceCandidate {
 pub struct KeywordArgCandidate {
     pub name: Ustr,
     pub range: TextRange,
+}
+
+/// The parameter slot one call argument fills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgumentSlot {
+    /// Zero-based index among the call's counted positional arguments.
+    Positional(u16),
+    /// Index into the call's `keyword_args`.
+    Keyword(u16),
+}
+
+/// How an argument's type is proven: a stored flow proof for a local, one
+/// exact lookup for a call, or the literal form alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgumentForm {
+    /// A local variable read with the type the flow tracker proved at this
+    /// read while its file was indexed.
+    Local(Box<RubyType>),
+    Call,
+    String,
+    Symbol,
+    Integer,
+    Float,
+    True,
+    False,
+    Array,
+    Hash,
+    Range,
+    Regexp,
+}
+
+/// One call argument whose type the resolve pass may prove.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgumentCandidate {
+    /// The argument expression.
+    pub range: TextRange,
+    pub slot: ArgumentSlot,
+    pub form: ArgumentForm,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

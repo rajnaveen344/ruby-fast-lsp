@@ -12,10 +12,11 @@ use crate::core::{RubyConstant, RubyMethod, SourceFileId, TextRange};
 use smallvec::SmallVec;
 
 pub use candidate::{
-    KeywordArgCandidate, MethodCallSignatureCandidate, MethodReceiverLabel,
-    MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate,
-    ReferenceCandidateKind, StoredConstantReferenceCandidate, StoredReferenceCandidate,
-    StoredReferenceCandidateKind, StoredReferenceCandidateRef, StoredResolvedReferenceCandidate,
+    ArgumentCandidate, ArgumentForm, ArgumentSlot, KeywordArgCandidate,
+    MethodCallSignatureCandidate, MethodReceiverLabel, MethodReferenceCandidate,
+    MethodReferenceDiagnostics, ReferenceCandidate, ReferenceCandidateKind,
+    StoredConstantReferenceCandidate, StoredReferenceCandidate, StoredReferenceCandidateKind,
+    StoredReferenceCandidateRef, StoredResolvedReferenceCandidate,
 };
 pub use method_row::{
     MethodCallDiagnostics, MethodCallSignature, StoredMethodReferenceCandidate,

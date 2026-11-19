@@ -287,7 +287,7 @@ impl FactCollector {
             let param_types = params
                 .iter()
                 .filter_map(|param| {
-                    let yard_param = doc.find_param(&param.name)?;
+                    let yard_param = doc.declared_param(&param.name)?;
                     if yard_param.types.is_empty() {
                         None
                     } else {
@@ -640,6 +640,9 @@ impl FactCollector {
             .max_live_shape_aliases
             .max(tracker.max_live_shape_aliases());
         if self.options.record_local_read_unknown_reasons {
+            self.flow
+                .argument_local_types
+                .extend(tracker.take_argument_local_reads());
             let reads = tracker.take_local_read_types();
             self.install_local_read_types(reads);
         }

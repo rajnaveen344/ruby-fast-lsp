@@ -5,6 +5,7 @@ use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use super::grouped_methods::grouped_method_targets;
+use super::method_checks::PendingArgumentChecks;
 use super::policy::{MethodAbsenceClaims, UNRESOLVED_CONSTANT, UNRESOLVED_METHOD};
 use super::{constant_name, MethodCallOutcomeCaches};
 use crate::core::storage::reference_store::ConstLookup;
@@ -35,6 +36,7 @@ impl Project {
         let mut method_absence_claims = MethodAbsenceClaims::new(self);
         let mut resolved_refs = Vec::new();
         let mut resolved_call_outcomes = HashMap::new();
+        let mut argument_checks = PendingArgumentChecks::default();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
 
         for candidate in reference_candidates {
@@ -298,6 +300,7 @@ impl Project {
                                         &owner_fqn,
                                         &method,
                                         diagnostics,
+                                        Some(&mut argument_checks),
                                         &mut unresolved,
                                     );
                                 }
@@ -359,6 +362,11 @@ impl Project {
             }
         }
 
+        self.push_argument_type_diagnostics(
+            argument_checks,
+            &resolved_call_outcomes,
+            &mut unresolved,
+        );
         self.uses.replace_resolved_file(file_id, resolved_refs);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         self.diagnostics

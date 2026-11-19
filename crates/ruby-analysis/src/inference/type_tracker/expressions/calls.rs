@@ -16,6 +16,7 @@ impl TypeTracker {
     /// Infer the return type of a method call, then release the enclosing
     /// locals its literal block may have assigned.
     pub(in crate::inference::type_tracker) fn infer_call(&mut self, call: &CallNode) -> RubyType {
+        self.observe_argument_local_reads(call);
         let result = self.infer_call_result(call);
         if let Some(block) = call.block().and_then(|block| block.as_block_node()) {
             self.release_closure_captured_writes(block.body());

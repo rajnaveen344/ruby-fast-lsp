@@ -24,6 +24,9 @@ pub(in crate::indexer::fact_collector) struct FlowState {
     /// collected before Prism visits the RHS, but reads inside that RHS must
     /// observe the previous value rather than the not-yet-completed write.
     pub(in crate::indexer::fact_collector) active_writes: Vec<(TypeSubject, TextRange)>,
+    /// Flow-proven types of locals passed directly as call arguments, keyed
+    /// by the read's start byte. A missing entry means the type is unproven.
+    pub(in crate::indexer::fact_collector) argument_local_types: HashMap<usize, RubyType>,
 }
 
 impl FactCollector {

@@ -225,6 +225,7 @@ fn ordinary_method_row_round_trips_every_field() {
             trailing_positional_may_be_options_hash: false,
             keyword_args: &[],
             has_keyword_splat: false,
+            arguments: &[],
         })
     );
 }
@@ -234,6 +235,11 @@ fn rare_method_row_payloads_round_trip_through_the_cold_box() {
     let keyword = KeywordArgCandidate {
         name: ustr::Ustr::from("force"),
         range: TextRange::new(file(), 15, 20),
+    };
+    let argument = ArgumentCandidate {
+        range: TextRange::new(file(), 21, 23),
+        slot: ArgumentSlot::Positional(0),
+        form: ArgumentForm::Integer,
     };
     let structural = RubyType::union([RubyType::Class(user()), RubyType::nil_class()]);
     let mut names = Vec::new();
@@ -257,6 +263,7 @@ fn rare_method_row_payloads_round_trip_through_the_cold_box() {
                 trailing_positional_may_be_options_hash: true,
                 keyword_args: vec![keyword.clone()],
                 has_keyword_splat: true,
+                arguments: vec![argument.clone()],
             }),
         }),
         &mut names,
@@ -296,6 +303,7 @@ fn rare_method_row_payloads_round_trip_through_the_cold_box() {
             trailing_positional_may_be_options_hash: true,
             keyword_args: std::slice::from_ref(&keyword),
             has_keyword_splat: true,
+            arguments: std::slice::from_ref(&argument),
         })
     );
 }

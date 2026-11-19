@@ -44,6 +44,8 @@ pub(in crate::engine) const UNRESOLVED_METHOD: DiagnosticRule =
     DiagnosticRule::new("unresolved-method", DiagnosticSeverity::Warning);
 pub(in crate::engine) const UNSUPPORTED_RUNTIME_API: DiagnosticRule =
     DiagnosticRule::new("unsupported-runtime-api", DiagnosticSeverity::Warning);
+pub(in crate::engine) const ARGUMENT_TYPE_MISMATCH: DiagnosticRule =
+    DiagnosticRule::new("argument-type-mismatch", DiagnosticSeverity::Warning);
 pub(in crate::engine) const WRONG_ARITY: DiagnosticRule =
     DiagnosticRule::new("wrong-arity", DiagnosticSeverity::Warning);
 pub(in crate::engine) const UNKNOWN_KWARG: DiagnosticRule =
@@ -59,13 +61,14 @@ pub(in crate::engine) const NIL_CALL: DiagnosticRule =
 
 /// Families that resolve passes derive from candidates. A rebuild drops
 /// these and keeps every other resolved fact.
-const RESOLVE_DERIVED: [DiagnosticRule; 9] = [
+const RESOLVE_DERIVED: [DiagnosticRule; 10] = [
     UNRESOLVED_CONSTANT,
     UNRESOLVED_METHOD,
     UNSUPPORTED_RUNTIME_API,
     WRONG_ARITY,
     UNKNOWN_KWARG,
     MISSING_KWARG,
+    ARGUMENT_TYPE_MISMATCH,
     RAISE_NON_EXCEPTION,
     BAD_SPLAT,
     NIL_CALL,

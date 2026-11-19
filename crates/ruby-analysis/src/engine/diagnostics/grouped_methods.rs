@@ -96,7 +96,16 @@ impl Project {
                 diagnostics.diagnostic_range(),
                 &mut grouped,
             );
-            self.push_signature_diagnostics(&fact, &fact.owner, &method, diagnostics, &mut grouped);
+            // A union receiver has one parameter list per member; argument
+            // types are compared only for a single resolved callee.
+            self.push_signature_diagnostics(
+                &fact,
+                &fact.owner,
+                &method,
+                diagnostics,
+                None,
+                &mut grouped,
+            );
         }
         let mut grouped = grouped.into_iter().collect::<Vec<_>>();
         grouped.sort_by_key(|(file_id, _facts)| file_id.0);

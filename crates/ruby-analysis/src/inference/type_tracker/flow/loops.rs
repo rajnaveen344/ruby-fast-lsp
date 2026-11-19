@@ -29,7 +29,8 @@ impl TypeTracker {
         let mut last_type = RubyType::nil_class();
         for _iteration in 0..iterations {
             if let Some(statements) = while_node.statements() {
-                last_type = self.track_node(&statements.as_node());
+                last_type =
+                    self.track_repeatable_body(|tracker| tracker.track_node(&statements.as_node()));
             }
         }
         self.control_flow.loop_depth -= 1;
@@ -65,7 +66,8 @@ impl TypeTracker {
         let mut last_type = RubyType::nil_class();
         for _iteration in 0..iterations {
             if let Some(statements) = until_node.statements() {
-                last_type = self.track_node(&statements.as_node());
+                last_type =
+                    self.track_repeatable_body(|tracker| tracker.track_node(&statements.as_node()));
             }
         }
         self.control_flow.loop_depth -= 1;

@@ -85,6 +85,7 @@ impl TypeTracker {
         self.next_shape_identity = 0;
         self.observations.snapshots.clear();
         self.observations.local_reads.clear();
+        self.observations.argument_reads.clear();
         self.observations.has_seen_control_flow = false;
         self.returns.local_terms.clear();
         self.returns.explicit_values.clear();

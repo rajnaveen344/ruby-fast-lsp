@@ -19,6 +19,14 @@ pub(in crate::inference::type_tracker) struct TypeObservations {
     /// read evidence is only useful inside or after control flow; straight-line
     /// reads are already represented by the scope's assignment facts.
     pub(in crate::inference::type_tracker) has_seen_control_flow: bool,
+    /// Proven types of locals passed directly as call arguments, keyed by the
+    /// read's start offset. Only reads visited exactly once with the exact
+    /// reaching environment are recorded; see `observe_argument_local_reads`.
+    pub(in crate::inference::type_tracker) argument_reads: Vec<(usize, RubyType)>,
+    /// Depth of bodies that may run more than once or later than their
+    /// position (loops and blocks). One forward visit of such a body does not
+    /// see every value a captured local can hold there.
+    pub(in crate::inference::type_tracker) repeatable_body_depth: usize,
 }
 
 /// One exact local-variable read solved by the forward flow tracker.
@@ -71,6 +79,73 @@ impl TypeTracker {
             }
         }
         deduplicated
+    }
+
+    /// Proven argument-local types, sorted by read offset.
+    pub(crate) fn take_argument_local_reads(&mut self) -> Vec<(usize, RubyType)> {
+        let mut reads = std::mem::take(&mut self.observations.argument_reads);
+        reads.sort_by_key(|(offset, _)| *offset);
+        reads.dedup_by_key(|(offset, _)| *offset);
+        reads
+    }
+
+    /// Track a body that may run repeatedly or after later statements.
+    pub(in crate::inference::type_tracker) fn track_repeatable_body<T>(
+        &mut self,
+        track: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        self.observations.repeatable_body_depth += 1;
+        let result = track(self);
+        self.observations.repeatable_body_depth -= 1;
+        result
+    }
+
+    /// Record the type of each local passed directly to `call`.
+    ///
+    /// The environment is exact here only for a single forward visit, so
+    /// reads inside loops and blocks are skipped. A local whose value is
+    /// Unknown, carries an Unknown reason, or depends on a constant equation
+    /// that resolves later is left unrecorded: no record means no proof.
+    pub(in crate::inference::type_tracker) fn observe_argument_local_reads(
+        &mut self,
+        call: &ruby_prism::CallNode,
+    ) {
+        if !self.observations.record_local_reads || self.observations.repeatable_body_depth > 0 {
+            return;
+        }
+        let Some(arguments) = call.arguments() else {
+            return;
+        };
+        for argument in arguments.arguments().iter() {
+            if let Some(keywords) = argument.as_keyword_hash_node() {
+                for element in keywords.elements().iter() {
+                    if let Some(assoc) = element.as_assoc_node() {
+                        self.observe_argument_local_read(&assoc.value());
+                    }
+                }
+            } else {
+                self.observe_argument_local_read(&argument);
+            }
+        }
+    }
+
+    fn observe_argument_local_read(&mut self, argument: &ruby_prism::Node<'_>) {
+        let Some(read) = argument.as_local_variable_read_node() else {
+            return;
+        };
+        let name = String::from_utf8_lossy(read.name().as_slice()).to_string();
+        let Some(ruby_type) = self.environment.types.get(&name) else {
+            return;
+        };
+        if RubyType::contains_unknown(ruby_type)
+            || self.environment.unknown_reason(&name).is_some()
+            || !self.environment.dependencies(&name).is_empty()
+        {
+            return;
+        }
+        self.observations
+            .argument_reads
+            .push((read.location().start_offset(), ruby_type.clone()));
     }
 
     /// Record current variable state at an offset
