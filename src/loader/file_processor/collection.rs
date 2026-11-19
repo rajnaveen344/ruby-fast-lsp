@@ -471,6 +471,31 @@ impl FileProcessor {
         })
     }
 
+    /// Declarations of one signature file shipped by a dependency, as a
+    /// template any project can bind. A signature this server cannot read
+    /// declares nothing; the dependency keeps every other source.
+    pub fn collect_project_neutral_signature_template(
+        &self,
+        uri: &Url,
+        content: &str,
+    ) -> Result<ProjectNeutralFileFactsTemplate> {
+        let template_file_id = ruby_analysis::core::SourceFileId(0);
+        let facts =
+            ruby_analysis::indexer::index_rbs(template_file_id, content).unwrap_or_else(|error| {
+                log::debug!(
+                    "Dependency signature {} declares nothing: {error}",
+                    uri.path()
+                );
+                FileAnalysis::default()
+            });
+        ProjectNeutralFileFactsTemplate::try_new(template_file_id, facts).map_err(|rejection| {
+            anyhow!(
+                "dependency signature {} produced project-specific facts: {rejection}",
+                uri.path()
+            )
+        })
+    }
+
     pub(super) fn collect_file_facts_as_with_resolution(
         &self,
         uri: &Url,

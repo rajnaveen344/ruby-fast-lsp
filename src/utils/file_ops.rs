@@ -128,6 +128,27 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Recursively collect the `.rbs` files under `dir`, sorted. Symbolic links
+/// are not followed, so the result stays inside `dir`. A missing folder
+/// has no signatures.
+pub fn collect_signature_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files = walkdir::WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .flatten()
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "rbs")
+        })
+        .map(walkdir::DirEntry::into_path)
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
 // ============================================================================
 // File Processing Helpers
 // ============================================================================

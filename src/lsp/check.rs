@@ -314,6 +314,7 @@ impl CheckSession {
             workspace.handle().view(|view| -> Result<()> {
                 for file in view.files() {
                     if !matches!(file.kind, SourceKind::Project | SourceKind::Signature)
+                        || file.library_package.is_some()
                         || !source_is_selected(&file.path, selected_file.as_deref(), &root)
                     {
                         continue;

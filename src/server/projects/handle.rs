@@ -154,6 +154,16 @@ impl ProjectHandle {
         })
     }
 
+    /// Whether the file at `path` was bound from a locked package rather
+    /// than discovered as a project source.
+    pub fn owns_path_through_package(&self, path: &Path) -> bool {
+        self.view(|view| {
+            view.file_id(path)
+                .and_then(|file_id| view.file(file_id))
+                .is_some_and(|file| file.library_package.is_some())
+        })
+    }
+
     /// Keep the file at `path`, if it is registered as `kind`, as an empty
     /// source with no facts, so require resolution still finds a file that
     /// exists but could not be read or analyzed. Returns whether a file was
@@ -280,8 +290,9 @@ fn registered_file_of_kind(
 ) -> Option<SourceFileId> {
     let view = engine.view();
     let file_id = view.file_id(path)?;
+    // A file bound from a locked package is replaced only with its package.
     view.file(file_id)
-        .is_some_and(|file| file.kind == kind)
+        .is_some_and(|file| file.kind == kind && file.library_package.is_none())
         .then_some(file_id)
 }
 

@@ -111,6 +111,12 @@ impl GemDependencySource {
         })
     }
 
+    /// Whether this is a signature file the gem ships rather than Ruby
+    /// source. The logical path is part of the product identity.
+    pub fn is_signature(&self) -> bool {
+        self.logical_path.ends_with(".rbs")
+    }
+
     pub fn library_package(&self) -> ruby_analysis::core::LibraryPackageId {
         ruby_analysis::core::LibraryPackageId::new(
             self.package_name.clone(),
@@ -437,11 +443,16 @@ impl GemDependencyProduct {
         let insertion_started = Instant::now();
         let mut uris = Vec::with_capacity(prepared.len());
         for (source, template, uri) in prepared {
-            let file_id = engine.register_gem_file(
-                source.physical_path.clone(),
-                &source.content,
-                source.library_package(),
-            );
+            let package = source.library_package();
+            let file_id = if source.is_signature() {
+                engine.register_gem_signature_file(
+                    source.physical_path.clone(),
+                    &source.content,
+                    package,
+                )
+            } else {
+                engine.register_gem_file(source.physical_path.clone(), &source.content, package)
+            };
             engine.update(
                 file_id,
                 template.facts.instantiate(file_id),
@@ -518,7 +529,11 @@ impl GemDependencyProduct {
         let mut uris = Vec::with_capacity(prepared.len());
         for (source, template, uri) in prepared {
             let package = source.library_package();
-            let file_id = engine.register_gem_file(source.physical_path, &source.content, package);
+            let file_id = if source.is_signature() {
+                engine.register_gem_signature_file(source.physical_path, &source.content, package)
+            } else {
+                engine.register_gem_file(source.physical_path, &source.content, package)
+            };
             engine.update(
                 file_id,
                 template.facts.instantiate(file_id),

@@ -26,7 +26,8 @@ pub struct SourceFile {
     pub content_hash: u64,
     pub kind: SourceKind,
     revision: u64,
-    /// Present for `SourceKind::Gem` files bound from a locked package.
+    /// Present for gem sources and gem-shipped signatures bound from a
+    /// locked package.
     pub library_package: Option<LibraryPackageId>,
 }
 
@@ -493,6 +494,19 @@ impl Project {
     ) -> SourceFileId {
         self.files
             .register_borrowed(path, content, SourceKind::Gem, Some(package))
+    }
+
+    /// Register a signature file shipped inside a locked gem package. It is
+    /// a declaration-only source like any other signature, and keeps the
+    /// package that owns it.
+    pub fn register_gem_signature_file(
+        &mut self,
+        path: PathBuf,
+        content: &str,
+        package: LibraryPackageId,
+    ) -> SourceFileId {
+        self.files
+            .register_borrowed(path, content, SourceKind::Signature, Some(package))
     }
 
     /// Register source whose caller retains the buffer. The engine keeps the

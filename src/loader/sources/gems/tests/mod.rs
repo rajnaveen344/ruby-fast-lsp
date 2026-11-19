@@ -34,6 +34,7 @@ mod platform_variants;
 mod runtime_discovery;
 mod rvm_gem_home;
 mod shared_products;
+mod shipped_signatures;
 
 fn create_test_indexer() -> IndexerGem {
     let temp_dir = TempDir::new().unwrap();

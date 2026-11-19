@@ -580,6 +580,14 @@ pub async fn handle_watched_files_changed(
         changed_dependency_uris.push(change.uri.clone());
 
         if path.extension().is_some_and(|extension| extension == "rbs") {
+            // A signature a locked gem ships changes with its package, not
+            // as a project signature.
+            if server
+                .project_for_uri(&change.uri)
+                .owns_path_through_package(&path)
+            {
+                continue;
+            }
             if change.typ == FileChangeType::DELETED
                 || !policy.includes_signature(&workspace.root_path, &path)
             {

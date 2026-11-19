@@ -36,6 +36,7 @@ fn build_gem_dependency_product(
         let engine = producer_engine.read();
         engine.view().known_namespace_fqns()
     });
+    register_shipped_signatures(manifest, &mut producer_engine.write());
     let chunk_size = manifest
         .sources()
         .len()
@@ -54,13 +55,20 @@ fn build_gem_dependency_product(
                             source.physical_path.display()
                         )
                     })?;
-                    let facts = processor.collect_project_neutral_file_template_without_insertion(
-                        &uri,
-                        source.content.as_str(),
-                        producer_engine.clone(),
-                        ruby_analysis::core::SourceKind::Gem,
-                        known_namespaces.clone(),
-                    )?;
+                    let facts = if source.is_signature() {
+                        processor.collect_project_neutral_signature_template(
+                            &uri,
+                            source.content.as_str(),
+                        )?
+                    } else {
+                        processor.collect_project_neutral_file_template_without_insertion(
+                            &uri,
+                            source.content.as_str(),
+                            producer_engine.clone(),
+                            ruby_analysis::core::SourceKind::Gem,
+                            known_namespaces.clone(),
+                        )?
+                    };
                     Ok(GemDependencyFileTemplate::new(
                         source.logical_path.clone(),
                         source.content_sha256,
@@ -74,6 +82,32 @@ fn build_gem_dependency_product(
         .flatten()
         .collect();
     GemDependencyProduct::new(manifest, templates)
+}
+
+/// Put the signatures the dependencies ship into the producer before any
+/// of their sources is collected, so a dependency's declared return outranks
+/// what its source documents or proves exactly as a project's signature does.
+/// A signature this server cannot read declares nothing.
+fn register_shipped_signatures(
+    manifest: &GemDependencyManifest,
+    producer: &mut ruby_analysis::engine::Project,
+) {
+    let mut registered = false;
+    for source in manifest.sources().iter().filter(|s| s.is_signature()) {
+        let file_id = producer.register_file_borrowed(
+            source.physical_path.clone(),
+            source.content.as_str(),
+            ruby_analysis::core::SourceKind::Signature,
+        );
+        let Ok(facts) = ruby_analysis::indexer::index_rbs(file_id, source.content.as_str()) else {
+            continue;
+        };
+        producer.update(file_id, facts, ruby_analysis::engine::ResolveMode::Deferred);
+        registered = true;
+    }
+    if registered {
+        producer.resolve();
+    }
 }
 
 fn gem_source_label(source: GemSource) -> &'static str {
@@ -468,6 +502,37 @@ impl IndexerGem {
                     gem_info.locked_version.clone(),
                 )?);
             }
+        }
+        // Only the signatures this exact package ships in its own `sig/`
+        // folder: never a sibling version, and never the declarations a
+        // signature tool bundles for other libraries.
+        let signature_root = gem_info.path.join("sig");
+        for file_path in utils::file_ops::collect_signature_files(&signature_root) {
+            let relative = file_path.strip_prefix(&signature_root).with_context(|| {
+                format!(
+                    "gem signature {} is outside {}",
+                    file_path.display(),
+                    signature_root.display()
+                )
+            })?;
+            let logical_path = format!(
+                "gems/{}/{}/{}/{}/sig/{}",
+                gem_info.name,
+                gem_info.locked_version,
+                gem_info.platform,
+                gem_source_label(gem_info.source),
+                normalized_relative_path(relative)?
+            );
+            let content = std::fs::read_to_string(&file_path)
+                .with_context(|| format!("failed to read gem signature {}", file_path.display()))?;
+            sources.push(GemDependencySource::new(
+                0,
+                logical_path,
+                file_path,
+                content,
+                gem_info.name.clone(),
+                gem_info.locked_version.clone(),
+            )?);
         }
         if sources.is_empty() {
             return Ok(None);

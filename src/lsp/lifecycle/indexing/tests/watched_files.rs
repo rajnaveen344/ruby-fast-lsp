@@ -156,6 +156,54 @@ async fn watched_project_rbs_files_replace_and_remove_signature_facts() {
     assert!(!has_namespace(&server, &uri, "GeneratedWidget"));
 }
 
+/// A signature bound from a locked package changes only with its package:
+/// a watched event for its path neither removes nor replaces its facts.
+#[tokio::test]
+async fn watched_events_leave_a_package_signature_to_its_package() {
+    let workspace = tempfile::TempDir::new().unwrap();
+    let path = workspace
+        .path()
+        .join("bundle/shared_widget-1.0.0/sig/shared_widget.rbs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+    let server = Server::default();
+    server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+
+    let content = "class SharedWidget\n  def label: () -> String\nend\n";
+    std::fs::write(&path, content).unwrap();
+    {
+        let mut engine = server.project_for_uri(&uri).test_write();
+        let file_id = engine.register_gem_signature_file(
+            path.clone(),
+            content,
+            ruby_analysis::core::LibraryPackageId::new("shared_widget", "1.0.0"),
+        );
+        let facts = ruby_analysis::indexer::index_rbs(file_id, content).unwrap();
+        engine.update(
+            file_id,
+            facts,
+            ruby_analysis::engine::ResolveMode::Immediate,
+        );
+    }
+    assert!(has_namespace(&server, &uri, "SharedWidget"));
+
+    std::fs::write(&path, "class OtherWidget\nend\n").unwrap();
+    for typ in [FileChangeType::CHANGED, FileChangeType::DELETED] {
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: uri.clone(),
+                    typ,
+                }],
+            },
+        )
+        .await;
+        assert!(has_namespace(&server, &uri, "SharedWidget"));
+        assert!(!has_namespace(&server, &uri, "OtherWidget"));
+    }
+}
+
 #[tokio::test]
 async fn watched_rbs_record_refreshes_an_early_open_consumer() {
     let workspace = tempfile::TempDir::new().unwrap();
