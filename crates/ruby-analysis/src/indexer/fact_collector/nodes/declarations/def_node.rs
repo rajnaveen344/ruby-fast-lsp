@@ -682,7 +682,11 @@ impl FactCollector {
             tracker.set_current_class(Some(pending.instance_owner_fqn.clone()));
         }
         let (owner, file_local_types) = self.instance_variables_of_method(node);
-        tracker.set_instance_variables(owner, file_local_types);
+        let memos = owner
+            .as_ref()
+            .map(|owner| self.memoised_instance_variables_of_method(node, owner))
+            .unwrap_or_default();
+        tracker.set_instance_variables(owner, file_local_types, memos);
         let equation = tracker.track_method_equation(
             node,
             pending.fqn.clone(),
@@ -692,6 +696,7 @@ impl FactCollector {
             .expressions
             .max_live_shape_aliases
             .max(tracker.max_live_shape_aliases());
+        self.install_compound_local_writes(&mut tracker);
         if self.options.record_local_read_unknown_reasons {
             self.flow
                 .argument_local_types

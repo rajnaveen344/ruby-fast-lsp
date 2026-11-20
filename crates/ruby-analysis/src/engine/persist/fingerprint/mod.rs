@@ -18,9 +18,9 @@ use stable_hash::{
     stable_graph_edge_kind, stable_graph_edge_provenance, stable_graph_node_kind, stable_len,
     stable_method, stable_method_availability, stable_method_param_kind,
     stable_method_reference_access, stable_method_visibility, stable_optional_fqn,
-    stable_optional_method, stable_optional_string, stable_range_offsets, stable_ruby_type,
-    stable_source_kind, stable_string, stable_symbol_kind, stable_type_provenance,
-    stable_type_subject, stable_u64, stable_u8,
+    stable_optional_method, stable_optional_string, stable_optional_u32, stable_range_offsets,
+    stable_ruby_type, stable_source_kind, stable_string, stable_symbol_kind,
+    stable_type_provenance, stable_type_subject, stable_u64, stable_u8,
 };
 
 impl SemanticExportFingerprint {
@@ -136,6 +136,7 @@ impl SemanticExportFingerprint {
                     stable_fqn(hasher, &observation.variable.owner);
                     stable_string(hasher, observation.variable.name.as_str());
                     stable_ruby_type(hasher, &observation.observed);
+                    stable_optional_u32(hasher, observation.except_memo);
                 }
             }));
         }
@@ -152,6 +153,7 @@ impl SemanticExportFingerprint {
                     None => stable_u8(hasher, 0),
                 }
                 stable_bool(hasher, write.in_constructor);
+                stable_optional_u32(hasher, write.memo);
             }));
         }
         for fact in &facts.inference.constant_callable_bodies {

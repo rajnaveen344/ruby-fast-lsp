@@ -8,6 +8,7 @@ use ruby_prism::{
 
 use crate::core::RubyType;
 use crate::indexer::fact_collector::FactCollector;
+use crate::inference::type_tracker::{CompoundLocalWrite, TypeTracker};
 
 impl FactCollector {
     fn parsed_local_variable_name(name: &[u8]) -> Option<String> {
@@ -210,10 +211,10 @@ impl FactCollector {
         &mut self,
         node: &LocalVariableOrWriteNode,
     ) {
-        self.declare_local_variable_write(
+        self.declare_compound_local_variable_write(
             node.name().as_slice(),
             node.name_loc(),
-            Some(&node.value()),
+            &node.value(),
         );
     }
 
@@ -221,11 +222,10 @@ impl FactCollector {
         &mut self,
         node: &LocalVariableOrWriteNode,
     ) {
-        self.bind_local_variable_write(
+        self.bind_compound_local_variable_write(
             node.name().as_slice(),
             node.name_loc(),
-            Some(&node.value()),
-            None,
+            &node.value(),
         );
     }
 
@@ -234,10 +234,10 @@ impl FactCollector {
         &mut self,
         node: &LocalVariableAndWriteNode,
     ) {
-        self.declare_local_variable_write(
+        self.declare_compound_local_variable_write(
             node.name().as_slice(),
             node.name_loc(),
-            Some(&node.value()),
+            &node.value(),
         );
     }
 
@@ -245,11 +245,10 @@ impl FactCollector {
         &mut self,
         node: &LocalVariableAndWriteNode,
     ) {
-        self.bind_local_variable_write(
+        self.bind_compound_local_variable_write(
             node.name().as_slice(),
             node.name_loc(),
-            Some(&node.value()),
-            None,
+            &node.value(),
         );
     }
 
@@ -258,10 +257,10 @@ impl FactCollector {
         &mut self,
         node: &LocalVariableOperatorWriteNode,
     ) {
-        self.declare_local_variable_write(
+        self.declare_compound_local_variable_write(
             node.name().as_slice(),
             node.name_loc(),
-            Some(&node.value()),
+            &node.value(),
         );
     }
 
@@ -269,11 +268,71 @@ impl FactCollector {
         &mut self,
         node: &LocalVariableOperatorWriteNode,
     ) {
-        self.bind_local_variable_write(
+        self.bind_compound_local_variable_write(
             node.name().as_slice(),
             node.name_loc(),
-            Some(&node.value()),
-            None,
+            &node.value(),
         );
+    }
+
+    /// Keep what the flow walk proved about each compound local assignment,
+    /// for the bindings recorded when those assignments are visited.
+    pub(in crate::indexer::fact_collector) fn install_compound_local_writes(
+        &mut self,
+        tracker: &mut TypeTracker,
+    ) {
+        self.flow
+            .compound_local_writes
+            .extend(tracker.take_compound_local_writes());
+    }
+
+    /// What the flow walk proved about the compound assignment at
+    /// `name_loc`. The assignment reads the binding it replaces, which only
+    /// that walk knows; without its proof the local is left unknown.
+    fn compound_local_write(&self, name_loc: &Location) -> CompoundLocalWrite {
+        self.flow
+            .compound_local_writes
+            .get(&name_loc.start_offset())
+            .cloned()
+            .unwrap_or(CompoundLocalWrite::Leaves(RubyType::Unknown))
+    }
+
+    /// Declare the target of `name ||= value`, `name &&= value`, or
+    /// `name += value`. Unless the value is always assigned, it may not be
+    /// what the local ends up holding, so no callable is remembered for it.
+    fn declare_compound_local_variable_write(
+        &mut self,
+        name: &[u8],
+        name_loc: Location,
+        value: &Node,
+    ) {
+        let write = self.compound_local_write(&name_loc);
+        self.declare_local_variable_write(name, name_loc, Some(value));
+        match write {
+            CompoundLocalWrite::AssignsValue => {}
+            CompoundLocalWrite::Leaves(_) => {
+                if let Some(variable_name) = Self::parsed_local_variable_name(name) {
+                    self.flow.local_callables.forget(&variable_name);
+                }
+            }
+        }
+    }
+
+    /// Bind a compound assignment to what the flow walk proved it leaves in
+    /// the local, never to the type of the assigned value alone.
+    fn bind_compound_local_variable_write(
+        &mut self,
+        name: &[u8],
+        name_loc: Location,
+        value: &Node,
+    ) {
+        match self.compound_local_write(&name_loc) {
+            CompoundLocalWrite::AssignsValue => {
+                self.bind_local_variable_write(name, name_loc, Some(value), None);
+            }
+            CompoundLocalWrite::Leaves(proven) => {
+                self.bind_local_variable_write(name, name_loc, None, Some(proven));
+            }
+        }
     }
 }

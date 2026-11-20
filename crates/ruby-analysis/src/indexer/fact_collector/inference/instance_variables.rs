@@ -34,6 +34,8 @@ pub(in crate::indexer::fact_collector) struct InstanceVariableEvidence {
     pub(in crate::indexer::fact_collector) writes: Vec<InstanceVariableWrite>,
     /// Enclosing method definitions, innermost last.
     methods: Vec<MethodWrites>,
+    /// The number the next `@name ||= value` assignment takes.
+    next_memo: u32,
 }
 
 /// What one method definition proves about the assignments in its body,
@@ -48,6 +50,8 @@ struct MethodWrites {
     runs_on_both_sides: bool,
     parameter_writes: HashMap<usize, RubyType>,
     constructor_writes: HashSet<usize>,
+    /// The file-wide number of each `@name ||= value` in the body.
+    memos: HashMap<usize, u32>,
 }
 
 impl FactCollector {
@@ -74,6 +78,11 @@ impl FactCollector {
         if let Some(body) = node.body() {
             finder.visit(&body);
         }
+        let mut memos = HashMap::new();
+        for offset in std::mem::take(&mut finder.memos) {
+            memos.insert(offset, self.instance_variables.next_memo);
+            self.instance_variables.next_memo += 1;
+        }
         let parameter_writes = finder
             .candidates
             .into_iter()
@@ -88,6 +97,7 @@ impl FactCollector {
             owner,
             runs_on_both_sides,
             parameter_writes,
+            memos,
             constructor_writes: if is_constructor {
                 constructor_writes(node)
             } else {
@@ -137,6 +147,7 @@ impl FactCollector {
         };
         let in_constructor =
             method.is_some_and(|method| method.constructor_writes.contains(&offset));
+        let memo = method.and_then(|method| method.memos.get(&offset).copied());
         if !exact_owner {
             let other_kind = match owner.namespace_kind() {
                 Some(NamespaceKind::Singleton) => NamespaceKind::Instance,
@@ -147,6 +158,7 @@ impl FactCollector {
                 name: name.into(),
                 proven: None,
                 in_constructor: false,
+                memo: None,
             });
         }
         self.instance_variables.writes.push(InstanceVariableWrite {
@@ -154,6 +166,7 @@ impl FactCollector {
             name: name.into(),
             proven,
             in_constructor,
+            memo,
         });
     }
 
@@ -211,6 +224,68 @@ impl FactCollector {
         (Some(owner), types)
     }
 
+    /// For each `@name ||= value` in the method defined at `node`, keyed by
+    /// where it starts: its number, and the type every other assignment of
+    /// the variable in this file so far proves. A variable nothing else
+    /// assigns holds nil until the method runs. A variable some other
+    /// assignment leaves unproven is left out.
+    pub(in crate::indexer::fact_collector) fn memoised_instance_variables_of_method(
+        &self,
+        node: &DefNode,
+        owner: &FullyQualifiedName,
+    ) -> HashMap<usize, (u32, RubyType)> {
+        let start_offset = node.location().start_offset();
+        let Some(method) = self
+            .instance_variables
+            .methods
+            .iter()
+            .rev()
+            .find(|method| method.start_offset == start_offset)
+        else {
+            return HashMap::new();
+        };
+        let mut finder = MemoNames::default();
+        if let Some(body) = node.body() {
+            finder.visit(&body);
+        }
+        finder
+            .names
+            .into_iter()
+            .filter_map(|(offset, name)| {
+                let memo = *method.memos.get(&offset)?;
+                let others = self.other_assignments_type(owner, &name, memo)?;
+                Some((offset, (memo, others)))
+            })
+            .collect()
+    }
+
+    fn other_assignments_type(
+        &self,
+        owner: &FullyQualifiedName,
+        name: &str,
+        memo: u32,
+    ) -> Option<RubyType> {
+        let mut types = Vec::new();
+        let mut in_constructor = false;
+        for write in &self.instance_variables.writes {
+            if write.owner != *owner || write.memo == Some(memo) {
+                continue;
+            }
+            if write.name.as_str() == InstanceVariableWrite::ANY_NAME {
+                return None;
+            }
+            if write.name.as_str() != name {
+                continue;
+            }
+            types.push(write.proven.clone()?);
+            in_constructor |= write.in_constructor;
+        }
+        if !in_constructor {
+            types.push(RubyType::nil_class());
+        }
+        Some(RubyType::union(types))
+    }
+
     /// Record a generated writer method, which stores whatever its caller
     /// passes.
     pub(in crate::indexer::fact_collector) fn record_generated_instance_variable_writer(
@@ -223,6 +298,7 @@ impl FactCollector {
             name: name.into(),
             proven: None,
             in_constructor: false,
+            memo: None,
         });
     }
 }
@@ -284,6 +360,8 @@ struct ParameterWrites {
     nested_closures: u32,
     reassigned: HashSet<Vec<u8>>,
     candidates: Vec<(usize, Vec<u8>)>,
+    /// Where each `@name ||= value` starts, in source order.
+    memos: Vec<usize>,
 }
 
 impl ParameterWrites {
@@ -310,6 +388,7 @@ impl<'pr> Visit<'pr> for ParameterWrites {
         &mut self,
         node: &ruby_prism::InstanceVariableOrWriteNode<'pr>,
     ) {
+        self.memos.push(node.location().start_offset());
         self.candidate(node.location().start_offset(), &node.value());
         ruby_prism::visit_instance_variable_or_write_node(self, node);
     }
@@ -368,6 +447,34 @@ impl<'pr> Visit<'pr> for ParameterWrites {
         self.nested_closures += 1;
         visit_lambda_node(self, node);
         self.nested_closures -= 1;
+    }
+
+    fn visit_def_node(&mut self, _node: &DefNode<'pr>) {}
+
+    fn visit_class_node(&mut self, _node: &ClassNode<'pr>) {}
+
+    fn visit_module_node(&mut self, _node: &ModuleNode<'pr>) {}
+
+    fn visit_singleton_class_node(&mut self, _node: &SingletonClassNode<'pr>) {}
+}
+
+/// The variable each `@name ||= value` of a method body assigns, by where
+/// the assignment starts. Nested definitions run on their own.
+#[derive(Default)]
+struct MemoNames {
+    names: Vec<(usize, String)>,
+}
+
+impl<'pr> Visit<'pr> for MemoNames {
+    fn visit_instance_variable_or_write_node(
+        &mut self,
+        node: &ruby_prism::InstanceVariableOrWriteNode<'pr>,
+    ) {
+        self.names.push((
+            node.location().start_offset(),
+            String::from_utf8_lossy(node.name().as_slice()).to_string(),
+        ));
+        ruby_prism::visit_instance_variable_or_write_node(self, node);
     }
 
     fn visit_def_node(&mut self, _node: &DefNode<'pr>) {}

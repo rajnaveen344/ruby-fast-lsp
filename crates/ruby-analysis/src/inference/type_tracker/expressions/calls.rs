@@ -2,6 +2,7 @@ use crate::core::{
     FullyQualifiedName, MethodReturnObservation, NamespaceKind, ObservedReceiverAccess,
     RubyConstant, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
+use crate::inference::control_flow;
 use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::method::return_type::receiver_rbs_return_type;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
@@ -9,6 +10,7 @@ use crate::inference::r#type::shape as shape_reads;
 use crate::inference::semantics::ReceiverAccess;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::returns::dependencies::call_is_direct_recursive;
+use crate::inference::type_tracker::returns::RecursiveReturnApproximation;
 use crate::inference::type_tracker::TypeTracker;
 use ruby_prism::*;
 
@@ -17,9 +19,22 @@ impl TypeTracker {
     /// locals its literal block may have assigned.
     pub(in crate::inference::type_tracker) fn infer_call(&mut self, call: &CallNode) -> RubyType {
         self.observe_argument_local_reads(call);
+        let explicit_return_count = self.returns.explicit_values.len();
         let result = self.infer_call_result(call);
         if let Some(block) = call.block().and_then(|block| block.as_block_node()) {
             self.release_closure_captured_writes(block.body());
+            // A `return` in a block whose body was not walked still leaves
+            // the method with a value this traversal never saw.
+            if self.returns.explicit_values.len() == explicit_return_count
+                && !block_owns_its_returns(call)
+                && block
+                    .body()
+                    .is_some_and(|body| control_flow::contains_method_return(&body))
+            {
+                self.returns
+                    .explicit_values
+                    .push(RecursiveReturnApproximation::Unknown);
+            }
         }
         result
     }
@@ -348,4 +363,14 @@ impl TypeTracker {
             method,
         ))
     }
+}
+
+/// Calls whose block is the body of a lambda or a defined method: a `return`
+/// inside it ends that callable, not the enclosing method.
+fn block_owns_its_returns(call: &CallNode<'_>) -> bool {
+    call.receiver().is_none()
+        && matches!(
+            call.name().as_slice(),
+            b"lambda" | b"define_method" | b"define_singleton_method"
+        )
 }

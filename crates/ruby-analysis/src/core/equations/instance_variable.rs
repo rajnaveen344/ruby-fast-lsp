@@ -28,6 +28,10 @@ pub struct InstanceVariableDependency {
 pub struct InstanceVariableObservation {
     pub variable: InstanceVariableDependency,
     pub observed: RubyType,
+    /// The memoising assignment of this file, by its [`InstanceVariableWrite::memo`]
+    /// number, that `observed` leaves out: `@name ||= value` evaluated with
+    /// what every other assignment proves. `None` observes all of them.
+    pub except_memo: Option<u32>,
 }
 
 impl InstanceVariableObservation {
@@ -48,6 +52,9 @@ pub struct InstanceVariableWrite {
     /// Whether every completed `initialize` reaches this assignment: a plain
     /// top-level statement of the constructor with no earlier `return`.
     pub in_constructor: bool,
+    /// Numbers a `@name ||= value` assignment within its file, so a method
+    /// returning it can name it without a source position.
+    pub memo: Option<u32>,
 }
 
 impl InstanceVariableWrite {

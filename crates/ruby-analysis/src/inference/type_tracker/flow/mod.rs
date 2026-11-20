@@ -3,6 +3,7 @@
 use crate::inference::type_tracker::flow::rescue::RescueEntryTypes;
 
 pub(in crate::inference::type_tracker) mod branches;
+pub(in crate::inference::type_tracker) mod compound_writes;
 pub(in crate::inference::type_tracker) mod environment;
 pub(in crate::inference::type_tracker) mod loops;
 pub(in crate::inference::type_tracker) mod narrow;

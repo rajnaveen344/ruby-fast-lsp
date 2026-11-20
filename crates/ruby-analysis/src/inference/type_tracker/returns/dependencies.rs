@@ -21,7 +21,7 @@ impl TypeTracker {
             if args_list.is_empty() {
                 RubyType::nil_class()
             } else if args_list.len() == 1 {
-                self.infer_expression(&args_list[0])
+                self.track_node(&args_list[0])
             } else {
                 // Multiple return values become an array
                 let types: Vec<RubyType> =
@@ -143,10 +143,12 @@ impl TypeTracker {
         })
     }
 
-    /// Let the instance variable that starts a returned call chain, such as
-    /// `@name.strip.upcase`, take its file-local type. A chain through a
-    /// block is left alone: the block's parameters would carry the
-    /// provisional type into facts the engine cannot withhold.
+    /// Let the instance variables a returned expression reads take their
+    /// file-local type: the one that starts a call chain such as
+    /// `@name.strip.upcase`, the operands of `||` and `&&`, and a memoising
+    /// `@name ||= value`. A chain through a literal block is left alone: the
+    /// block's parameters would carry the provisional type into facts the
+    /// engine cannot withhold.
     pub(in crate::inference::type_tracker) fn mark_returned_chain_receiver(
         &mut self,
         node: &Node<'_>,
@@ -163,9 +165,25 @@ impl TypeTracker {
             }
             return;
         }
+        if let Some(or_node) = node.as_or_node() {
+            self.mark_returned_operand(&or_node.left());
+            self.mark_returned_operand(&or_node.right());
+            return;
+        }
+        if let Some(and_node) = node.as_and_node() {
+            self.mark_returned_operand(&and_node.left());
+            self.mark_returned_operand(&and_node.right());
+            return;
+        }
+        if node.as_instance_variable_or_write_node().is_some() {
+            self.returns
+                .returned_chain_receivers
+                .insert(node.location().start_offset());
+            return;
+        }
         let mut current = node.as_call_node();
         while let Some(call) = current {
-            if call.block().is_some() {
+            if call.block().is_some_and(|block| !is_symbol_block(&block)) {
                 return;
             }
             let Some(receiver) = call.receiver() else {
@@ -181,23 +199,41 @@ impl TypeTracker {
         }
     }
 
+    fn mark_returned_operand(&mut self, node: &Node<'_>) {
+        if node.as_instance_variable_read_node().is_some() {
+            self.returns
+                .returned_chain_receivers
+                .insert(node.location().start_offset());
+        } else {
+            self.mark_returned_chain_receiver(node);
+        }
+    }
+
     /// The file-local type of an instance variable read that starts a
     /// returned call chain, recorded for the engine to confirm.
     pub(in crate::inference::type_tracker) fn returned_chain_receiver_type(
         &self,
         read: &InstanceVariableReadNode<'_>,
     ) -> Option<RubyType> {
+        self.marked_instance_variable_type(read.location().start_offset(), read.name().as_slice())
+    }
+
+    /// The file-local type of the instance variable a marked node at
+    /// `start_offset` names, recorded for the engine to confirm.
+    pub(in crate::inference::type_tracker) fn marked_instance_variable_type(
+        &self,
+        start_offset: usize,
+        name: &[u8],
+    ) -> Option<RubyType> {
         if !self
             .returns
             .returned_chain_receivers
-            .contains(&read.location().start_offset())
+            .contains(&start_offset)
         {
             return None;
         }
         let owner = self.context.instance_variable_owner.clone()?;
-        let name: ustr::Ustr = String::from_utf8_lossy(read.name().as_slice())
-            .as_ref()
-            .into();
+        let name: ustr::Ustr = String::from_utf8_lossy(name).as_ref().into();
         let observed = self.context.instance_variable_types.get(&name)?.clone();
         self.returns
             .instance_variable_observations
@@ -205,6 +241,40 @@ impl TypeTracker {
             .insert(InstanceVariableObservation {
                 variable: InstanceVariableDependency { owner, name },
                 observed: observed.clone(),
+                except_memo: None,
+            });
+        Some(observed)
+    }
+
+    /// What every other assignment in this file proves about the variable a
+    /// marked `@name ||= value` at `start_offset` memoises, recorded for the
+    /// engine to confirm.
+    pub(in crate::inference::type_tracker) fn marked_memo_other_assignments_type(
+        &self,
+        start_offset: usize,
+        name: &[u8],
+    ) -> Option<RubyType> {
+        if !self
+            .returns
+            .returned_chain_receivers
+            .contains(&start_offset)
+        {
+            return None;
+        }
+        let owner = self.context.instance_variable_owner.clone()?;
+        let (memo, observed) = self
+            .context
+            .instance_variable_memos
+            .get(&start_offset)?
+            .clone();
+        let name: ustr::Ustr = String::from_utf8_lossy(name).as_ref().into();
+        self.returns
+            .instance_variable_observations
+            .borrow_mut()
+            .insert(InstanceVariableObservation {
+                variable: InstanceVariableDependency { owner, name },
+                observed: observed.clone(),
+                except_memo: Some(memo),
             });
         Some(observed)
     }
@@ -362,6 +432,14 @@ impl TypeTracker {
         )])
     }
 }
+/// `&:name` passes no code that could bind the receiver's provisional type.
+fn is_symbol_block(block: &Node<'_>) -> bool {
+    block
+        .as_block_argument_node()
+        .and_then(|argument| argument.expression())
+        .is_some_and(|expression| expression.as_symbol_node().is_some())
+}
+
 pub(in crate::inference::type_tracker) fn call_is_direct_recursive(
     call: &CallNode<'_>,
     method: Option<&RubyMethod>,

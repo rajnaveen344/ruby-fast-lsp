@@ -121,6 +121,7 @@ impl Visit<'_> for FactCollector {
                 .with_semantics(self.semantics.project.clone())
                 .with_local_read_types();
             tracker.track_program(node);
+            self.install_compound_local_writes(&mut tracker);
             self.flow
                 .argument_local_types
                 .extend(tracker.take_argument_local_reads());

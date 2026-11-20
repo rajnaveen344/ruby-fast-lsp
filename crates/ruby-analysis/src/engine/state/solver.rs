@@ -484,6 +484,7 @@ impl Solver {
                             .map(|dependency| {
                                 self.instance_variable_types
                                     .get(dependency)
+                                    .and_then(|types| types.get(&None))
                                     .cloned()
                                     .flatten()
                             });
@@ -622,7 +623,7 @@ impl Solver {
             return None;
         }
         let mut failed = BTreeSet::new();
-        for evidence in self.evidence_by_file.values() {
+        for (file_id, evidence) in &self.evidence_by_file {
             for equation in &evidence.method_return_equations {
                 if failed.contains(equation.method()) {
                     continue;
@@ -644,8 +645,12 @@ impl Solver {
                     .is_some_and(|current| observation_holds(&observation.observed, &current))
                 }) && equation.instance_variable_observations().iter().all(
                     |observation| {
-                        self.instance_variable_types.get(&observation.variable)
-                            == Some(&Some(observation.observed.clone()))
+                        let except = observation.except_memo.map(|memo| (*file_id, memo));
+                        self.instance_variable_types
+                            .get(&observation.variable)
+                            .and_then(|types| types.get(&except))
+                            .and_then(Option::as_ref)
+                            == Some(&observation.observed)
                     },
                 );
                 if !holds {
@@ -690,7 +695,7 @@ impl Solver {
         }
         Some(resolve_instance_variables(
             query,
-            self.evidence_by_file.values(),
+            self.evidence_by_file.iter(),
         ))
     }
 

@@ -5,6 +5,8 @@
 
 // Higher-order calls and parameter-dependent callable bodies.
 mod callables;
+// Local types after `||=`, `&&=`, and operator assignments.
+mod compound_local_writes;
 // Declared YARD/RBS types checked against inferred types.
 mod declared_types;
 // Receiver-aware method lookup across contexts, chains, and ancestors.

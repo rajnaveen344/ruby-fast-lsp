@@ -5,6 +5,7 @@ use crate::core::{
     TypeSubject, UnknownReason,
 };
 use crate::indexer::fact_collector::FactCollector;
+use crate::inference::type_tracker::CompoundLocalWrite;
 use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::HashMap;
@@ -31,6 +32,11 @@ pub(in crate::indexer::fact_collector) struct FlowState {
     /// Flow-proven types of locals passed directly as call arguments, keyed
     /// by the read's start byte. A missing entry means the type is unproven.
     pub(in crate::indexer::fact_collector) argument_local_types: HashMap<usize, RubyType>,
+    /// What flow proves about each compound local assignment (`||=`, `&&=`,
+    /// `+=`), keyed by the assignment's start byte. A missing entry means
+    /// the binding is unproven.
+    pub(in crate::indexer::fact_collector) compound_local_writes:
+        HashMap<usize, CompoundLocalWrite>,
 }
 
 impl FactCollector {

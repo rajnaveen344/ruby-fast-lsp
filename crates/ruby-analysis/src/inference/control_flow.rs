@@ -212,6 +212,35 @@ impl<'pr> Visit<'pr> for UnsupportedHigherOrderExitFinder {
     fn visit_lambda_node(&mut self, _node: &ruby_prism::LambdaNode<'pr>) {}
 }
 
+/// True when a block body contains a `return` that leaves the enclosing
+/// method. Nested blocks are searched because their `return` also leaves the
+/// method; lambdas and definitions own theirs.
+pub(crate) fn contains_method_return(node: &Node<'_>) -> bool {
+    let mut finder = MethodReturnFinder { found: false };
+    finder.visit(node);
+    finder.found
+}
+
+struct MethodReturnFinder {
+    found: bool,
+}
+
+impl<'pr> Visit<'pr> for MethodReturnFinder {
+    fn visit_return_node(&mut self, _node: &ruby_prism::ReturnNode<'pr>) {
+        self.found = true;
+    }
+
+    fn visit_lambda_node(&mut self, _node: &ruby_prism::LambdaNode<'pr>) {}
+
+    fn visit_def_node(&mut self, _node: &ruby_prism::DefNode<'pr>) {}
+
+    fn visit_class_node(&mut self, _node: &ruby_prism::ClassNode<'pr>) {}
+
+    fn visit_module_node(&mut self, _node: &ruby_prism::ModuleNode<'pr>) {}
+
+    fn visit_singleton_class_node(&mut self, _node: &ruby_prism::SingletonClassNode<'pr>) {}
+}
+
 // --- IfNode / UnlessNode --------------------------------------------------
 
 fn analyze_if(if_n: &IfNode<'_>) -> Reachability {

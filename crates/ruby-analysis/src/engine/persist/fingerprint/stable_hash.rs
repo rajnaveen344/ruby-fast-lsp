@@ -33,6 +33,16 @@ pub(super) fn stable_u64(hasher: &mut StableExportHasher, value: u64) {
     hasher.write(&value.to_le_bytes());
 }
 
+pub(super) fn stable_optional_u32(hasher: &mut StableExportHasher, value: Option<u32>) {
+    match value {
+        Some(value) => {
+            stable_u8(hasher, 1);
+            stable_u64(hasher, u64::from(value));
+        }
+        None => stable_u8(hasher, 0),
+    }
+}
+
 pub(super) fn stable_len(hasher: &mut StableExportHasher, value: usize) {
     stable_u64(
         hasher,

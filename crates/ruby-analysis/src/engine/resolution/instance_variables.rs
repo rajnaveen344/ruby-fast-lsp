@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphNodeKind, InferenceEvidence,
     InstanceVariableDependency, InstanceVariableWrite, NamespaceKind, RubyMethod, RubyType,
-    SourceKind,
+    SourceFileId, SourceKind,
 };
 use crate::engine::View;
 
@@ -25,47 +25,65 @@ use super::{method_lookup_chain, method_lookup_chain_has_unresolved_dependency_f
 /// the variable unknown.
 const MAX_HIERARCHY_CLASSES: usize = 64;
 
+/// One memoising assignment: its file and its number there.
+pub(in crate::engine) type MemoSite = (SourceFileId, u32);
+
 /// The proven type of each instance variable a method-return equation
-/// returns or was evaluated with; `None` where the project does not prove one.
+/// returns or was evaluated with; `None` where the project does not prove
+/// one. A variable keyed with a memoising assignment is typed from every
+/// other assignment.
 pub(in crate::engine) type InstanceVariableTypes =
-    BTreeMap<InstanceVariableDependency, Option<RubyType>>;
+    BTreeMap<InstanceVariableDependency, BTreeMap<Option<MemoSite>, Option<RubyType>>>;
 
 /// Resolve every instance variable the method-return equations in
 /// `evidence` rely on against the project as it is now.
 pub(in crate::engine) fn resolve_instance_variables<'a>(
     view: &View<'_>,
-    evidence: impl Iterator<Item = &'a InferenceEvidence> + Clone,
+    evidence: impl Iterator<Item = (&'a SourceFileId, &'a InferenceEvidence)> + Clone,
 ) -> InstanceVariableTypes {
     let mut by_owner: HashMap<_, Vec<_>> = HashMap::new();
-    for write in evidence
-        .clone()
-        .flat_map(|evidence| evidence.instance_variable_writes.iter())
-    {
-        by_owner.entry(&write.owner).or_default().push(write);
+    for (file_id, evidence) in evidence.clone() {
+        for write in &evidence.instance_variable_writes {
+            by_owner
+                .entry(&write.owner)
+                .or_default()
+                .push((*file_id, write));
+        }
     }
     let writes = InstanceVariableWrites { by_owner };
     let mut reach_by_owner: HashMap<&FullyQualifiedName, Option<OwnerReach>> = HashMap::new();
     let mut resolved = InstanceVariableTypes::new();
-    for equation in evidence.flat_map(|evidence| evidence.method_return_equations.iter()) {
-        let observed = equation
-            .instance_variable_observations()
-            .iter()
-            .map(|observation| &observation.variable);
-        for variable in equation
-            .instance_variable_dependencies()
-            .iter()
-            .chain(observed)
-        {
-            if resolved.contains_key(variable) {
-                continue;
+    for (file_id, evidence) in evidence {
+        for equation in &evidence.method_return_equations {
+            let observed = equation
+                .instance_variable_observations()
+                .iter()
+                .map(|observation| {
+                    let except = observation.except_memo.map(|memo| (*file_id, memo));
+                    (&observation.variable, except)
+                });
+            let returned = equation
+                .instance_variable_dependencies()
+                .iter()
+                .map(|variable| (variable, None));
+            for (variable, except) in returned.chain(observed) {
+                if resolved
+                    .get(variable)
+                    .is_some_and(|types| types.contains_key(&except))
+                {
+                    continue;
+                }
+                let reach = reach_by_owner
+                    .entry(&variable.owner)
+                    .or_insert_with(|| owner_reach(view, &variable.owner));
+                let ruby_type = reach
+                    .as_ref()
+                    .and_then(|reach| instance_variable_type(&writes, reach, variable, except));
+                resolved
+                    .entry(variable.clone())
+                    .or_default()
+                    .insert(except, ruby_type);
             }
-            let reach = reach_by_owner
-                .entry(&variable.owner)
-                .or_insert_with(|| owner_reach(view, &variable.owner));
-            let ruby_type = reach
-                .as_ref()
-                .and_then(|reach| instance_variable_type(&writes, reach, variable));
-            resolved.insert(variable.clone(), ruby_type);
         }
     }
     resolved
@@ -73,7 +91,7 @@ pub(in crate::engine) fn resolve_instance_variables<'a>(
 
 /// Every recorded assignment in the project, grouped by owning namespace.
 struct InstanceVariableWrites<'a> {
-    by_owner: HashMap<&'a FullyQualifiedName, Vec<&'a InstanceVariableWrite>>,
+    by_owner: HashMap<&'a FullyQualifiedName, Vec<(SourceFileId, &'a InstanceVariableWrite)>>,
 }
 
 /// Everything that can assign a variable of one class's instances, shared by
@@ -120,14 +138,23 @@ fn owner_reach(view: &View<'_>, owner: &FullyQualifiedName) -> Option<OwnerReach
 }
 
 /// The proven type of `dependency`'s variable as a reader method returns it.
+/// With `except`, the type every assignment but that memoising one leaves:
+/// a variable nothing else assigns holds nil until the memo runs.
 fn instance_variable_type(
     writes: &InstanceVariableWrites<'_>,
     reach: &OwnerReach,
     dependency: &InstanceVariableDependency,
+    except: Option<MemoSite>,
 ) -> Option<RubyType> {
+    let is_excepted = |file_id: SourceFileId, write: &InstanceVariableWrite| {
+        except.is_some() && write.memo.map(|memo| (file_id, memo)) == except
+    };
     let mut members = Vec::new();
     for namespace in &reach.namespaces {
-        for write in writes.by_owner.get(namespace).into_iter().flatten() {
+        for (file_id, write) in writes.by_owner.get(namespace).into_iter().flatten() {
+            if is_excepted(*file_id, write) {
+                continue;
+            }
             if write.name.as_str() == InstanceVariableWrite::ANY_NAME {
                 return None;
             }
@@ -137,7 +164,7 @@ fn instance_variable_type(
             members.push(write.proven.clone()?);
         }
     }
-    if members.is_empty() {
+    if members.is_empty() && except.is_none() {
         return None;
     }
     // The constructor must assign the variable on every completed run.
@@ -148,7 +175,11 @@ fn instance_variable_type(
                 .get(namespace)
                 .into_iter()
                 .flatten()
-                .any(|write| write.in_constructor && write.name == dependency.name)
+                .any(|(file_id, write)| {
+                    write.in_constructor
+                        && write.name == dependency.name
+                        && !is_excepted(*file_id, write)
+                })
         })
     });
     if !always_assigned {

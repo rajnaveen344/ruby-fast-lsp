@@ -27,6 +27,18 @@ pub(in crate::inference::type_tracker) struct TypeObservations {
     /// position (loops and blocks). One forward visit of such a body does not
     /// see every value a captured local can hold there.
     pub(in crate::inference::type_tracker) repeatable_body_depth: usize,
+    /// What each compound local assignment (`||=`, `&&=`, `+=`) did, keyed
+    /// by where the assignment starts. One entry per visit.
+    pub(in crate::inference::type_tracker) compound_writes: Vec<(usize, CompoundLocalWrite)>,
+}
+
+/// What flow proves about one compound local assignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CompoundLocalWrite {
+    /// The value is always assigned, exactly as a plain assignment would.
+    AssignsValue,
+    /// The local is left holding this type; `Unknown` when unproven.
+    Leaves(RubyType),
 }
 
 /// One exact local-variable read solved by the forward flow tracker.
@@ -87,6 +99,25 @@ impl TypeTracker {
         reads.sort_by_key(|(offset, _)| *offset);
         reads.dedup_by_key(|(offset, _)| *offset);
         reads
+    }
+
+    /// What each compound local assignment did, by where the assignment
+    /// starts. An assignment whose visits disagree is unknown.
+    pub(crate) fn take_compound_local_writes(&mut self) -> Vec<(usize, CompoundLocalWrite)> {
+        let mut writes = std::mem::take(&mut self.observations.compound_writes);
+        writes.sort_by_key(|(offset, _)| *offset);
+        let mut collapsed: Vec<(usize, CompoundLocalWrite)> = Vec::with_capacity(writes.len());
+        for (offset, write) in writes {
+            match collapsed.last_mut() {
+                Some((previous, seen)) if *previous == offset => {
+                    if *seen != write {
+                        *seen = CompoundLocalWrite::Leaves(RubyType::Unknown);
+                    }
+                }
+                Some(_) | None => collapsed.push((offset, write)),
+            }
+        }
+        collapsed
     }
 
     /// Track a body that may run repeatedly or after later statements.

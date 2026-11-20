@@ -107,6 +107,11 @@ impl LocalCallables {
     /// A callable read anywhere in an assigned value may be stored and called
     /// later with unknown inputs. Assigning the literal itself or a bare alias
     /// is not an escape.
+    /// Drop a binding whose local may now hold a different value.
+    pub(crate) fn forget(&mut self, name: &str) {
+        self.bindings.remove(name);
+    }
+
     pub(crate) fn invalidate_escaped_in_value(&mut self, value: &Node<'_>) {
         if self.bindings.is_empty()
             || crate::inference::callable_body::is_static_callable_literal(value)

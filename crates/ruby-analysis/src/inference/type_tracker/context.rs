@@ -28,6 +28,10 @@ pub(in crate::inference::type_tracker) struct MethodContext {
     /// Provisional: other files may assign them too, so every use is
     /// recorded as an observation for the engine to confirm.
     pub(in crate::inference::type_tracker) instance_variable_types: HashMap<Ustr, RubyType>,
+    /// For each `@name ||= value` of the method, by where it starts: its
+    /// number in the file, and what the file's other assignments of the
+    /// variable prove. Provisional in the same way.
+    pub(in crate::inference::type_tracker) instance_variable_memos: HashMap<usize, (u32, RubyType)>,
 }
 
 #[derive(Default)]
@@ -114,8 +118,10 @@ impl TypeTracker {
         &mut self,
         owner: Option<FullyQualifiedName>,
         file_local_types: HashMap<Ustr, RubyType>,
+        memos: HashMap<usize, (u32, RubyType)>,
     ) {
         self.context.instance_variable_types = file_local_types;
+        self.context.instance_variable_memos = memos;
         self.context.instance_variable_owner = owner;
     }
 }

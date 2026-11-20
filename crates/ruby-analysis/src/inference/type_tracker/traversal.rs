@@ -101,6 +101,38 @@ impl TypeTracker {
                 self.track_escaping_write(&write.value())
             }
 
+            // Compound assignments read the binding they replace.
+            _ if node.as_local_variable_or_write_node().is_some() => {
+                let write = node.as_local_variable_or_write_node().unwrap();
+                self.track_control_flow(|tracker| {
+                    tracker.track_local_short_circuit_write(
+                        write.location().start_offset(),
+                        write.name().as_slice(),
+                        &write.value(),
+                        ShortCircuitOperator::Or,
+                    )
+                })
+            }
+            _ if node.as_local_variable_and_write_node().is_some() => {
+                let write = node.as_local_variable_and_write_node().unwrap();
+                self.track_control_flow(|tracker| {
+                    tracker.track_local_short_circuit_write(
+                        write.location().start_offset(),
+                        write.name().as_slice(),
+                        &write.value(),
+                        ShortCircuitOperator::And,
+                    )
+                })
+            }
+            _ if node.as_local_variable_operator_write_node().is_some() => {
+                let write = node.as_local_variable_operator_write_node().unwrap();
+                self.track_local_operator_write(&write)
+            }
+            _ if node.as_instance_variable_or_write_node().is_some() => {
+                let write = node.as_instance_variable_or_write_node().unwrap();
+                self.track_control_flow(|tracker| tracker.track_instance_variable_or_write(&write))
+            }
+
             // If/unless conditionals
             _ if node.as_if_node().is_some() => {
                 let if_node = node.as_if_node().unwrap();

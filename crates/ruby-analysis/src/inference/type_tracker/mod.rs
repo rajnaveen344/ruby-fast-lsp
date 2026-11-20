@@ -21,7 +21,7 @@ use returns::ReturnEvidence;
 
 #[cfg(test)]
 pub use observations::get_var_type_at;
-pub(crate) use observations::LocalReadType;
+pub(crate) use observations::{CompoundLocalWrite, LocalReadType};
 
 /// Track a method, program, or isolated block using its existing Prism tree.
 #[derive(Default)]
