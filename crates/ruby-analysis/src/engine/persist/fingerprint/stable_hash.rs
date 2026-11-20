@@ -541,6 +541,22 @@ pub(super) fn stable_direct_yield_call(
     }
 }
 
+pub(super) fn stable_documented_yield(
+    hasher: &mut StableExportHasher,
+    documented: Option<&crate::core::callables::callable_signature::DocumentedYield>,
+) {
+    match documented {
+        Some(documented) => {
+            stable_u8(hasher, 1);
+            stable_len(hasher, documented.parameter_types.len());
+            for parameter_type in &documented.parameter_types {
+                stable_ruby_type(hasher, parameter_type);
+            }
+        }
+        None => stable_u8(hasher, 0),
+    }
+}
+
 fn stable_literal_value(hasher: &mut StableExportHasher, value: &crate::core::LiteralValue) {
     match value {
         crate::core::LiteralValue::Symbol(value) => {

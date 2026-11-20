@@ -294,6 +294,16 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
             .map(|direct| SnapshotDirectYieldCall {
                 parameter_names: ustr_strings(&direct.parameter_names),
             }),
+        documented_yield: fact
+            .documented_yield()
+            .map(|documented| {
+                documented
+                    .parameter_types
+                    .iter()
+                    .map(snapshot_ruby_type)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?,
     })
 }
 
@@ -344,6 +354,18 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
             parameter_names: interned_strings(&direct.parameter_names),
         }
     });
+    let documented_yield = fact
+        .documented_yield
+        .map(|parameter_types| {
+            parameter_types
+                .into_iter()
+                .map(|parameter_type| restore_ruby_type(parameter_type, 0))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|parameter_types| {
+                    crate::core::callables::callable_signature::DocumentedYield { parameter_types }
+                })
+        })
+        .transpose()?;
     Ok(MethodFact {
         fqn: restore_fqn(fact.fqn)?,
         owner: restore_fqn(fact.owner)?,
@@ -361,7 +383,8 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
     }
     .with_callable_signatures(callable_signatures)
     .with_forwarded_block_call(forwarded_block_call)
-    .with_direct_yield_call(direct_yield_call))
+    .with_direct_yield_call(direct_yield_call)
+    .with_documented_yield(documented_yield))
 }
 
 fn snapshot_method_visibility_override(

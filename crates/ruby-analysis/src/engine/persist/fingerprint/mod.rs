@@ -14,12 +14,13 @@ use crate::engine::View;
 use stable_hash::{
     export_hash, result_hash, stable_bool, stable_callable_body_summary,
     stable_callable_signatures, stable_diagnostic_severity, stable_direct_yield_call,
-    stable_execution_scope_mode, stable_forwarded_block_call, stable_fqn, stable_graph_edge_kind,
-    stable_graph_edge_provenance, stable_graph_node_kind, stable_len, stable_method,
-    stable_method_availability, stable_method_param_kind, stable_method_reference_access,
-    stable_method_visibility, stable_optional_fqn, stable_optional_method, stable_optional_string,
-    stable_range_offsets, stable_ruby_type, stable_source_kind, stable_string, stable_symbol_kind,
-    stable_type_provenance, stable_type_subject, stable_u64, stable_u8,
+    stable_documented_yield, stable_execution_scope_mode, stable_forwarded_block_call, stable_fqn,
+    stable_graph_edge_kind, stable_graph_edge_provenance, stable_graph_node_kind, stable_len,
+    stable_method, stable_method_availability, stable_method_param_kind,
+    stable_method_reference_access, stable_method_visibility, stable_optional_fqn,
+    stable_optional_method, stable_optional_string, stable_range_offsets, stable_ruby_type,
+    stable_source_kind, stable_string, stable_symbol_kind, stable_type_provenance,
+    stable_type_subject, stable_u64, stable_u8,
 };
 
 impl SemanticExportFingerprint {
@@ -62,6 +63,7 @@ impl SemanticExportFingerprint {
                 stable_callable_signatures(hasher, fact.callable_signatures());
                 stable_forwarded_block_call(hasher, fact.forwarded_block_call());
                 stable_direct_yield_call(hasher, fact.direct_yield_call());
+                stable_documented_yield(hasher, fact.documented_yield());
             }));
         }
         for fact in &facts.method_visibility_overrides {
@@ -378,6 +380,7 @@ impl View<'_> {
                     stable_callable_signatures(hasher, fact.callable_signatures());
                     stable_forwarded_block_call(hasher, fact.forwarded_block_call());
                     stable_direct_yield_call(hasher, fact.direct_yield_call());
+                    stable_documented_yield(hasher, fact.documented_yield());
                 }),
             );
         }

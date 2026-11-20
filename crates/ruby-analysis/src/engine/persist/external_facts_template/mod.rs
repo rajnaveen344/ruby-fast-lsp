@@ -255,6 +255,7 @@ struct SnapshotMethodFact {
     callable_signatures: Vec<SnapshotCallableSignature>,
     forwarded_block_call: Option<SnapshotForwardedBlockCall>,
     direct_yield_call: Option<SnapshotDirectYieldCall>,
+    documented_yield: Option<Vec<SnapshotRubyType>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -18,6 +18,10 @@ pub(in crate::indexer::fact_collector) struct FlowState {
     pub(in crate::indexer::fact_collector) assignment_target_types: Vec<RubyType>,
     pub(in crate::indexer::fact_collector) method_yields:
         HashMap<FullyQualifiedName, Vec<RubyType>>,
+    /// Methods with a definition in this file that documents its yields;
+    /// their inferred yield types are never recorded.
+    pub(in crate::indexer::fact_collector) documented_yield_methods:
+        std::collections::HashSet<FullyQualifiedName>,
     pub(in crate::indexer::fact_collector) local_callables:
         crate::inference::higher_order::LocalCallables,
     /// Nonlocal writes currently being traversed. Their target facts are

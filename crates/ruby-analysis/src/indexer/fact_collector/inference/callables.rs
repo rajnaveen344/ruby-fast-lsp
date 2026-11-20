@@ -75,6 +75,9 @@ impl FactCollector {
                 .then(|| TypeInferenceOutcome::unknown(reason));
             }
         };
+        if prepared.leaves_result_to_method_return() {
+            return None;
+        }
         if let Some(block) = block_expression.as_block_node() {
             if block.body().as_ref().is_some_and(|body| {
                 crate::inference::control_flow::has_unsupported_higher_order_exit(body)
@@ -315,7 +318,19 @@ impl FactCollector {
         let prepared = self.prepare_higher_order_call_for_node(node, &HashMap::new());
         let preparation_reason = match prepared {
             Ok(prepared) => {
-                let parameter_types = prepared.block_parameter_types().to_vec();
+                let parameter_types = if prepared.leaves_result_to_method_return() {
+                    node.block()
+                        .and_then(|block| block.as_block_node())
+                        .map(|block| {
+                            call_site::documented_block_parameter_types(
+                                prepared.block_parameter_types(),
+                                &block,
+                            )
+                        })
+                        .unwrap_or_default()
+                } else {
+                    prepared.block_parameter_types().to_vec()
+                };
                 return (parameter_types, Some(Ok(prepared)));
             }
             Err(reason) => reason,
@@ -430,6 +445,35 @@ impl FactCollector {
             .cloned()
     }
 
+    /// Record the yield types a definition documents. Documentation is the
+    /// first source of truth: once any definition of the method documents its
+    /// yields, types inferred from its `yield` expressions are not used.
+    pub(in crate::indexer::fact_collector) fn record_documented_yield(
+        &mut self,
+        method_fqn: &FullyQualifiedName,
+        definition_range: crate::core::TextRange,
+        yard_doc: Option<&crate::indexer::yard::types::YardMethodDoc>,
+    ) {
+        let Some(documented_yield) =
+            yard_doc.and_then(crate::indexer::yard::converter::YardTypeConverter::documented_yield)
+        else {
+            return;
+        };
+        for fact in self
+            .facts
+            .analysis
+            .methods
+            .iter_mut()
+            .filter(|fact| fact.fqn == *method_fqn && fact.range == definition_range)
+        {
+            fact.set_documented_yield(Some(documented_yield.clone()));
+        }
+        self.flow.method_yields.remove(method_fqn);
+        self.flow
+            .documented_yield_methods
+            .insert(method_fqn.clone());
+    }
+
     pub(in crate::indexer::fact_collector) fn record_current_method_yield_types(
         &mut self,
         node: &YieldNode<'_>,
@@ -446,6 +490,9 @@ impl FactCollector {
             .map(|arg| self.infer_type_from_value(&arg))
             .collect::<Vec<_>>();
         if yield_types.iter().all(|ty| *ty == RubyType::Unknown) {
+            return;
+        }
+        if self.flow.documented_yield_methods.contains(&method_fqn) {
             return;
         }
         let existing = self.flow.method_yields.entry(method_fqn).or_default();
@@ -466,6 +513,9 @@ impl FactCollector {
             return;
         };
         if yield_types.iter().all(|ty| *ty == RubyType::Unknown) {
+            return;
+        }
+        if self.flow.documented_yield_methods.contains(&method_fqn) {
             return;
         }
         let existing = self.flow.method_yields.entry(method_fqn).or_default();

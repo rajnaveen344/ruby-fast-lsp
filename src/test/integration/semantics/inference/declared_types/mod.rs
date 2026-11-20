@@ -3,3 +3,4 @@
 mod instance_variables;
 mod return_type_checks;
 mod type_mismatch;
+mod yield_parameters;

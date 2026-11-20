@@ -116,6 +116,11 @@ impl TypeTracker {
                 .then_some(RubyType::Unknown);
             }
         };
+        if prepared.leaves_result_to_method_return() {
+            // Documented yields type what the block receives; the call's
+            // result is the method's own return.
+            return None;
+        }
         if let Some(block) = block_expression.as_block_node() {
             if block
                 .body()

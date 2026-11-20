@@ -5,6 +5,7 @@ use crate::core::callables::callable_signature::CallableBlockTemplate;
 use crate::core::callables::callable_signature::CallableSignature;
 use crate::core::callables::callable_signature::CallableTypeTemplate;
 use crate::core::{FullyQualifiedName, MethodFact, MethodParamKind, RubyMethod, RubyType};
+use crate::inference::higher_order::documented_yield::prepare_documented_yield;
 use crate::inference::higher_order::{prepare_callable_set, PreparedCallableSet};
 use crate::inference::semantics::Semantics;
 use ustr::Ustr;
@@ -73,7 +74,10 @@ pub(super) fn prepare_higher_order_call_with_fallbacks_uncached<S: Semantics + ?
         (None, None) => return Err(crate::core::UnknownReason::IncompleteBlockInput),
     };
     fallback_unsupported_callable(
-        prepare_from_callable_signatures(receiver_type, &facts, argument_types),
+        fallback_unsupported_callable(
+            prepare_from_callable_signatures(receiver_type, &facts, argument_types),
+            || prepare_documented_yield(query, receiver_type, &method, &facts),
+        ),
         || {
             fallback_unsupported_callable(
                 prepare_forwarded_from_facts(query, &facts, argument_types),

@@ -177,6 +177,24 @@ impl YardTypeConverter {
         }
     }
 
+    /// The yield types a method documents, by position; an undocumented or
+    /// untyped position is unknown. `None` when no position has a type.
+    pub(crate) fn documented_yield(
+        doc: &crate::indexer::yard::types::YardMethodDoc,
+    ) -> Option<crate::core::callables::callable_signature::DocumentedYield> {
+        let parameter_types = doc
+            .yield_params
+            .iter()
+            .map(|param| Self::convert_multiple(&param.types))
+            .collect::<Vec<_>>();
+        parameter_types
+            .iter()
+            .any(|parameter_type| *parameter_type != RubyType::Unknown)
+            .then_some(
+                crate::core::callables::callable_signature::DocumentedYield { parameter_types },
+            )
+    }
+
     /// Convert multiple YARD type strings to a single RubyType (union if multiple)
     ///
     /// Examples:

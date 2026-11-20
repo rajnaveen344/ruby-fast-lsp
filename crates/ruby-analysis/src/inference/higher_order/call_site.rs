@@ -75,6 +75,50 @@ pub(crate) fn unprepared_block_result_is_unknown(
     crate::inference::rbs::block_selects_another_result(&class_name, method_name)
 }
 
+/// The documented yield types a block's parameters may take, by position.
+///
+/// Documentation proves a type only for a plain required parameter that
+/// receives exactly one documented value. A block that also declares
+/// optional, rest, post, or destructuring parameters, or more parameters than
+/// the method documents, distributes the yielded values in a way the
+/// documentation does not describe, so nothing is bound.
+pub(crate) fn documented_block_parameter_types(
+    documented: &[RubyType],
+    block: &BlockNode<'_>,
+) -> Vec<RubyType> {
+    let Some(parameters_node) = block.parameters() else {
+        return Vec::new();
+    };
+    let plain_parameter_count =
+        if let Some(numbered) = parameters_node.as_numbered_parameters_node() {
+            usize::from(numbered.maximum())
+        } else {
+            let Some(parameters) = parameters_node
+                .as_block_parameters_node()
+                .and_then(|node| node.parameters())
+            else {
+                return Vec::new();
+            };
+            let only_plain_required_parameters = parameters
+                .requireds()
+                .iter()
+                .all(|required| required.as_required_parameter_node().is_some())
+                && parameters.optionals().iter().next().is_none()
+                && parameters.rest().is_none()
+                && parameters.posts().iter().next().is_none()
+                && parameters.keywords().iter().next().is_none()
+                && parameters.keyword_rest().is_none();
+            if !only_plain_required_parameters {
+                return Vec::new();
+            }
+            parameters.requireds().iter().count()
+        };
+    if plain_parameter_count == 0 || plain_parameter_count > documented.len() {
+        return Vec::new();
+    }
+    documented[..plain_parameter_count].to_vec()
+}
+
 impl PreparedCallableSet {
     /// The block's positional parameters bound to the yielded types; a
     /// parameter the signature does not yield is nil.

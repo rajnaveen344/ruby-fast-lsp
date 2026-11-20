@@ -19,6 +19,14 @@ pub(crate) struct DirectYieldCall {
     pub(crate) parameter_names: Vec<Ustr>,
 }
 
+/// The type a method's documentation gives each value it yields, in yield
+/// order and as written: a name is resolved only when a call reads it, and a
+/// value documented without a type is `Unknown`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DocumentedYield {
+    pub(crate) parameter_types: Vec<RubyType>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CallableTypeTemplate {
     Concrete(RubyType),

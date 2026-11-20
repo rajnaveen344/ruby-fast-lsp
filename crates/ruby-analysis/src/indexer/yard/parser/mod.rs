@@ -52,7 +52,13 @@ static RETURN_REGEX: LazyLock<Regex> =
 /// @yieldparam name [Type] description
 /// Groups: 1=name, 2=type, 3=description
 static YIELD_PARAM_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"@yieldparam\s+(\w+)\s+\[([^\]]+)\]\s*(.*)").expect("Invalid yieldparam regex")
+    Regex::new(r"@yieldparam\s+(\w+)(?:\s+\[([^\]]+)\])?\s*(.*)").expect("Invalid yieldparam regex")
+});
+
+/// @yieldparam [Type] name description (type before the optional name)
+/// Groups: 1=type, 2=name, 3=description
+static YIELD_PARAM_ALT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@yieldparam\s*\[([^\]]+)\]\s*(\w*)\s*(.*)").expect("Invalid yieldparam alt regex")
 });
 
 /// @yieldreturn [Type] description
@@ -315,6 +321,7 @@ impl YardParser {
             || doc.unavailable.is_some()
             || doc.absent.is_some()
             || !doc.raises.is_empty()
+            || !doc.yield_params.is_empty()
         {
             Some(doc)
         } else {
@@ -371,6 +378,7 @@ impl YardParser {
         let mut doc = YardMethodDoc::new();
         let mut description_lines: Vec<&str> = Vec::new();
         let mut in_description = true;
+        let mut documents_overloads = false;
 
         for line_info in lines {
             let line = line_info.content;
@@ -380,6 +388,7 @@ impl YardParser {
 
             if line.starts_with('@') {
                 in_description = false;
+                documents_overloads |= line.starts_with("@overload");
                 Self::parse_tag(line, &mut doc, line_info, track_positions);
             } else if in_description {
                 description_lines.push(line);
@@ -388,6 +397,11 @@ impl YardParser {
 
         if !description_lines.is_empty() {
             doc.description = Some(description_lines.join(" "));
+        }
+        if documents_overloads {
+            // Each overload documents its own yields; which one a call
+            // selects is not proven, so no position has one documented type.
+            doc.yield_params.clear();
         }
 
         debug!("Parsed YARD doc: {:?}", doc);
@@ -523,6 +537,14 @@ impl YardParser {
             } else {
                 doc.returns.push(YardReturn::new(types, desc));
             }
+        } else if let Some(caps) = YIELD_PARAM_ALT_REGEX.captures(line) {
+            let types = parse_type_list(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
+            let name = caps
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let desc = non_empty_string(caps.get(3).map(|m| m.as_str().trim()));
+            doc.yield_params.push(YardParam::new(name, types, desc));
         } else if let Some(caps) = YIELD_PARAM_REGEX.captures(line) {
             let name = caps
                 .get(1)
@@ -531,6 +553,11 @@ impl YardParser {
             let types = parse_type_list(caps.get(2).map(|m| m.as_str()).unwrap_or(""));
             let desc = non_empty_string(caps.get(3).map(|m| m.as_str().trim()));
             doc.yield_params.push(YardParam::new(name, types, desc));
+        } else if line.contains("@yieldparam") {
+            // An unreadable tag still occupies its yield position, so later
+            // documented types never shift onto the wrong block parameter.
+            doc.yield_params
+                .push(YardParam::new(String::new(), Vec::new(), None));
         } else if let Some(caps) = YIELD_RETURN_REGEX.captures(line) {
             let types = parse_type_list(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
             let desc = non_empty_string(caps.get(2).map(|m| m.as_str().trim()));

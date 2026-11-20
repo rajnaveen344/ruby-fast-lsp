@@ -260,6 +260,7 @@ impl FactCollector {
                 fact.set_direct_yield_call(Some(direct_yield_call.clone()));
             }
         }
+        self.record_documented_yield(&fqn, self.direct_range(&full_location), yard_doc.as_ref());
 
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 

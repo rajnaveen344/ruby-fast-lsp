@@ -296,6 +296,9 @@ impl Visit<'_> for AnalysisIndexer<'_> {
         let forwarded_block_call =
             crate::indexer::lowering::forwarded_block::direct_forwarded_block_call(node);
         let direct_yield_call = crate::indexer::lowering::forwarded_block::direct_yield_call(node);
+        let documented_yield = yard_doc
+            .as_ref()
+            .and_then(crate::indexer::yard::converter::YardTypeConverter::documented_yield);
         let availability = match yard_doc.as_ref() {
             Some(doc) => match (&doc.unavailable, &doc.absent) {
                 (Some(reason), None) => MethodAvailability::Unavailable {
@@ -327,7 +330,8 @@ impl Visit<'_> for AnalysisIndexer<'_> {
                 .with_visibility(visibility)
                 .with_initialize_origin(normalized_from_initialize)
                 .with_forwarded_block_call(forwarded_block_call.clone())
-                .with_direct_yield_call(direct_yield_call.clone()),
+                .with_direct_yield_call(direct_yield_call.clone())
+                .with_documented_yield(documented_yield.clone()),
         );
         if module_function_copy {
             let owner = FullyQualifiedName::namespace_with_kind(
@@ -346,7 +350,8 @@ impl Visit<'_> for AnalysisIndexer<'_> {
                     .with_availability(availability)
                     .with_visibility(MethodVisibility::Public)
                     .with_forwarded_block_call(forwarded_block_call)
-                    .with_direct_yield_call(direct_yield_call),
+                    .with_direct_yield_call(direct_yield_call)
+                    .with_documented_yield(documented_yield),
             );
         }
         if let Some(return_type) = method_body_literal_type(node) {

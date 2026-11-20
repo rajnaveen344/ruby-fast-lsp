@@ -5,6 +5,7 @@ use crate::core::callables::callable_body::CallableBodyParameter;
 use crate::core::callables::callable_body::CallableBodyParameterKind;
 use crate::core::callables::callable_body::CallableBodySummary;
 use crate::core::callables::callable_body::ConstantCallableBodyFact;
+use crate::core::callables::callable_signature::DocumentedYield;
 use crate::core::MethodVisibility;
 use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, FileAnalysis, FullyQualifiedName, GraphEdgeFact,
@@ -87,6 +88,39 @@ fn persistent_snapshot_round_trips_capture_free_callable_constant() {
     assert_eq!(fact.constant, constant);
     assert_eq!(fact.summary, summary);
     assert_eq!(fact.range.file_id, target);
+}
+
+#[test]
+fn persistent_snapshot_round_trips_documented_yield_types() {
+    let source = SourceFileId(41);
+    let target = SourceFileId(7);
+    let owner = namespace("Roster");
+    let method_fqn = FullyQualifiedName::method(
+        owner.namespace_parts(),
+        RubyMethod::new("each_name").unwrap(),
+    );
+    let documented = DocumentedYield {
+        parameter_types: vec![RubyType::string(), RubyType::Unknown],
+    };
+    let template = ProjectNeutralFileFactsTemplate::try_new(
+        source,
+        FileAnalysis {
+            methods: vec![
+                MethodFact::new(method_fqn, owner, TextRange::new(source, 1, 20))
+                    .with_documented_yield(Some(documented.clone())),
+            ],
+            ..FileAnalysis::default()
+        },
+    )
+    .unwrap();
+
+    let snapshot = template.to_persistent_snapshot().unwrap();
+    let encoded = postcard::to_allocvec(&snapshot).unwrap();
+    let decoded: ProjectNeutralFileFactsSnapshot = postcard::from_bytes(&encoded).unwrap();
+    let restored = ProjectNeutralFileFactsTemplate::try_from_persistent_snapshot(decoded).unwrap();
+    let facts = restored.instantiate(target);
+    assert_eq!(facts.methods.len(), 1);
+    assert_eq!(facts.methods[0].documented_yield(), Some(&documented));
 }
 
 #[test]

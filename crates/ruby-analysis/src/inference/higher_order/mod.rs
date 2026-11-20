@@ -7,6 +7,7 @@
 
 pub(crate) mod call_site;
 mod captured_writes;
+pub(crate) mod documented_yield;
 mod local_callables;
 
 pub(crate) use captured_writes::captured_local_writes;
@@ -51,9 +52,26 @@ struct PreparedCallable {
 pub struct PreparedCallableSet {
     candidates: Vec<PreparedCallable>,
     block_parameter_types: Vec<RubyType>,
+    /// The evidence types the yielded values only; the call's result is the
+    /// method's own return, not a function of the block.
+    block_parameters_only: bool,
 }
 
 impl PreparedCallableSet {
+    /// A set proving what the block receives and nothing about the result.
+    pub(crate) fn block_parameters_only(block_parameter_types: Vec<RubyType>) -> Self {
+        Self {
+            candidates: Vec::new(),
+            block_parameter_types,
+            block_parameters_only: true,
+        }
+    }
+
+    /// Whether the call's result must come from the method's return evidence.
+    pub(crate) fn leaves_result_to_method_return(&self) -> bool {
+        self.block_parameters_only
+    }
+
     pub(crate) fn block_parameter_types(&self) -> &[RubyType] {
         &self.block_parameter_types
     }
@@ -305,6 +323,7 @@ pub(crate) fn prepare_callable_set(
             "an empty applicable set returns before preparation",
             "keep candidate and block-parameter construction atomic",
         ),
+        block_parameters_only: false,
     })
 }
 

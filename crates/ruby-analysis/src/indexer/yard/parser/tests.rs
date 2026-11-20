@@ -172,6 +172,32 @@ fn test_parse_hash_with_union_inside_braces() {
 // =========================================================================
 
 #[test]
+fn test_parse_yield_params_keep_their_position_in_every_tag_form() {
+    let comment = r#"
+# @yieldparam [String] name the type comes first
+# @yieldparam
+# @yieldparam rank
+# @yieldparam count [Integer]
+"#;
+    let doc = YardParser::parse(comment);
+
+    let parsed = doc
+        .yield_params
+        .iter()
+        .map(|param| (param.name.as_str(), param.types.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parsed,
+        vec![
+            ("name", vec!["String".to_string()]),
+            ("", Vec::new()),
+            ("rank", Vec::new()),
+            ("count", vec!["Integer".to_string()]),
+        ]
+    );
+}
+
+#[test]
 fn test_parse_yield_params() {
     let comment = r#"
 # @yieldparam index [Integer] the current index

@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use crate::core::callables::callable_signature::CallableSignature;
 use crate::core::callables::callable_signature::CallableTypeTemplate;
 use crate::core::callables::callable_signature::DirectYieldCall;
+use crate::core::callables::callable_signature::DocumentedYield;
 use crate::core::callables::callable_signature::ForwardedBlockCall;
 use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::file_owned::arena::{FileArena, FileIndex, RowId};
@@ -71,6 +72,7 @@ pub(crate) struct HigherOrderMethodMetadata {
     pub(crate) callable_signatures: Vec<CallableSignature>,
     pub(crate) forwarded_block_call: Option<ForwardedBlockCall>,
     pub(crate) direct_yield_call: Option<DirectYieldCall>,
+    pub(crate) documented_yield: Option<DocumentedYield>,
 }
 
 impl HigherOrderMethodMetadata {
@@ -78,6 +80,7 @@ impl HigherOrderMethodMetadata {
         self.callable_signatures.is_empty()
             && self.forwarded_block_call.is_none()
             && self.direct_yield_call.is_none()
+            && self.documented_yield.is_none()
     }
 }
 
@@ -342,6 +345,31 @@ impl MethodFact {
             }
             self.clear_empty_higher_order();
         }
+    }
+
+    pub(crate) fn with_documented_yield(
+        mut self,
+        documented_yield: Option<DocumentedYield>,
+    ) -> Self {
+        self.set_documented_yield(documented_yield);
+        self
+    }
+
+    pub(crate) fn set_documented_yield(&mut self, documented_yield: Option<DocumentedYield>) {
+        if let Some(documented_yield) = documented_yield {
+            self.higher_order_metadata_mut().documented_yield = Some(documented_yield);
+        } else {
+            if let Some(metadata) = self.higher_order.as_mut() {
+                metadata.documented_yield = None;
+            }
+            self.clear_empty_higher_order();
+        }
+    }
+
+    pub(crate) fn documented_yield(&self) -> Option<&DocumentedYield> {
+        self.higher_order
+            .as_deref()
+            .and_then(|metadata| metadata.documented_yield.as_ref())
     }
 
     pub(crate) fn callable_signatures(&self) -> &[CallableSignature] {
@@ -759,6 +787,14 @@ fn higher_order_method_metadata_heap_bytes(metadata: &HigherOrderMethodMetadata)
             .as_ref()
             .map(|direct| vec_payload_bytes(&direct.parameter_names))
             .unwrap_or(0)
+        + metadata.documented_yield.as_ref().map_or(0, |documented| {
+            vec_payload_bytes(&documented.parameter_types)
+                + documented
+                    .parameter_types
+                    .iter()
+                    .map(ruby_type_heap_bytes)
+                    .sum::<usize>()
+        })
 }
 
 fn callable_signature_heap_bytes(signature: &CallableSignature) -> usize {
