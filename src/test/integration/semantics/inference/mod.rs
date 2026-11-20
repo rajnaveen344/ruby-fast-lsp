@@ -3,6 +3,8 @@
 //! Tests for method return type inference, type unioning, branch narrowing,
 //! mixin cross-module inference, and related features.
 
+// Local reads after a block that reassigns the local.
+mod block_local_writes;
 // Higher-order calls and parameter-dependent callable bodies.
 mod callables;
 // Local types after `||=`, `&&=`, and operator assignments.

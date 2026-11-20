@@ -348,6 +348,12 @@ impl<'a> View<'a> {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<RubyType> {
+        // The forward flow walk owns what reaches a read. When it left this
+        // read unproven, an assignment fact that precedes it in source order
+        // (or a parameter contract) is not what the read holds.
+        if self.local_read_is_unproven(name, file_id, byte_offset) {
+            return Some(RubyType::Unknown);
+        }
         match self.engine.type_store().type_at(
             &TypeSubject::Local {
                 scope_id,
@@ -382,6 +388,26 @@ impl<'a> View<'a> {
             })
             .max_by_key(|fact| fact.range.start_byte)
             .map(|fact| fact.ruby_type)
+    }
+
+    /// Whether the local token of `name` covering `byte_offset` carries an
+    /// Unknown reason. The reason must sit on the token's exact range, so an
+    /// enclosing unknown call never marks its proven receiver or arguments.
+    fn local_read_is_unproven(&self, name: &str, file_id: SourceFileId, byte_offset: u32) -> bool {
+        let Some(reasons) = self.engine.expression_unknown_reasons_in_file(file_id) else {
+            return false;
+        };
+        let Ok(name_len) = u32::try_from(name.len()) else {
+            return false;
+        };
+        let earliest_start = byte_offset.saturating_sub(name_len);
+        let first = reasons.partition_point(|(range, _)| range.start_byte < earliest_start);
+        reasons[first..]
+            .iter()
+            .take_while(|(range, _)| range.start_byte <= byte_offset)
+            .any(|(range, _)| {
+                range.end_byte - range.start_byte == name_len && byte_offset <= range.end_byte
+            })
     }
 
     fn latest_unambiguous_concrete_type(facts: impl Iterator<Item = TypeFact>) -> Option<RubyType> {

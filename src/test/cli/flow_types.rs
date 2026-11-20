@@ -554,3 +554,58 @@ end
         "restoring the unconditional Text assignment must restore the method-return inlay"
     );
 }
+
+#[tokio::test]
+async fn local_reassigned_in_a_block_is_unproven_across_cli_and_lsp() {
+    let source = r#"class Report
+  def plain(items)
+    value = 1
+    items.each do |item|
+      value = "s"
+    end
+    value
+  end
+end
+"#;
+    let project = tempfile::tempdir().expect("temporary block-write project must be created");
+    std::fs::write(project.path().join("main.rb"), source)
+        .expect("block-write parity fixture must be written");
+
+    let check_report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must analyze the block-write fixture");
+    let method_return = check_report
+        .inferred_types
+        .iter()
+        .find(|inferred| {
+            inferred.kind == CheckTypeSubjectKind::MethodReturn
+                && inferred.subject == "Report#plain"
+        })
+        .expect("the CLI must report Report#plain's return outcome");
+    assert!(
+        matches!(method_return.outcome, CheckTypeOutcome::Unknown { .. }),
+        "the pre-block Integer must not become the proven return, got {:#?}",
+        method_return.outcome
+    );
+
+    let mut editor = FakeEditor::new().await;
+    editor.open("main.rb", source).await;
+    let hover = editor
+        .hover_at("main.rb", 6, 6)
+        .await
+        .expect("the read after the block must have hover output");
+    let actual = hover_text(hover);
+    assert!(
+        actual.contains("Unknown") && !actual.contains("Integer"),
+        "LSP hover must leave the read unknown like the CLI, got `{actual}`"
+    );
+    assert!(
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .all(|hint| !get_hint_label(&hint).contains("-> Integer")),
+        "no return inlay may publish the pre-block Integer"
+    );
+}
