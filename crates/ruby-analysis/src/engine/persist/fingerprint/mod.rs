@@ -124,6 +124,32 @@ impl SemanticExportFingerprint {
                 for callee in equation.local_callees() {
                     stable_fqn(hasher, callee);
                 }
+                stable_len(hasher, equation.instance_variable_dependencies().len());
+                for dependency in equation.instance_variable_dependencies() {
+                    stable_fqn(hasher, &dependency.owner);
+                    stable_string(hasher, dependency.name.as_str());
+                }
+                stable_len(hasher, equation.instance_variable_observations().len());
+                for observation in equation.instance_variable_observations() {
+                    stable_fqn(hasher, &observation.variable.owner);
+                    stable_string(hasher, observation.variable.name.as_str());
+                    stable_ruby_type(hasher, &observation.observed);
+                }
+            }));
+        }
+        for write in &facts.inference.instance_variable_writes {
+            exports.push(export_hash(|hasher| {
+                stable_u8(hasher, 10);
+                stable_fqn(hasher, &write.owner);
+                stable_string(hasher, write.name.as_str());
+                match &write.proven {
+                    Some(ruby_type) => {
+                        stable_u8(hasher, 1);
+                        stable_ruby_type(hasher, ruby_type);
+                    }
+                    None => stable_u8(hasher, 0),
+                }
+                stable_bool(hasher, write.in_constructor);
             }));
         }
         for fact in &facts.inference.constant_callable_bodies {

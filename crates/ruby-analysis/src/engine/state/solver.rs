@@ -17,6 +17,7 @@ use crate::core::{
 use super::types::{TypeInferenceOutcomeRef, TypeTable};
 use super::Project;
 use crate::core::callables::callable_body::CallableBodySummary;
+use crate::engine::resolution::{resolve_instance_variables, InstanceVariableTypes};
 use crate::engine::View;
 use crate::inference::constant::{
     solve_constant_type_equations, ConstantFactInput, ResolvedConstantDependency,
@@ -111,6 +112,13 @@ pub(in crate::engine) struct Solver {
     /// base is withheld until the observation holds again or the owning file
     /// is collected afresh.
     withheld_methods: BTreeSet<FullyQualifiedName>,
+    /// Files whose method-return equations return an instance variable.
+    instance_variable_files: usize,
+    /// Whether a file changed since the returned instance variables were
+    /// last resolved.
+    instance_variables_unchecked: bool,
+    /// The type each returned instance variable resolved to at that time.
+    instance_variable_types: InstanceVariableTypes,
 }
 
 /// The read-only result of planning a constant-type equation solve.
@@ -197,6 +205,7 @@ impl Solver {
         self.method_return_equations_dirty |= equations_changed;
         self.constant_type_equations_dirty = self.constant_solve_files > 0;
         self.return_observations_unchecked = true;
+        self.instance_variables_unchecked = true;
     }
 
     /// Drop one file's inference evidence. Its method-return equations, if
@@ -210,6 +219,7 @@ impl Solver {
         self.method_return_equations_dirty |= !previous.method_return_equations.is_empty();
         self.constant_type_equations_dirty = self.constant_solve_files > 0;
         self.return_observations_unchecked = true;
+        self.instance_variables_unchecked = true;
     }
 
     /// Add (`delta` 1) or remove (`delta` -1) one file's evidence from the
@@ -232,6 +242,12 @@ impl Solver {
         };
         self.constant_solve_files = adjust(self.constant_solve_files, feeds_constant_solve);
         self.constant_dependency_files = adjust(self.constant_dependency_files, has_dependencies);
+        let returns_instance_variables = evidence.method_return_equations.iter().any(|equation| {
+            !equation.instance_variable_dependencies().is_empty()
+                || !equation.instance_variable_observations().is_empty()
+        });
+        self.instance_variable_files =
+            adjust(self.instance_variable_files, returns_instance_variables);
     }
 
     pub(in crate::engine) fn refresh_retained_shape_telemetry(
@@ -440,6 +456,7 @@ impl Solver {
         if file_ids.len() == 1
             && !self.method_return_solution_spans_files
             && !has_constant_dependencies
+            && self.instance_variable_files == 0
             && self.withheld_methods.is_empty()
         {
             return MethodReturnEquationPlan::FileLocal;
@@ -461,10 +478,23 @@ impl Solver {
                         if self.withheld_methods.contains(equation.method()) {
                             return equation.with_withheld_base();
                         }
-                        equation.with_resolved_constant_types(
-                            equation.constant_dependencies().iter().map(|dependency| {
-                                resolve_constant_dependency_type(query, dependency)
-                            }),
+                        let instance_variables = equation
+                            .instance_variable_dependencies()
+                            .iter()
+                            .map(|dependency| {
+                                self.instance_variable_types
+                                    .get(dependency)
+                                    .cloned()
+                                    .flatten()
+                            });
+                        equation.with_resolved_inputs(
+                            equation
+                                .constant_dependencies()
+                                .iter()
+                                .map(|dependency| {
+                                    resolve_constant_dependency_type(query, dependency)
+                                })
+                                .chain(instance_variables),
                         )
                     })
             })
@@ -612,7 +642,12 @@ impl Solver {
                         access,
                     )
                     .is_some_and(|current| observation_holds(&observation.observed, &current))
-                });
+                }) && equation.instance_variable_observations().iter().all(
+                    |observation| {
+                        self.instance_variable_types.get(&observation.variable)
+                            == Some(&Some(observation.observed.clone()))
+                    },
+                );
                 if !holds {
                     failed.insert(equation.method().clone());
                 }
@@ -638,6 +673,43 @@ impl Solver {
             }
         }
         Some(failed)
+    }
+
+    /// Resolve the instance variables the equations rely on against the
+    /// project as it is now, or `None` when no file changed since the last
+    /// resolution.
+    pub(in crate::engine) fn plan_instance_variable_types(
+        &self,
+        query: &View<'_>,
+    ) -> Option<InstanceVariableTypes> {
+        if !self.instance_variables_unchecked {
+            return None;
+        }
+        if self.instance_variable_files == 0 {
+            return Some(InstanceVariableTypes::new());
+        }
+        Some(resolve_instance_variables(
+            query,
+            self.evidence_by_file.values(),
+        ))
+    }
+
+    /// Keep a planned instance-variable resolution. A changed type marks the
+    /// method-return equations for another solve.
+    pub(in crate::engine) fn apply_instance_variable_types(
+        &mut self,
+        resolved: Option<InstanceVariableTypes>,
+    ) {
+        let Some(resolved) = resolved else {
+            return;
+        };
+        self.instance_variables_unchecked = false;
+        if resolved != self.instance_variable_types {
+            self.instance_variable_types = resolved;
+            self.method_return_equations_dirty = true;
+            // The collector's file-local solution leaves these terms unknown.
+            self.method_return_solution_spans_files = true;
+        }
     }
 
     /// Withhold the equations in `failed`. `only_add` keeps earlier
@@ -770,6 +842,9 @@ impl Project {
     pub(super) fn resolve_method_return_equations(&mut self) -> bool {
         let mut solved = false;
         let mut round = 0usize;
+        let instance_variables = self.solver.plan_instance_variable_types(&View::new(self));
+        self.solver
+            .apply_instance_variable_types(instance_variables);
         loop {
             let plan = self.solver.plan_method_return_equations(&View::new(self));
             solved |= self

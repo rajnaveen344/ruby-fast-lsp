@@ -30,7 +30,7 @@ use context::{
 };
 use inference::{
     constants::ConstantEvidence, expressions::ExpressionEvidence, flow::FlowState,
-    method_return::MethodReturnEvidence,
+    instance_variables::InstanceVariableEvidence, method_return::MethodReturnEvidence,
 };
 
 /// A single file pass. Temporary proof and traversal state never outlives it.
@@ -43,6 +43,7 @@ pub struct FactCollector {
     flow: FlowState,
     semantics: SemanticContext,
     method_returns: MethodReturnEvidence,
+    instance_variables: InstanceVariableEvidence,
     expressions: ExpressionEvidence,
     constants: ConstantEvidence,
 }
@@ -65,6 +66,7 @@ impl FactCollector {
             flow: FlowState::default(),
             semantics,
             method_returns: MethodReturnEvidence::default(),
+            instance_variables: InstanceVariableEvidence::default(),
             expressions: ExpressionEvidence::default(),
             constants: ConstantEvidence::default(),
         }

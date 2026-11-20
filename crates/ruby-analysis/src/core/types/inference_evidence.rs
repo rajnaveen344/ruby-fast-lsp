@@ -8,8 +8,8 @@ use std::sync::LazyLock;
 use crate::core::callables::callable_body::ConstantCallableBodyFact;
 use crate::core::storage::memory_estimate::fqn_heap_bytes;
 use crate::core::{
-    ConstantTypeEquation, FullyQualifiedName, InferenceTelemetry, MethodReturnEquation, TextRange,
-    TypeInferenceOutcome, UnknownReason,
+    ConstantTypeEquation, FullyQualifiedName, InferenceTelemetry, InstanceVariableWrite,
+    MethodReturnEquation, TextRange, TypeInferenceOutcome, UnknownReason,
 };
 
 /// File-owned proof results and their observational solver telemetry.
@@ -23,6 +23,9 @@ pub struct InferenceEvidence {
     /// Compact proof equations retained independently of Prism so the shared
     /// engine can solve recursive components spanning project files.
     pub method_return_equations: Vec<MethodReturnEquation>,
+    /// Every instance-variable assignment in the file, in source order. The
+    /// engine reads them to type methods that return the variable.
+    pub instance_variable_writes: Vec<InstanceVariableWrite>,
     /// File-owned type equations whose terms contain lexical value-constant
     /// lookups. The engine solves them after the complete namespace graph is
     /// installed and before method-return equations consume their results.
@@ -45,6 +48,7 @@ impl InferenceEvidence {
     /// Drop growth slack before the evidence is retained with its file.
     pub(crate) fn shrink_to_fit(&mut self) {
         self.method_return_equations.shrink_to_fit();
+        self.instance_variable_writes.shrink_to_fit();
         self.constant_type_equations.shrink_to_fit();
         self.constant_callable_bodies.shrink_to_fit();
         self.call_expression_outcomes.shrink_to_fit();
@@ -58,6 +62,12 @@ impl InferenceEvidence {
                 .method_return_equations
                 .iter()
                 .map(MethodReturnEquation::estimated_heap_bytes)
+                .sum::<usize>()
+            + self.instance_variable_writes.capacity() * InstanceVariableWrite::inline_bytes()
+            + self
+                .instance_variable_writes
+                .iter()
+                .map(InstanceVariableWrite::estimated_heap_bytes)
                 .sum::<usize>()
             + self.constant_type_equations.capacity() * size_of::<ConstantTypeEquation>()
             + self.constant_callable_bodies.capacity() * size_of::<ConstantCallableBodyFact>()

@@ -9,7 +9,8 @@ use std::mem::size_of;
 
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, ruby_type_heap_bytes};
 use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, MethodReturnObservation, RubyConstant, RubyType,
+    ConstantTypeDependency, FullyQualifiedName, InstanceVariableDependency,
+    InstanceVariableObservation, MethodReturnObservation, RubyConstant, RubyType,
     TypeInferenceOutcome, UnknownReason,
 };
 
@@ -32,6 +33,12 @@ pub struct MethodReturnEquation {
     dependencies: Box<[FullyQualifiedName]>,
     /// Sorted and unique.
     constant_dependencies: Box<[ConstantTypeDependency]>,
+    /// Sorted and unique. Instance variables the method returns directly;
+    /// the engine resolves them from every assignment in the project.
+    instance_variable_dependencies: Box<[InstanceVariableDependency]>,
+    /// Sorted and unique. Instance-variable types the base was derived
+    /// from; the base holds only while the project proves each of them.
+    instance_variable_observations: Box<[InstanceVariableObservation]>,
     /// Sorted and unique. Returns of other methods the base was derived
     /// from; the base holds only while each lookup still gives that answer.
     observations: Box<[MethodReturnObservation]>,
@@ -51,6 +58,8 @@ impl MethodReturnEquation {
             base,
             dependencies: dependencies.into_iter().collect(),
             constant_dependencies: Box::default(),
+            instance_variable_dependencies: Box::default(),
+            instance_variable_observations: Box::default(),
             observations: Box::default(),
             local_callees: Box::default(),
         }
@@ -85,6 +94,8 @@ impl MethodReturnEquation {
             base: MethodReturnBase::Unknown(UnknownReason::UnresolvedMethodReturn),
             dependencies: Box::default(),
             constant_dependencies: Box::default(),
+            instance_variable_dependencies: Box::default(),
+            instance_variable_observations: self.instance_variable_observations.clone(),
             observations: self.observations.clone(),
             local_callees: self.local_callees.clone(),
         }
@@ -96,6 +107,20 @@ impl MethodReturnEquation {
     ) -> Self {
         self.constant_dependencies = dependencies.into_iter().collect();
         self
+    }
+
+    pub(crate) fn with_instance_variable_dependencies(
+        mut self,
+        dependencies: BTreeSet<InstanceVariableDependency>,
+        observations: BTreeSet<InstanceVariableObservation>,
+    ) -> Self {
+        self.instance_variable_dependencies = dependencies.into_iter().collect();
+        self.instance_variable_observations = observations.into_iter().collect();
+        self
+    }
+
+    pub(crate) fn instance_variable_observations(&self) -> &[InstanceVariableObservation] {
+        &self.instance_variable_observations
     }
 
     pub(crate) fn proven(method: FullyQualifiedName, ruby_type: RubyType) -> Self {
@@ -140,11 +165,23 @@ impl MethodReturnEquation {
         &self.constant_dependencies
     }
 
-    pub(crate) fn with_resolved_constant_types(
+    pub fn instance_variable_dependencies(&self) -> &[InstanceVariableDependency] {
+        &self.instance_variable_dependencies
+    }
+
+    /// Whether the equation has terms only a project-wide solve can resolve.
+    pub(crate) fn has_solve_time_inputs(&self) -> bool {
+        !self.constant_dependencies.is_empty() || !self.instance_variable_dependencies.is_empty()
+    }
+
+    /// The equation with its constant and instance-variable terms replaced
+    /// by their current types, one entry per term in either order. A term
+    /// without a proven type leaves the whole return unknown.
+    pub(crate) fn with_resolved_inputs(
         &self,
         resolved: impl IntoIterator<Item = Option<RubyType>>,
     ) -> Self {
-        if self.constant_dependencies.is_empty() {
+        if !self.has_solve_time_inputs() {
             return self.clone();
         }
         let mut members = Vec::new();
@@ -155,6 +192,7 @@ impl MethodReturnEquation {
                 let mut equation = self.clone();
                 equation.base = MethodReturnBase::Unknown(*reason);
                 equation.constant_dependencies = Box::default();
+                equation.instance_variable_dependencies = Box::default();
                 return equation;
             }
         }
@@ -163,12 +201,14 @@ impl MethodReturnEquation {
                 let mut equation = self.clone();
                 equation.base = MethodReturnBase::Unknown(UnknownReason::UnresolvedAssignmentValue);
                 equation.constant_dependencies = Box::default();
+                equation.instance_variable_dependencies = Box::default();
                 return equation;
             };
             if RubyType::union_members_contain_unknown(&ruby_type) {
                 let mut equation = self.clone();
                 equation.base = MethodReturnBase::Unknown(UnknownReason::UnresolvedAssignmentValue);
                 equation.constant_dependencies = Box::default();
+                equation.instance_variable_dependencies = Box::default();
                 return equation;
             }
             members.push(ruby_type);
@@ -180,6 +220,7 @@ impl MethodReturnEquation {
             MethodReturnBase::Proven(RubyType::union(members))
         };
         equation.constant_dependencies = Box::default();
+        equation.instance_variable_dependencies = Box::default();
         equation
     }
 
@@ -191,7 +232,7 @@ impl MethodReturnEquation {
     pub(crate) fn immediate_outcome(&self) -> TypeInferenceOutcome {
         match (
             &self.base,
-            self.dependencies.is_empty() && self.constant_dependencies.is_empty(),
+            self.dependencies.is_empty() && !self.has_solve_time_inputs(),
         ) {
             (MethodReturnBase::Proven(ruby_type), true) => {
                 TypeInferenceOutcome::proven(ruby_type.clone())
@@ -220,6 +261,18 @@ impl MethodReturnEquation {
                     (dependency.parts.len() + dependency.lexical_context.len())
                         * size_of::<RubyConstant>()
                 })
+                .sum::<usize>()
+            + self.instance_variable_dependencies.len() * size_of::<InstanceVariableDependency>()
+            + self
+                .instance_variable_dependencies
+                .iter()
+                .map(InstanceVariableDependency::estimated_heap_bytes)
+                .sum::<usize>()
+            + self.instance_variable_observations.len() * size_of::<InstanceVariableObservation>()
+            + self
+                .instance_variable_observations
+                .iter()
+                .map(InstanceVariableObservation::estimated_heap_bytes)
                 .sum::<usize>()
             + self
                 .observations

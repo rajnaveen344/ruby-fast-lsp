@@ -7,6 +7,7 @@ use ruby_prism::{
 
 use crate::core::RubyType;
 
+use crate::indexer::fact_collector::inference::instance_variables::InstanceVariableWriteKind;
 use crate::indexer::fact_collector::FactCollector;
 
 impl FactCollector {
@@ -58,10 +59,17 @@ impl FactCollector {
         name: &[u8],
         name_loc: ruby_prism::Location,
         value_node: Option<&Node>,
+        kind: InstanceVariableWriteKind,
     ) {
         let Some(variable_name) = Self::parsed_instance_variable_name(name) else {
             return;
         };
+        self.record_instance_variable_write(
+            &variable_name,
+            name_loc.start_offset(),
+            value_node,
+            kind,
+        );
         let inferred_type = if let Some(value) = value_node {
             self.infer_assignment_type_from_value(value)
         } else {
@@ -95,6 +103,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            InstanceVariableWriteKind::Value,
         );
         self.finish_nonlocal_write();
     }
@@ -105,7 +114,12 @@ impl FactCollector {
         node: &InstanceVariableTargetNode,
     ) {
         self.declare_instance_variable_write(node.name().as_slice(), node.location());
-        self.bind_instance_variable_write(node.name().as_slice(), node.location(), None);
+        self.bind_instance_variable_write(
+            node.name().as_slice(),
+            node.location(),
+            None,
+            InstanceVariableWriteKind::Computed,
+        );
     }
 
     pub(in crate::indexer::fact_collector) fn process_instance_variable_target_node_exit(
@@ -131,6 +145,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            InstanceVariableWriteKind::Value,
         );
         self.finish_nonlocal_write();
     }
@@ -151,6 +166,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            InstanceVariableWriteKind::Value,
         );
         self.finish_nonlocal_write();
     }
@@ -171,6 +187,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            InstanceVariableWriteKind::Computed,
         );
         self.finish_nonlocal_write();
     }

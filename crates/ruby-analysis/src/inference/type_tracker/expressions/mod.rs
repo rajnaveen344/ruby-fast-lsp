@@ -31,6 +31,12 @@ impl TypeTracker {
             return ty;
         }
 
+        if let Some(read) = node.as_instance_variable_read_node() {
+            if let Some(ruby_type) = self.returned_chain_receiver_type(&read) {
+                return ruby_type;
+            }
+        }
+
         // Handle local variable reads
         if let Some(read) = node.as_local_variable_read_node() {
             let var_name = String::from_utf8_lossy(read.name().as_slice()).to_string();

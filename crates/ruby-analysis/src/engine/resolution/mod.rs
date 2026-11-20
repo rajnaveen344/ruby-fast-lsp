@@ -4,6 +4,7 @@
 mod callees;
 mod chain_methods;
 mod definitions;
+mod instance_variables;
 mod lookup_chain;
 mod method_references;
 mod reference_ranges;
@@ -15,6 +16,7 @@ pub(in crate::engine) use chain_methods::{
     execution_context_application_targets, method_facts_in_chain, method_missing_method,
     protected_method_visible_from,
 };
+pub(in crate::engine) use instance_variables::{resolve_instance_variables, InstanceVariableTypes};
 #[cfg(test)]
 pub(in crate::engine) use lookup_chain::method_lookup_chain_for_reference_cached;
 #[cfg(test)]

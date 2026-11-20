@@ -375,6 +375,23 @@ impl FactCollector {
                     })
             })
             .collect::<Vec<_>>();
+        self.begin_instance_variable_method(
+            node,
+            FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), namespace_kind),
+            module_function_copy,
+            params
+                .iter()
+                .filter(|parameter| {
+                    matches!(
+                        parameter.kind,
+                        MethodParamKind::Required | MethodParamKind::RequiredKeyword
+                    )
+                })
+                .filter_map(|parameter| param_types.iter().find(|typed| typed.0 == parameter.name))
+                .map(|(name, ruby_type, _, _)| (name.clone().into_bytes(), ruby_type.clone()))
+                .collect(),
+            is_constructor,
+        );
 
         // Project RBS facts use the same isolated engine as Ruby source and
         // outrank the process-wide bundled core signatures. Owner identity is
@@ -663,6 +680,8 @@ impl FactCollector {
         if !pending.namespace_parts.is_empty() {
             tracker.set_current_class(Some(pending.instance_owner_fqn.clone()));
         }
+        let (owner, file_local_types) = self.instance_variables_of_method(node);
+        tracker.set_instance_variables(owner, file_local_types);
         let equation = tracker.track_method_equation(
             node,
             pending.fqn.clone(),

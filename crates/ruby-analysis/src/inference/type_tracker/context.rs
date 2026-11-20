@@ -5,6 +5,7 @@ use crate::inference::semantics::Semantics;
 use crate::inference::type_tracker::TypeTracker;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use ustr::Ustr;
 
 #[derive(Default)]
 pub(in crate::inference::type_tracker) struct MethodContext {
@@ -20,6 +21,13 @@ pub(in crate::inference::type_tracker) struct MethodContext {
     pub(in crate::inference::type_tracker) class: Option<FullyQualifiedName>,
     /// Current method context for resolving `super`.
     pub(in crate::inference::type_tracker) method: Option<RubyMethod>,
+    /// The namespace side whose objects run the method being tracked. An
+    /// instance variable the method returns belongs to it.
+    pub(in crate::inference::type_tracker) instance_variable_owner: Option<FullyQualifiedName>,
+    /// What this file's own assignments prove about that owner's variables.
+    /// Provisional: other files may assign them too, so every use is
+    /// recorded as an observation for the engine to confirm.
+    pub(in crate::inference::type_tracker) instance_variable_types: HashMap<Ustr, RubyType>,
 }
 
 #[derive(Default)]
@@ -98,5 +106,16 @@ impl TypeTracker {
     /// Set the current class/module context for resolving implicit self
     pub fn set_current_class(&mut self, fqn: Option<FullyQualifiedName>) {
         self.context.class = fqn;
+    }
+
+    /// Set the namespace side that owns instance variables read by the
+    /// method being tracked, and what this file alone proves about them.
+    pub fn set_instance_variables(
+        &mut self,
+        owner: Option<FullyQualifiedName>,
+        file_local_types: HashMap<Ustr, RubyType>,
+    ) {
+        self.context.instance_variable_types = file_local_types;
+        self.context.instance_variable_owner = owner;
     }
 }

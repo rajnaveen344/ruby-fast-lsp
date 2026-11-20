@@ -223,6 +223,7 @@ impl FactCollector {
             method_return_equations,
             constant_type_equations: self.constants.equations.clone(),
             constant_callable_bodies: self.constants.callable_bodies.clone(),
+            instance_variable_writes: self.instance_variables.writes.clone(),
             call_expression_outcomes,
             expression_unknown_reasons,
             telemetry: self.inference_telemetry().into(),

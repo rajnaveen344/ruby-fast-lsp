@@ -4,4 +4,5 @@ pub(super) mod callables;
 pub(super) mod constants;
 pub(super) mod expressions;
 pub(super) mod flow;
+pub(super) mod instance_variables;
 pub(super) mod method_return;

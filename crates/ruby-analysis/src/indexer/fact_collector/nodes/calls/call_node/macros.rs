@@ -2,8 +2,9 @@
 
 use crate::core::MethodVisibility;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, MethodFact, MethodParamFact, MethodParamKind,
-    MethodReferenceAccess, NamespaceKind, ReferenceCandidate, RubyMethod, TypeFact, TypeSubject,
+    FullyQualifiedName, GraphEdgeKind, InstanceVariableWrite, MethodFact, MethodParamFact,
+    MethodParamKind, MethodReferenceAccess, NamespaceKind, ReferenceCandidate, RubyMethod,
+    TypeFact, TypeSubject,
 };
 use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
@@ -149,10 +150,26 @@ impl FactCollector {
         // ordinary class-body `attr_accessor` a singleton method during cold
         // indexing, allowing a same-named included method to win dispatch.
         let owner_kind = self.scope_tracker.current_macro_definition_context();
+        let variable_owner = FullyQualifiedName::namespace_with_kind(
+            self.scope_tracker.method_definition_context().0,
+            owner_kind,
+        );
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = direct_attr_name_and_range(self, &arg) else {
+                if writer {
+                    self.record_generated_instance_variable_writer(
+                        variable_owner.clone(),
+                        InstanceVariableWrite::ANY_NAME,
+                    );
+                }
                 continue;
             };
+            if writer {
+                self.record_generated_instance_variable_writer(
+                    variable_owner.clone(),
+                    &format!("@{name}"),
+                );
+            }
             if reader {
                 if let Ok(method) = RubyMethod::new(&name) {
                     self.direct_push_method_fact(

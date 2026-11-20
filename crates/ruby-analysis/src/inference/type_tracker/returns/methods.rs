@@ -66,8 +66,14 @@ impl TypeTracker {
         let constant_dependencies = std::mem::take(&mut self.returns.constant_dependencies);
         let observations = std::mem::take(self.returns.observations.get_mut());
         let local_callees = std::mem::take(self.returns.local_callees.get_mut());
+        let instance_variable_dependencies =
+            std::mem::take(&mut self.returns.instance_variable_dependencies);
         MethodReturnEquation::new(method_fqn, base, dependencies)
             .with_constant_dependencies(constant_dependencies)
+            .with_instance_variable_dependencies(
+                instance_variable_dependencies,
+                std::mem::take(self.returns.instance_variable_observations.get_mut()),
+            )
             .with_observations(observations, local_callees)
     }
 
@@ -94,6 +100,12 @@ impl TypeTracker {
         self.returns.explicit_values.clear();
         self.returns.dependencies.clear();
         self.returns.constant_dependencies.clear();
+        self.returns.instance_variable_dependencies.clear();
+        self.returns
+            .instance_variable_observations
+            .get_mut()
+            .clear();
+        self.returns.returned_chain_receivers.clear();
         self.returns.observations.get_mut().clear();
         self.returns.local_callees.get_mut().clear();
         self.returns.direct_call_proofs.clear();
@@ -109,6 +121,9 @@ impl TypeTracker {
         }
 
         // Track method body
+        if let Some(body) = method.body() {
+            self.mark_returned_chain_receiver(&body);
+        }
         let fallthrough_type = if let Some(body) = method.body() {
             self.track_node(&body)
         } else {
@@ -128,8 +143,17 @@ impl TypeTracker {
             .body()
             .map(|body| self.constant_dependencies_for_node(&body))
             .unwrap_or_default();
+        let fallthrough_instance_variable = method
+            .body()
+            .and_then(|body| self.returned_instance_variable(&body));
         let fallthrough = match method.body() {
             Some(body) if control_flow::diverges(&body) => RecursiveReturnApproximation::Bottom,
+            Some(_) if fallthrough_instance_variable.is_some() => {
+                self.returns
+                    .instance_variable_dependencies
+                    .extend(fallthrough_instance_variable);
+                self.instance_variable_return_base(fallthrough_type)
+            }
             Some(_)
                 if fallthrough_term.as_ref().is_some_and(|(dependency, _)| {
                     self.should_track_return_dependency(

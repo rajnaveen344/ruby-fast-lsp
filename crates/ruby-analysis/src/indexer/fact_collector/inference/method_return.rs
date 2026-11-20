@@ -337,14 +337,23 @@ impl FactCollector {
         // can solve them again after all files are installed or replaced.
         let prepared = equations
             .iter()
-            .any(|equation| !equation.constant_dependencies().is_empty())
+            .any(|equation| equation.has_solve_time_inputs())
             .then(|| {
                 equations
                     .iter()
                     .map(|equation| {
-                        equation.with_resolved_constant_types(
-                            equation.constant_dependencies().iter().map(|dependency| {
-                                match dependency.projection() {
+                        // An instance variable is a project-wide question: one
+                        // file cannot see every assignment, so only the engine
+                        // answers it.
+                        let instance_variables = equation
+                            .instance_variable_dependencies()
+                            .iter()
+                            .map(|_| None);
+                        equation.with_resolved_inputs(
+                            equation
+                                .constant_dependencies()
+                                .iter()
+                                .map(|dependency| match dependency.projection() {
                                     ConstantTypeProjection::Value => self
                                         .resolve_constant_value_type_from(
                                             &dependency.parts,
@@ -355,8 +364,8 @@ impl FactCollector {
                                     ConstantTypeProjection::ConstructorInstance => {
                                         self.semantics.project.constant_dependency_type(dependency)
                                     }
-                                }
-                            }),
+                                })
+                                .chain(instance_variables),
                         )
                     })
                     .collect::<Vec<_>>()

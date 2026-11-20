@@ -1,4 +1,7 @@
-use crate::core::{ConstantTypeDependency, FullyQualifiedName, RubyMethod, RubyType};
+use crate::core::{
+    ConstantTypeDependency, FullyQualifiedName, InstanceVariableDependency,
+    InstanceVariableObservation, RubyMethod, RubyType,
+};
 use crate::inference::type_tracker::returns::RecursiveReturnApproximation;
 use crate::inference::type_tracker::TypeTracker;
 use ruby_prism::*;
@@ -12,6 +15,9 @@ impl TypeTracker {
     ) -> RubyType {
         let return_type = if let Some(args) = ret.arguments() {
             let args_list: Vec<_> = args.arguments().iter().collect();
+            if let [value] = args_list.as_slice() {
+                self.mark_returned_chain_receiver(value);
+            }
             if args_list.is_empty() {
                 RubyType::nil_class()
             } else if args_list.len() == 1 {
@@ -25,6 +31,23 @@ impl TypeTracker {
         } else {
             RubyType::nil_class()
         };
+
+        let returned_instance_variable = ret.arguments().and_then(|arguments| {
+            let mut args = arguments.arguments().iter();
+            let first = args.next()?;
+            args.next()
+                .is_none()
+                .then(|| self.returned_instance_variable(&first))
+                .flatten()
+        });
+        if let Some(dependency) = returned_instance_variable {
+            self.returns
+                .instance_variable_dependencies
+                .insert(dependency);
+            let approximation = self.instance_variable_return_base(return_type.clone());
+            self.returns.explicit_values.push(approximation);
+            return return_type;
+        }
 
         let returned_dependency = ret.arguments().and_then(|arguments| {
             let mut args = arguments.arguments().iter();
@@ -87,6 +110,113 @@ impl TypeTracker {
         // stale seed with the final value after resolution or an edit.
         // Direct single-method inference still uses the currently proven type.
         if self.returns.approximation.is_none() || ruby_type == RubyType::Unknown {
+            RecursiveReturnApproximation::Bottom
+        } else {
+            RecursiveReturnApproximation::from_ruby_type(ruby_type)
+        }
+    }
+
+    /// The instance variable a returned node reads directly, when the
+    /// tracked method has a known owner.
+    pub(in crate::inference::type_tracker) fn returned_instance_variable(
+        &self,
+        node: &Node<'_>,
+    ) -> Option<InstanceVariableDependency> {
+        if let Some(statements) = node.as_statements_node() {
+            return statements
+                .body()
+                .iter()
+                .last()
+                .and_then(|last| self.returned_instance_variable(&last));
+        }
+        if let Some(parentheses) = node.as_parentheses_node() {
+            return parentheses
+                .body()
+                .and_then(|body| self.returned_instance_variable(&body));
+        }
+        let read = node.as_instance_variable_read_node()?;
+        let owner = self.context.instance_variable_owner.clone()?;
+        let name = String::from_utf8_lossy(read.name().as_slice());
+        Some(InstanceVariableDependency {
+            owner,
+            name: name.as_ref().into(),
+        })
+    }
+
+    /// Let the instance variable that starts a returned call chain, such as
+    /// `@name.strip.upcase`, take its file-local type. A chain through a
+    /// block is left alone: the block's parameters would carry the
+    /// provisional type into facts the engine cannot withhold.
+    pub(in crate::inference::type_tracker) fn mark_returned_chain_receiver(
+        &mut self,
+        node: &Node<'_>,
+    ) {
+        if let Some(statements) = node.as_statements_node() {
+            if let Some(last) = statements.body().iter().last() {
+                self.mark_returned_chain_receiver(&last);
+            }
+            return;
+        }
+        if let Some(parentheses) = node.as_parentheses_node() {
+            if let Some(body) = parentheses.body() {
+                self.mark_returned_chain_receiver(&body);
+            }
+            return;
+        }
+        let mut current = node.as_call_node();
+        while let Some(call) = current {
+            if call.block().is_some() {
+                return;
+            }
+            let Some(receiver) = call.receiver() else {
+                return;
+            };
+            if receiver.as_instance_variable_read_node().is_some() {
+                self.returns
+                    .returned_chain_receivers
+                    .insert(receiver.location().start_offset());
+                return;
+            }
+            current = receiver.as_call_node();
+        }
+    }
+
+    /// The file-local type of an instance variable read that starts a
+    /// returned call chain, recorded for the engine to confirm.
+    pub(in crate::inference::type_tracker) fn returned_chain_receiver_type(
+        &self,
+        read: &InstanceVariableReadNode<'_>,
+    ) -> Option<RubyType> {
+        if !self
+            .returns
+            .returned_chain_receivers
+            .contains(&read.location().start_offset())
+        {
+            return None;
+        }
+        let owner = self.context.instance_variable_owner.clone()?;
+        let name: ustr::Ustr = String::from_utf8_lossy(read.name().as_slice())
+            .as_ref()
+            .into();
+        let observed = self.context.instance_variable_types.get(&name)?.clone();
+        self.returns
+            .instance_variable_observations
+            .borrow_mut()
+            .insert(InstanceVariableObservation {
+                variable: InstanceVariableDependency { owner, name },
+                observed: observed.clone(),
+            });
+        Some(observed)
+    }
+
+    /// The return alternative an instance-variable term stands for. While
+    /// equations are collected the term alone represents it; direct
+    /// single-method inference has only the type the body itself proves.
+    pub(in crate::inference::type_tracker) fn instance_variable_return_base(
+        &self,
+        ruby_type: RubyType,
+    ) -> RecursiveReturnApproximation {
+        if self.returns.approximation.is_none() {
             RecursiveReturnApproximation::Bottom
         } else {
             RecursiveReturnApproximation::from_ruby_type(ruby_type)

@@ -4,7 +4,8 @@ use crate::core::equations::method_return_equation::MethodReturnBase;
 #[cfg(test)]
 use crate::core::TypeInferenceOutcome;
 use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, MethodReturnObservation, RubyType, UnknownReason,
+    ConstantTypeDependency, FullyQualifiedName, InstanceVariableDependency,
+    InstanceVariableObservation, MethodReturnObservation, RubyType, UnknownReason,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -84,6 +85,17 @@ pub(in crate::inference::type_tracker) struct ReturnEvidence {
     /// Value-constant terms returned by the current method. These stay
     /// private until attached to the file-owned method equation.
     pub(in crate::inference::type_tracker) constant_dependencies: BTreeSet<ConstantTypeDependency>,
+    /// Instance variables the current method returns directly. The engine
+    /// resolves them from every assignment in the project.
+    pub(in crate::inference::type_tracker) instance_variable_dependencies:
+        BTreeSet<InstanceVariableDependency>,
+    /// Instance-variable types the returned value was derived from.
+    pub(in crate::inference::type_tracker) instance_variable_observations:
+        RefCell<BTreeSet<InstanceVariableObservation>>,
+    /// Start offsets of instance-variable reads that begin a returned call
+    /// chain. Only these reads take the file-local type: the result reaches
+    /// nothing but the return equation, which the engine can withhold.
+    pub(in crate::inference::type_tracker) returned_chain_receivers: HashSet<usize>,
     /// Returns of other methods the current body was typed with. Lookups run
     /// behind shared borrows of the tracker, so the record is interior.
     pub(in crate::inference::type_tracker) observations: RefCell<BTreeSet<MethodReturnObservation>>,
