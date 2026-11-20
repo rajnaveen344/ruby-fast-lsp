@@ -104,6 +104,9 @@ impl FactCollector {
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
         };
+        if self.record_struct_class(node) {
+            return;
+        }
         self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
     }
 
@@ -115,6 +118,12 @@ impl FactCollector {
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
         };
+        if self.struct_definition(node).is_some() {
+            // The class declaration already typed the constant. Its block is
+            // the class body, so later code reads the returns solved here.
+            self.finalize_method_return_equations_for_namespace(&fqn.namespace_parts());
+            return;
+        }
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
         if let Ok(summary) = crate::inference::callable_body::lower_callable_literal(&node.value())
         {

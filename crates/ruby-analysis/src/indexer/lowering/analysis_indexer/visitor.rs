@@ -441,6 +441,10 @@ impl Visit<'_> for AnalysisIndexer<'_> {
     }
 
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'_>) {
+        if self.push_struct_class(node) {
+            visit_constant_write_node(self, node);
+            return;
+        }
         self.push_constant_declaration(
             node.name().as_slice(),
             node.name_loc(),

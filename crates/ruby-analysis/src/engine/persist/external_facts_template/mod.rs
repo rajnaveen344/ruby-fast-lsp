@@ -428,6 +428,7 @@ struct SnapshotUnresolvedGraphEdgeFact {
 enum SnapshotGraphEdgeProvenance {
     Explicit,
     ImplicitObject,
+    StructDefinition,
 }
 
 impl fmt::Display for ProjectNeutralTemplateRejection {

@@ -191,3 +191,45 @@ async fn rename_from_reference_updates_reopened_definitions() {
     );
     assert_eq!(editor.content("use.rb"), "Account.new\n");
 }
+
+#[tokio::test]
+async fn rename_struct_definition_updates_the_write_and_every_use() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "point.rb",
+            "Point = Struct.new(:x, :y) do\n  def twin\n    Point.new(x, y)\n  end\nend\n",
+        )
+        .await;
+    editor.open("use.rb", "point = Point.new(1, 2)\n").await;
+
+    let edit = editor
+        .rename_at("point.rb", 0, 2, "Spot")
+        .await
+        .expect("struct class rename should return a cross-file workspace edit");
+    editor.apply_edit(&edit).await;
+
+    assert_eq!(
+        editor.content("point.rb"),
+        "Spot = Struct.new(:x, :y) do\n  def twin\n    Spot.new(x, y)\n  end\nend\n"
+    );
+    assert_eq!(editor.content("use.rb"), "point = Spot.new(1, 2)\n");
+}
+
+#[tokio::test]
+async fn rename_from_a_struct_use_updates_the_write() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open("point.rb", "Point = Struct.new(:x, :y)\n")
+        .await;
+    editor.open("use.rb", "point = Point.new(1, 2)\n").await;
+
+    let edit = editor
+        .rename_at("use.rb", 0, 10, "Spot")
+        .await
+        .expect("struct class rename from a use should return a workspace edit");
+    editor.apply_edit(&edit).await;
+
+    assert_eq!(editor.content("point.rb"), "Spot = Struct.new(:x, :y)\n");
+    assert_eq!(editor.content("use.rb"), "point = Spot.new(1, 2)\n");
+}

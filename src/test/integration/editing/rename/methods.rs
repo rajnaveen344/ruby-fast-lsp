@@ -441,3 +441,19 @@ async fn absence_only_barriers_suppress_claims_but_keep_rename_available() {
         "a top-level method keeps its rename"
     );
 }
+
+/// A struct member names a reader, a writer and a symbol; renaming one call
+/// would leave the others behind, so the rename is refused.
+#[tokio::test]
+async fn rename_rejects_struct_member_accessor() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "point.rb",
+            "Point = Struct.new(:x, :y)\npoint = Point.new(1, 2)\npoint.x\npoint.x = 3\n",
+        )
+        .await;
+
+    assert!(editor.rename_at("point.rb", 2, 6, "left").await.is_none());
+    assert!(editor.rename_at("point.rb", 3, 6, "left").await.is_none());
+}

@@ -332,3 +332,51 @@ LexicalOwner::Nested$0
     )
     .await;
 }
+
+/// A struct definition is the definition of its class.
+#[tokio::test]
+async fn goto_struct_definition_class() {
+    check(
+        r#"
+module Shapes
+  <def>Point = Struct.new(:x, :y)</def>
+end
+
+Shapes::Point$0.new(1, 2)
+"#,
+    )
+    .await;
+}
+
+/// A struct member reader resolves to the member symbol.
+#[tokio::test]
+async fn goto_struct_member() {
+    check(
+        r#"
+Point = Struct.new(<def>:x</def>, :y)
+
+point = Point.new(1, 2)
+point.x$0
+"#,
+    )
+    .await;
+}
+
+/// A method defined in the struct's block resolves like a class method.
+#[tokio::test]
+async fn goto_struct_block_method() {
+    check(
+        r#"
+module Shapes
+  Point = Struct.new(:x, :y) do
+    <def>def self.unit
+      Point.new(1, 1)
+    end</def>
+  end
+end
+
+Shapes::Point.unit$0
+"#,
+    )
+    .await;
+}

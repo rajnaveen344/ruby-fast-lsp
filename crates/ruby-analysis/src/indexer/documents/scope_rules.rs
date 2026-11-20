@@ -12,6 +12,7 @@ use ruby_prism::{CallNode, Location, MultiWriteNode, Node};
 use std::collections::HashSet;
 
 use super::scope_tracker::{mixin_ref_from_node, ScopeTracker};
+use super::struct_definition::struct_definition_block;
 
 /// Lexical lookup candidates for `parts`, innermost enclosing namespace first
 /// and the top level last. An absolute path has the single candidate `parts`.
@@ -213,14 +214,17 @@ pub fn eval_definition_kind(node: &CallNode<'_>) -> Option<NamespaceKind> {
     }
 }
 
-/// `Target.class_eval do … end` and its `module_*`/`instance_*` forms.
-/// `resolve_receiver` is the walk's knowledge of constant and `self`
-/// receivers.
+/// `Target.class_eval do … end` and its `module_*`/`instance_*` forms, and
+/// the class body block of a struct definition. `resolve_receiver` is the
+/// walk's knowledge of constant and `self` receivers.
 pub fn eval_block(
     node: &CallNode<'_>,
     scope_tracker: &ScopeTracker,
     resolve_receiver: impl Fn(&Node<'_>) -> Option<Vec<RubyConstant>>,
 ) -> Option<BlockExecution> {
+    if let Some(execution) = struct_definition_block(node, scope_tracker) {
+        return Some(execution);
+    }
     let definition_kind = eval_definition_kind(node)?;
     node.block()?;
     let namespace = match node.receiver() {

@@ -67,3 +67,20 @@ end
     )
     .await;
 }
+
+/// References to a struct class include uses inside its own block.
+#[tokio::test]
+async fn references_struct_definition_class() {
+    check(
+        r#"
+Point = Struct.new(:x, :y) do
+  def twin
+    <ref>Point</ref>.new(x, y)
+  end
+end
+
+point = <ref>Point$0</ref>.new(1, 2)
+"#,
+    )
+    .await;
+}

@@ -2,7 +2,8 @@
 //! singleton lookup chain.
 
 use crate::core::{
-    FullyQualifiedName, NamespaceKind, RubyMethod, SourceKind, TypeInferenceOutcome, UnknownReason,
+    FullyQualifiedName, GraphEdgeProvenance, NamespaceKind, RubyConstant, RubyMethod, SourceKind,
+    TypeInferenceOutcome, UnknownReason,
 };
 use crate::inference::method::constructor::{declared_singleton_new, ConstructorResult};
 use crate::invariant::ExpectInvariant;
@@ -21,6 +22,8 @@ impl View<'_> {
     ///
     /// Ruby code that defines its own singleton `new` may hand back any
     /// object, so its result stays Unknown instead of an assumed instance.
+    /// A class built by a struct definition constructs instances, although
+    /// its parent `Struct` declares a `new` that builds classes.
     pub fn constructor_result(&self, class: &FullyQualifiedName) -> ConstructorResult {
         let new = RubyMethod::new("new").expect_invariant(
             "the constructor name `new` was rejected as a method name",
@@ -40,9 +43,31 @@ impl View<'_> {
                         UnknownReason::UnresolvedMethodReturn,
                     )));
                 }
+                if self.is_struct_definition(ancestor) {
+                    return Some(ConstructorResult::Instance);
+                }
                 declared_singleton_new(ancestor.namespace_parts_slice())
             })
             .unwrap_or(ConstructorResult::Instance)
+    }
+
+    /// Whether `singleton` is the class side of a class built by
+    /// `Name = Struct.new(:member, ...)`. `new` on such a class is the
+    /// ordinary constructor again, not the class builder `Struct.new` is.
+    /// The parent must be proven to be the core `Struct`.
+    fn is_struct_definition(&self, singleton: &FullyQualifiedName) -> bool {
+        let Some(class) = singleton.to_instance_namespace() else {
+            return false;
+        };
+        self.proven_superclass_edge(&class).is_some_and(|edge| {
+            edge.provenance == GraphEdgeProvenance::StructDefinition
+                && edge
+                    .target
+                    .namespace_parts_slice()
+                    .iter()
+                    .map(RubyConstant::as_str)
+                    .eq(["Struct"])
+        })
     }
 
     /// Whether Ruby source defines `method` directly on `owner`. A `new`

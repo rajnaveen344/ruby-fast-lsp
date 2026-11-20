@@ -135,7 +135,7 @@ impl FactCollector {
         ));
     }
 
-    pub(super) fn push_direct_attr_method_facts(
+    pub(in crate::indexer::fact_collector) fn push_direct_attr_method_facts(
         &mut self,
         node: &CallNode,
         reader: bool,

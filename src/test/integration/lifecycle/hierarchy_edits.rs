@@ -210,3 +210,29 @@ async fn naming_a_computed_parent_restores_missing_method_reports() {
         .await;
     editor.check("caller.rb", silent).await;
 }
+
+#[tokio::test]
+async fn struct_definition_follows_edits_of_its_constant() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "struct.rb",
+            "class Struct\n  def self.new(*members)\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open("point.rb", "Point = Struct.new(:x, :y)\n")
+        .await;
+    editor
+        .open("caller.rb", "point = Point.new(1, 2)\npoint.absent\n")
+        .await;
+    let built = "point = Point.new(1, 2)\npoi<type label=\"Point\">nt.<warn code=\"unresolved-method\">absent</warn>\n";
+    let plain = "point = Point.new(1, 2)\n<warn none code=\"unresolved-method\">poi<type label=\"?\">nt.absent</warn>\n";
+    editor.check("caller.rb", built).await;
+
+    editor.set("point.rb", "Point = [1, 2]\n").await;
+    editor.check("caller.rb", plain).await;
+
+    editor.set("point.rb", "Point = Struct.new(:x, :y)\n").await;
+    editor.check("caller.rb", built).await;
+}

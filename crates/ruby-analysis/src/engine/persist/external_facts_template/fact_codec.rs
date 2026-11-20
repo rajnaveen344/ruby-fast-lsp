@@ -481,6 +481,9 @@ fn snapshot_graph_edge_provenance(
         crate::core::GraphEdgeProvenance::ImplicitObject => {
             SnapshotGraphEdgeProvenance::ImplicitObject
         }
+        crate::core::GraphEdgeProvenance::StructDefinition => {
+            SnapshotGraphEdgeProvenance::StructDefinition
+        }
     }
 }
 
@@ -491,6 +494,9 @@ fn restore_graph_edge_provenance(
         SnapshotGraphEdgeProvenance::Explicit => crate::core::GraphEdgeProvenance::Explicit,
         SnapshotGraphEdgeProvenance::ImplicitObject => {
             crate::core::GraphEdgeProvenance::ImplicitObject
+        }
+        SnapshotGraphEdgeProvenance::StructDefinition => {
+            crate::core::GraphEdgeProvenance::StructDefinition
         }
     }
 }

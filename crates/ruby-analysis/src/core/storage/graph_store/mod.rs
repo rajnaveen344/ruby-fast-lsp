@@ -28,6 +28,18 @@ pub enum GraphEdgeKind {
 pub enum GraphEdgeProvenance {
     Explicit,
     ImplicitObject,
+    /// The superclass of a class built by `Name = Struct.new(...)`.
+    StructDefinition,
+}
+
+impl GraphEdgeProvenance {
+    /// Whether source states the edge, as opposed to a default parent.
+    pub fn is_declared(self) -> bool {
+        match self {
+            Self::Explicit | Self::StructDefinition => true,
+            Self::ImplicitObject => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -406,11 +418,10 @@ impl SemanticGraph {
                 .filter(|link| link.kind == GraphEdgeKind::Superclass)
                 .filter_map(|link| self.edge(link.edge))
         };
-        let has_explicit =
-            superclasses().any(|edge| edge.provenance == GraphEdgeProvenance::Explicit);
+        let has_explicit = superclasses().any(|edge| edge.provenance.is_declared());
         let mut chosen: Option<StoredGraphEdgeFact> = None;
         for edge in superclasses() {
-            if has_explicit && edge.provenance != GraphEdgeProvenance::Explicit {
+            if has_explicit && !edge.provenance.is_declared() {
                 continue;
             }
             let fact = StoredGraphEdgeFact::from(edge);
@@ -603,7 +614,7 @@ impl SemanticGraph {
     }
 
     pub fn add_unresolved_edge(&mut self, edge: StoredUnresolvedGraphEdgeFact) {
-        if edge.provenance == GraphEdgeProvenance::Explicit {
+        if edge.provenance.is_declared() {
             bump_unresolved_source_count(
                 &mut self.unresolved_explicit_sources_by_source,
                 edge.source,
@@ -624,7 +635,7 @@ impl SemanticGraph {
     }
 
     fn remove_unresolved_edge_indexes(&mut self, edge: StoredUnresolvedGraphEdgeFact) {
-        if edge.provenance == GraphEdgeProvenance::Explicit {
+        if edge.provenance.is_declared() {
             release_unresolved_source_count(
                 &mut self.unresolved_explicit_sources_by_source,
                 edge.source,

@@ -17,3 +17,5 @@ mod overloaded_call_returns;
 mod method_resolution;
 // Inferred method and accessor return types.
 mod return_types;
+// Classes built by `Name = Struct.new(...)`.
+mod struct_classes;

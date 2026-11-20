@@ -52,6 +52,9 @@ pub struct ScopeTracker {
     method_stack: Vec<(FullyQualifiedName, NamespaceKind)>,
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
+    /// The `Struct.new` call, by start offset, whose block defines methods
+    /// on the class the enclosing constant write declares.
+    struct_definition_block: Option<(usize, Vec<RubyConstant>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +98,26 @@ impl ScopeTracker {
             method_stack: Vec::new(),
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
+            struct_definition_block: None,
         }
+    }
+
+    /// Record that the call starting at `call_offset` builds `namespace`.
+    pub fn expect_struct_definition_block(
+        &mut self,
+        call_offset: usize,
+        namespace: Vec<RubyConstant>,
+    ) {
+        self.struct_definition_block = Some((call_offset, namespace));
+    }
+
+    /// The class the call starting at `call_offset` builds, when a constant
+    /// write recorded one.
+    pub fn struct_definition_block_at(&self, call_offset: usize) -> Option<&[RubyConstant]> {
+        self.struct_definition_block
+            .as_ref()
+            .filter(|(offset, _)| *offset == call_offset)
+            .map(|(_, namespace)| namespace.as_slice())
     }
 
     pub fn push_method_execution_context(

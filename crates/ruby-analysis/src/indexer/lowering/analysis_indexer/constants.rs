@@ -1,15 +1,86 @@
 //! Value-constant declarations from constant writes and assignment targets.
 
-use crate::core::{FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeSubject};
+use crate::core::{
+    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant,
+    SymbolFact, SymbolKind, TypeSubject, UnresolvedGraphEdgeFact,
+};
 use crate::indexer::documents::scope_rules::{
     constant_path_write_target, implicit_singleton_namespace,
 };
-use ruby_prism::{Location, Node};
+use crate::indexer::documents::struct_definition::{struct_class_execution, struct_definition};
+use ruby_prism::{ConstantWriteNode, Location, Node};
 
 use super::syntax::terminal_name_range;
 use super::AnalysisIndexer;
 
 impl AnalysisIndexer<'_> {
+    /// Declare the class `Name = Struct.new(:member, ...)` builds: the
+    /// class, its `Struct` parent, and a reader and a writer per member.
+    /// Returns false when the write is any other constant write.
+    pub(super) fn push_struct_class(&mut self, node: &ConstantWriteNode<'_>) -> bool {
+        let lexical_context = self.scope.get_ns_stack();
+        let Some(definition) = struct_definition(
+            node.name().as_slice(),
+            &node.value(),
+            &lexical_context,
+            |fqn| self.is_namespace(fqn),
+        ) else {
+            return false;
+        };
+        let Ok(constant) = RubyConstant::new(&String::from_utf8_lossy(node.name().as_slice()))
+        else {
+            return false;
+        };
+        let mut parts = lexical_context.clone();
+        parts.push(constant);
+        let fqn = FullyQualifiedName::namespace(parts.clone());
+        let range = self.range(&node.location());
+        self.push_namespace_facts(
+            fqn.clone(),
+            GraphNodeKind::Class,
+            range,
+            self.range(&node.name_loc()),
+        );
+        let parent_range = self.range(&definition.call.location());
+        match self.resolve_namespace_from(
+            &definition.parent,
+            definition.parent_is_absolute,
+            &lexical_context,
+        ) {
+            Some(target) => {
+                let singletons = fqn
+                    .to_singleton_namespace()
+                    .zip(target.to_singleton_namespace());
+                for (source, target) in std::iter::once((fqn, target)).chain(singletons) {
+                    self.push_resolved_edge_with_provenance(
+                        source,
+                        target,
+                        GraphEdgeKind::Superclass,
+                        GraphEdgeProvenance::StructDefinition,
+                        parent_range,
+                    );
+                }
+            }
+            None => self.facts.unresolved_graph_edges.push(
+                UnresolvedGraphEdgeFact::new(
+                    fqn,
+                    definition.parent.clone(),
+                    definition.parent_is_absolute,
+                    FullyQualifiedName::namespace(lexical_context),
+                    GraphEdgeKind::Superclass,
+                    parent_range,
+                )
+                .with_provenance(GraphEdgeProvenance::StructDefinition),
+            ),
+        }
+        struct_class_execution(parts.clone()).enter(&mut self.scope);
+        self.push_attr_method_facts(&definition.call, true, true);
+        self.scope.pop_execution_context();
+        self.scope
+            .expect_struct_definition_block(definition.call.location().start_offset(), parts);
+        true
+    }
+
     /// Declare `NAME` in the current lexical namespace.
     pub(super) fn push_constant_declaration(
         &mut self,

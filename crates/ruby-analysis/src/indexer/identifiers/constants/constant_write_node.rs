@@ -5,11 +5,37 @@ use ruby_prism::{
 
 use crate::core::RubyConstant;
 use crate::indexer::documents::scope_rules::declaration_candidates;
+use crate::indexer::documents::struct_definition::struct_definition;
 use crate::indexer::{mixin_ref_from_node, Identifier};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor<'_> {
+    /// Record the class a `Name = Struct.new(:member, ...)` write builds, so
+    /// the call's block is walked as that class's body.
+    fn expect_struct_definition_block(&mut self, node: &ConstantWriteNode) {
+        let lexical_context = self.scope_tracker.get_ns_stack();
+        let Some(definition) = struct_definition(
+            node.name().as_slice(),
+            &node.value(),
+            &lexical_context,
+            |fqn| {
+                self.semantics
+                    .is_some_and(|semantics| semantics.has_graph_node(fqn))
+            },
+        ) else {
+            return;
+        };
+        let Ok(constant) = RubyConstant::new(&String::from_utf8_lossy(node.name().as_slice()))
+        else {
+            return;
+        };
+        let mut namespace = lexical_context;
+        namespace.push(constant);
+        self.scope_tracker
+            .expect_struct_definition_block(definition.call.location().start_offset(), namespace);
+    }
+
     fn set_simple_constant_def_at_name(&mut self, name: &[u8], name_loc: &Location<'_>) {
         if self.is_result_set() || !self.is_position_in_location(name_loc) {
             return;
@@ -29,6 +55,7 @@ impl IdentifierVisitor<'_> {
     }
 
     pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
+        self.expect_struct_definition_block(node);
         if let Some(value) = self.constant_value(&node.value()) {
             let name = String::from_utf8_lossy(node.name().as_slice());
             if let Ok(constant) = RubyConstant::new(&name) {

@@ -617,6 +617,7 @@ pub(super) fn stable_graph_edge_provenance(
     match provenance {
         GraphEdgeProvenance::Explicit => stable_u8(hasher, 1),
         GraphEdgeProvenance::ImplicitObject => stable_u8(hasher, 2),
+        GraphEdgeProvenance::StructDefinition => stable_u8(hasher, 3),
     }
 }
 
