@@ -51,10 +51,10 @@ thi<type label="String">rd
     .await;
 }
 
-/// An operator assignment is typed only when both operands share one scalar
-/// class: a mixed operation may return the argument's class.
+/// An operator assignment is typed like the operation it performs: the
+/// assigned value selects the result's class.
 #[tokio::test]
-async fn operator_writes_are_typed_only_for_operands_of_one_class() {
+async fn operator_writes_follow_the_assigned_value() {
     check(
         r#"
 class Report
@@ -67,13 +67,13 @@ class Report
   def mixed
     other = 1
     other += 0.5
-    oth<type label="?">er
+    oth<type label="Float">er
   end
 end
 
 total = 1
 total += 0.5
-tot<type label="?">al
+tot<type label="Float">al
 "#,
     )
     .await;

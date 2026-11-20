@@ -3,10 +3,14 @@ use crate::core::{
     RubyConstant, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::inference::control_flow;
+use crate::inference::method::arguments::call_arguments;
 use crate::inference::method::constructor::seed_constructor_type;
-use crate::inference::method::return_type::receiver_rbs_return_type;
+use crate::inference::method::return_type::{
+    receiver_rbs_return_depends_on_arguments, receiver_rbs_return_type,
+};
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
+use crate::inference::rbs::CallArguments;
 use crate::inference::semantics::ReceiverAccess;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::returns::dependencies::call_is_direct_recursive;
@@ -135,6 +139,13 @@ impl TypeTracker {
         }
 
         let allow_private = call.receiver().is_none();
+        // The arguments are typed only for a bundled signature whose
+        // overloads return different types.
+        let arguments = if receiver_rbs_return_depends_on_arguments(&receiver_type, &method_name) {
+            call_arguments(call, |argument| self.infer_expression(argument))
+        } else {
+            None
+        };
         if let RubyType::Union(members) = &receiver_type {
             return crate::inference::method::return_type::resolve_proven_union(
                 members,
@@ -144,7 +155,7 @@ impl TypeTracker {
                         &method_name,
                         allow_private,
                     )
-                    .or_else(|| receiver_rbs_return_type(member, &method_name))
+                    .or_else(|| receiver_rbs_return_type(member, &method_name, arguments.as_ref()))
                 },
             )
             .unwrap_or(RubyType::Unknown);
@@ -157,18 +168,23 @@ impl TypeTracker {
             return return_type;
         }
 
-        receiver_rbs_return_type(&receiver_type, &method_name).unwrap_or(RubyType::Unknown)
+        receiver_rbs_return_type(&receiver_type, &method_name, arguments.as_ref())
+            .unwrap_or(RubyType::Unknown)
     }
 
+    /// The return of a call on `receiver_type`; `arguments` is what the call
+    /// site proves, or `None` when no call site is visible.
     pub(in crate::inference::type_tracker) fn resolve_static_method_return_outcome(
         &self,
         receiver_type: &RubyType,
         method_name: &str,
+        arguments: Option<&CallArguments>,
     ) -> TypeInferenceOutcome {
         if let RubyType::Union(members) = receiver_type {
             let mut return_types = Vec::with_capacity(members.len());
             for member in members {
-                let outcome = self.resolve_static_method_return_outcome(member, method_name);
+                let outcome =
+                    self.resolve_static_method_return_outcome(member, method_name, arguments);
                 let Some(return_type) = outcome.into_proven_type() else {
                     return TypeInferenceOutcome::unknown(UnknownReason::IncompleteUnionMember);
                 };
@@ -181,7 +197,7 @@ impl TypeTracker {
         }
         TypeInferenceOutcome::from_optional(
             self.resolve_method_return_type_from_analysis(receiver_type, method_name, false)
-                .or_else(|| receiver_rbs_return_type(receiver_type, method_name)),
+                .or_else(|| receiver_rbs_return_type(receiver_type, method_name, arguments)),
             UnknownReason::UnresolvedMethodReturn,
         )
     }
@@ -254,7 +270,8 @@ impl TypeTracker {
         access: ReceiverAccess<'_>,
         observed: &RubyType,
     ) {
-        if receiver_rbs_return_type(receiver_type, method.as_str()).as_ref() == Some(observed) {
+        if receiver_rbs_return_type(receiver_type, method.as_str(), None).as_ref() == Some(observed)
+        {
             return;
         }
         let access = match access {

@@ -178,7 +178,9 @@ impl TypeTracker {
                 &block_argument,
                 |expression| self.constant_callable_body_for_node(expression),
                 &|capture| self.environment.types.get(capture).cloned(),
-                &|receiver, method| self.resolve_static_method_return_outcome(receiver, method),
+                &|receiver, method| {
+                    self.resolve_static_method_return_outcome(receiver, method, None)
+                },
             )?
             .into_proven_type()
     }
@@ -214,7 +216,7 @@ impl TypeTracker {
                 &argument_types,
                 &|capture| self.environment.types.get(capture).cloned(),
                 &|receiver, method| {
-                    self.resolve_static_method_return_outcome(receiver, method.as_str())
+                    self.resolve_static_method_return_outcome(receiver, method.as_str(), None)
                 },
                 &mut Vec::new(),
             )

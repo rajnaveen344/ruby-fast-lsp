@@ -4,6 +4,8 @@ use crate::core::{
 };
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::control_flow;
+use crate::inference::method::arguments::call_arguments;
+use crate::inference::method::return_type::receiver_rbs_return_depends_on_arguments;
 use crate::inference::r#type::literal::{
     infer_collection_literal_type, literal_shape_construction_unknown_reason,
     project_immediate_hash_receiver_type, LiteralAnalyzer,
@@ -306,10 +308,20 @@ impl FactCollector {
             return TypeInferenceOutcome::proven(receiver_type);
         }
 
+        // The arguments are typed only for a bundled signature whose
+        // overloads return different types.
+        let arguments = receiver_rbs_return_depends_on_arguments(&receiver_type, &method_name)
+            .then(|| {
+                call_arguments(call_node, |argument| {
+                    self.infer_type_from_value_with_locals(argument, local_types)
+                })
+            })
+            .flatten();
         self.resolve_method_return_type_outcome_with_private(
             &receiver_type,
             &method_name,
             call_node.receiver().is_none(),
+            arguments.as_ref(),
         )
     }
 

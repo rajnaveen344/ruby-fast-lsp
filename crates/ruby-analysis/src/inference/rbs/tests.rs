@@ -229,19 +229,77 @@ fn rbs_method_catalog_is_shared_and_preserves_inherited_aliases() {
     );
 }
 
+fn positional(arguments: Vec<RubyType>) -> CallArguments {
+    CallArguments {
+        positional: arguments,
+        block: Some(false),
+    }
+}
+
 #[test]
 fn test_generic_type_substitution_array_first() {
     let type_args = vec![RubyType::integer()];
-    let result = get_rbs_method_return_type_with_type_args("Array", "first", false, &type_args);
-    assert!(
-        result.is_some(),
-        "Array#first with type_args should return a type"
-    );
-    let rt = result.unwrap();
     assert_eq!(
-        rt,
-        RubyType::integer(),
-        "Array[Integer]#first should return Integer"
+        rbs_call_return(
+            "Array",
+            "first",
+            false,
+            &type_args,
+            Some(&positional(vec![]))
+        ),
+        Some(Ok(RubyType::integer())),
+        "Array[Integer]#first without a count should return Integer"
+    );
+    assert_eq!(
+        rbs_call_return(
+            "Array",
+            "first",
+            false,
+            &type_args,
+            Some(&positional(vec![RubyType::integer()]))
+        ),
+        Some(Ok(RubyType::array_of(RubyType::integer()))),
+        "Array[Integer]#first with a count should return an Array"
+    );
+}
+
+#[test]
+fn differing_overloads_without_a_call_site_are_withheld() {
+    assert_eq!(
+        get_rbs_method_return_type_with_type_args("Array", "first", false, &[RubyType::integer()]),
+        Some(RubyType::Unknown),
+    );
+    assert!(rbs_return_depends_on_arguments("Integer", "+", false));
+    assert!(!rbs_return_depends_on_arguments("String", "length", false));
+}
+
+#[test]
+fn arguments_select_the_overload_that_accepts_them() {
+    let call = |class: &str, method: &str, argument: RubyType| {
+        rbs_call_return(class, method, false, &[], Some(&positional(vec![argument])))
+    };
+    assert_eq!(
+        call("Integer", "+", RubyType::integer()),
+        Some(Ok(RubyType::integer()))
+    );
+    assert_eq!(
+        call("Integer", "+", RubyType::float()),
+        Some(Ok(RubyType::float()))
+    );
+    // `Float#*` accepts an Integer through the Numeric overload only.
+    assert_eq!(
+        call("Float", "*", RubyType::integer()),
+        Some(Ok(RubyType::float()))
+    );
+    assert_eq!(
+        call("Integer", "+", RubyType::Unknown),
+        Some(Err(crate::core::UnknownReason::AmbiguousCallableOverload)),
+        "an argument of unknown type selects no overload"
+    );
+    assert_eq!(
+        call("Integer", "+", RubyType::string()),
+        Some(Err(crate::core::UnknownReason::AmbiguousCallableOverload)),
+        "a call no overload accepts has no proven result"
     );
 }
 

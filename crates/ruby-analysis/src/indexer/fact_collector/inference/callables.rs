@@ -124,7 +124,7 @@ impl FactCollector {
             |expression| self.constant_callable_body_for_node(expression),
             &|capture| self.local_capture_type(capture, local_types, &location),
             &|receiver, method| {
-                self.resolve_method_return_type_outcome_with_private(receiver, method, false)
+                self.resolve_method_return_type_outcome_with_private(receiver, method, false, None)
             },
         )
     }
@@ -169,6 +169,7 @@ impl FactCollector {
                     receiver,
                     method.as_str(),
                     false,
+                    None,
                 )
             },
         )
@@ -263,6 +264,7 @@ impl FactCollector {
                     receiver,
                     method.as_str(),
                     false,
+                    None,
                 )
             },
             &mut Vec::new(),

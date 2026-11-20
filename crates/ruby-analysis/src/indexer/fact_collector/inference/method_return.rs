@@ -5,8 +5,9 @@ use crate::core::{
 };
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
-use crate::inference::method::return_type::receiver_rbs_return_type;
+use crate::inference::method::return_type::receiver_rbs_call_return;
 use crate::inference::r#type::shape as shape_reads;
+use crate::inference::rbs::CallArguments;
 use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -34,11 +35,14 @@ pub(in crate::indexer::fact_collector) struct InferredMethodContext {
 }
 
 impl FactCollector {
+    /// The return of a call on `receiver_type`; `arguments` is what the call
+    /// site proves, or `None` when no call site is visible.
     pub(in crate::indexer::fact_collector) fn resolve_method_return_type_outcome_with_private(
         &self,
         receiver_type: &RubyType,
         method_name: &str,
         allow_private: bool,
+        arguments: Option<&CallArguments>,
     ) -> TypeInferenceOutcome {
         if *receiver_type == RubyType::Unknown {
             return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
@@ -65,6 +69,7 @@ impl FactCollector {
                 &projected,
                 method_name,
                 allow_private,
+                arguments,
             );
         }
 
@@ -75,6 +80,7 @@ impl FactCollector {
                     ty,
                     method_name,
                     allow_private,
+                    arguments,
                 );
                 let Some(return_type) = outcome.into_proven_type() else {
                     return TypeInferenceOutcome::unknown(UnknownReason::IncompleteUnionMember);
@@ -101,15 +107,24 @@ impl FactCollector {
             return TypeInferenceOutcome::unknown(UnknownReason::InvalidMethodName);
         }
 
-        let return_type = if matches!(receiver_type, RubyType::Array(_) | RubyType::Hash(_, _)) {
-            receiver_rbs_return_type(receiver_type, method_name)
-        } else if self.options.resolve_analysis_method_returns {
+        let bundled = || receiver_rbs_call_return(receiver_type, method_name, arguments);
+        let analysed = !matches!(receiver_type, RubyType::Array(_) | RubyType::Hash(_, _))
+            && self.options.resolve_analysis_method_returns;
+        let return_type = if analysed {
             self.resolve_method_return_type_from_analysis(receiver_type, method_name, allow_private)
-                .or_else(|| receiver_rbs_return_type(receiver_type, method_name))
+                .map(Ok)
+                .or_else(bundled)
         } else {
-            receiver_rbs_return_type(receiver_type, method_name)
+            bundled()
         };
-        TypeInferenceOutcome::from_optional(return_type, UnknownReason::UnresolvedMethodReturn)
+        match return_type {
+            Some(Ok(return_type)) => TypeInferenceOutcome::from_optional(
+                Some(return_type),
+                UnknownReason::UnresolvedMethodReturn,
+            ),
+            Some(Err(reason)) => TypeInferenceOutcome::unknown(reason),
+            None => TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn),
+        }
     }
 
     fn resolve_method_return_type_from_analysis(

@@ -4,6 +4,7 @@
 //! both that binding and the assigned value are.
 
 use crate::core::{RubyType, UnknownReason};
+use crate::inference::rbs::CallArguments;
 use crate::inference::type_tracker::flow::branches::{
     is_falsy_type, ruby_truthiness, short_circuit_result_type, ShortCircuitOperator, Truthiness,
 };
@@ -75,10 +76,8 @@ impl TypeTracker {
     }
 
     /// Track `name += value` and the other operator assignments as the call
-    /// they abbreviate, when both operands are the same scalar class: a
-    /// mixed operation may return the argument's class instead. Collections
-    /// are left unknown: their element types would have to follow the
-    /// argument.
+    /// they abbreviate, with the value as its one argument. Collections are
+    /// left unknown: their element types would have to follow the argument.
     pub(in crate::inference::type_tracker) fn track_local_operator_write(
         &mut self,
         write: &LocalVariableOperatorWriteNode<'_>,
@@ -94,14 +93,16 @@ impl TypeTracker {
         self.environment.callables.forget(&name);
 
         let operator = String::from_utf8_lossy(write.binary_operator().as_slice()).to_string();
-        let result = if scalar_class(&current).is_none()
-            || scalar_class(&current) != scalar_class(&value_type)
-        {
-            RubyType::Unknown
-        } else {
-            self.resolve_static_method_return_outcome(&current, &operator)
+        let result = if is_scalar(&current) {
+            let arguments = CallArguments {
+                positional: vec![value_type],
+                block: Some(false),
+            };
+            self.resolve_static_method_return_outcome(&current, &operator, Some(&arguments))
                 .into_proven_type()
                 .unwrap_or(RubyType::Unknown)
+        } else {
+            RubyType::Unknown
         };
         let bound = self.bind_compound_result(name.clone(), result);
         self.observe_compound_write(write.location().start_offset(), &name);
@@ -197,11 +198,11 @@ impl TypeTracker {
     }
 }
 
-/// The one class a scalar value belongs to.
-fn scalar_class(ruby_type: &RubyType) -> Option<RubyType> {
+/// Whether the value belongs to one class that is not a collection.
+fn is_scalar(ruby_type: &RubyType) -> bool {
     match ruby_type {
-        RubyType::Class(_) => Some(ruby_type.clone()),
-        RubyType::Literal(value) => scalar_class(&value.widened_type()),
+        RubyType::Class(_) => true,
+        RubyType::Literal(value) => is_scalar(&value.widened_type()),
         RubyType::Module(_)
         | RubyType::ClassReference(_)
         | RubyType::ModuleReference(_)
@@ -209,6 +210,6 @@ fn scalar_class(ruby_type: &RubyType) -> Option<RubyType> {
         | RubyType::Hash(_, _)
         | RubyType::Shape(_)
         | RubyType::Union(_)
-        | RubyType::Unknown => None,
+        | RubyType::Unknown => false,
     }
 }

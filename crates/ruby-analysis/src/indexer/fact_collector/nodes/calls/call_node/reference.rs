@@ -10,8 +10,9 @@ use log::trace;
 use ruby_prism::CallNode;
 
 use crate::core::RubyType;
+use crate::inference::method::arguments::call_arguments;
 use crate::inference::method::return_type::{
-    rbs_class_exists_for_type, rbs_method_exists_for_type,
+    rbs_class_exists_for_type, rbs_method_exists_for_type, receiver_rbs_return_depends_on_arguments,
 };
 use crate::inference::r#type::literal::literal_key;
 use crate::inference::r#type::shape as shape_reads;
@@ -217,6 +218,13 @@ impl FactCollector {
             } else if let Some(outcome) = self.shape_call_outcome(node, receiver_type) {
                 Some(outcome)
             } else {
+                // The arguments are typed only for a bundled signature
+                // whose overloads return different types. A static `send`
+                // passes the method name first, so its arguments are unseen.
+                let arguments = (static_send_target.is_none()
+                    && receiver_rbs_return_depends_on_arguments(receiver_type, method_name))
+                .then(|| call_arguments(node, |argument| self.infer_type_from_value(argument)))
+                .flatten();
                 // Only the constructor consults the project: a class whose
                 // Ruby code replaces `new` has no assumed instance result.
                 let syntax_outcome = match receiver_type {
@@ -225,10 +233,10 @@ impl FactCollector {
                         .project
                         .constructor_result(class)
                         .into_type_outcome(RubyType::Class(class.clone())),
-                    _ => crate::inference::method::return_type::method_call_type_outcome(
-                        None::<&dyn crate::inference::semantics::Semantics>,
+                    _ => crate::inference::method::return_type::signature_call_type_outcome(
                         receiver_type,
                         method_name,
+                        arguments.as_ref(),
                     ),
                 };
                 let outcome = if matches!(receiver_type, RubyType::Union(_))
@@ -238,6 +246,7 @@ impl FactCollector {
                         receiver_type,
                         method_name,
                         !matches!(access, MethodReferenceAccess::ExplicitReceiver),
+                        arguments.as_ref(),
                     )
                 } else {
                     syntax_outcome

@@ -311,13 +311,13 @@ end
     .await;
 }
 
-/// An operator assignment is typed only when both operands are the same
-/// scalar class; a mixed operation may change the class.
+/// An operator assignment returns what its operation returns: the assigned
+/// value selects the class.
 #[tokio::test]
-async fn operator_assignment_with_a_different_operand_class_stays_unknown() {
+async fn operator_assignment_follows_the_assigned_value() {
     check(
         r#"
-def mix<type label="?">ed
+def mix<type label="Float">ed
   value = 1
   value += 0.5
   value

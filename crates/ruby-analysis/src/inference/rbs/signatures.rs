@@ -2,7 +2,6 @@
 
 use rbs_parser::RbsType;
 
-use super::conversion::{rbs_type_to_ruby_type, rbs_type_to_ruby_type_with_substitutions};
 use super::RBS_LOADER;
 use crate::core::{MethodParamKind, RubyType};
 
@@ -108,56 +107,15 @@ pub fn get_rbs_method_return_type_as_ruby_type(
 ///
 /// For example, `Array[Integer]#first` returns `Elem` in RBS, but with
 /// `type_args = [Integer]` we substitute `Elem` → `Integer`.
+///
+/// No call site is visible here, so a method whose overloads return
+/// different types is `Unknown`.
 pub fn get_rbs_method_return_type_with_type_args(
     class_name: &str,
     method_name: &str,
     is_singleton: bool,
     type_args: &[RubyType],
 ) -> Option<RubyType> {
-    let loader = RBS_LOADER.read();
-    let rbs_type = loader
-        .get_method_return_type(class_name, method_name, is_singleton)?
-        .clone();
-
-    // Build substitution map from class type_params to actual type_args
-    let substitutions = if let Some(class) = loader.get_class(class_name) {
-        build_substitution_map(&class.type_params, type_args)
-    } else if let Some(module) = loader.get_module(class_name) {
-        build_substitution_map(&module.type_params, type_args)
-    } else {
-        std::collections::HashMap::new()
-    };
-
-    if substitutions.is_empty() {
-        Some(rbs_type_to_ruby_type(&rbs_type))
-    } else {
-        Some(rbs_type_to_ruby_type_with_substitutions(
-            &rbs_type,
-            &substitutions,
-        ))
-    }
-}
-
-/// Build a map from type parameter names to concrete RubyTypes. A parameter
-/// without an argument maps to `Unknown`; the RBS parser may spell it like a
-/// class name, which must not leak as a concrete class.
-/// Handles type param names that include modifiers like "unchecked out Elem" → "Elem".
-fn build_substitution_map(
-    type_params: &[rbs_parser::TypeParam],
-    type_args: &[RubyType],
-) -> std::collections::HashMap<String, RubyType> {
-    type_params
-        .iter()
-        .enumerate()
-        .map(|(index, param)| {
-            let arg = type_args.get(index).unwrap_or(&RubyType::Unknown);
-            // Strip modifiers: "unchecked out Elem" → "Elem"
-            let name = param
-                .name
-                .rsplit_once(' ')
-                .map(|(_, name)| name)
-                .unwrap_or(&param.name);
-            (name.to_string(), arg.clone())
-        })
-        .collect()
+    super::overloads::rbs_call_return(class_name, method_name, is_singleton, type_args, None)
+        .map(|outcome| outcome.unwrap_or(RubyType::Unknown))
 }

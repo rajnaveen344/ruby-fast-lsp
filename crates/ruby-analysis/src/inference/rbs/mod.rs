@@ -7,6 +7,7 @@ mod catalog;
 mod conversion;
 mod embedded_callable;
 mod higher_order;
+mod overloads;
 mod prepare_cache;
 mod signatures;
 
@@ -16,6 +17,7 @@ use rbs_parser::Loader;
 
 pub use catalog::{get_rbs_class_methods, rbs_class_method_exists};
 pub use conversion::rbs_type_to_ruby_type;
+pub(crate) use overloads::{rbs_call_return, rbs_return_depends_on_arguments, CallArguments};
 pub(crate) use prepare_cache::prepare_higher_order_call_with_fallbacks;
 pub(crate) use signatures::block_selects_another_result;
 pub use signatures::{

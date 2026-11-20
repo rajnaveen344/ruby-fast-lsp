@@ -4,6 +4,7 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::inference::r#type::shape as shape_reads;
+use crate::inference::rbs::CallArguments;
 use crate::inference::semantics::{ReceiverAccess, Semantics};
 
 /// Resolve every reachable member of a union before publishing a call result.
@@ -45,6 +46,23 @@ pub fn method_call_type_outcome_with_private<S: Semantics + ?Sized>(
     method_call_type_outcome_with_visibility(query, receiver_type, method_name, allow_private, None)
 }
 
+/// Resolve a call from bundled signatures alone, selecting the overload
+/// from what the call site proves about its arguments.
+pub(crate) fn signature_call_type_outcome(
+    receiver_type: &RubyType,
+    method_name: &str,
+    arguments: Option<&CallArguments>,
+) -> TypeInferenceOutcome {
+    method_call_type_outcome_for_call(
+        None::<&dyn Semantics>,
+        receiver_type,
+        method_name,
+        true,
+        None,
+        arguments,
+    )
+}
+
 pub fn method_call_return_type_with_visibility<S: Semantics + ?Sized>(
     query: Option<&S>,
     receiver_type: &RubyType,
@@ -69,15 +87,36 @@ pub fn method_call_type_outcome_with_visibility<S: Semantics + ?Sized>(
     allow_private: bool,
     protected_caller: Option<&FullyQualifiedName>,
 ) -> TypeInferenceOutcome {
+    method_call_type_outcome_for_call(
+        query,
+        receiver_type,
+        method_name,
+        allow_private,
+        protected_caller,
+        None,
+    )
+}
+
+/// `arguments` is what the call site proves, or `None` when no call site is
+/// visible; a bundled signature the call does not decide is unknown.
+fn method_call_type_outcome_for_call<S: Semantics + ?Sized>(
+    query: Option<&S>,
+    receiver_type: &RubyType,
+    method_name: &str,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
+    arguments: Option<&CallArguments>,
+) -> TypeInferenceOutcome {
     if let RubyType::Union(types) = receiver_type {
         let mut return_types = Vec::with_capacity(types.len());
         for member in types {
-            let outcome = method_call_type_outcome_with_visibility(
+            let outcome = method_call_type_outcome_for_call(
                 query,
                 member,
                 method_name,
                 allow_private,
                 protected_caller,
+                arguments,
             );
             let Some(return_type) = outcome.into_proven_type() else {
                 return TypeInferenceOutcome::unknown(UnknownReason::IncompleteUnionMember);
@@ -120,11 +159,8 @@ pub fn method_call_type_outcome_with_visibility<S: Semantics + ?Sized>(
         }
     }
 
-    if let Some(return_type) = generic_rbs_method_return_type(receiver_type, method_name) {
-        return TypeInferenceOutcome::from_optional(
-            Some(return_type),
-            UnknownReason::UnresolvedMethodReturn,
-        );
+    if let Some(bundled) = generic_rbs_method_return(receiver_type, method_name, arguments) {
+        return signature_outcome(Some(bundled));
     }
 
     let Ok(method) = RubyMethod::new(method_name) else {
@@ -150,10 +186,19 @@ pub fn method_call_type_outcome_with_visibility<S: Semantics + ?Sized>(
         }
     }
 
-    TypeInferenceOutcome::from_optional(
-        rbs_method_return_type(receiver_type, method_name),
-        UnknownReason::UnresolvedMethodReturn,
-    )
+    signature_outcome(rbs_method_return(receiver_type, method_name, arguments))
+}
+
+/// A bundled-signature answer as an outcome, keeping why it was withheld.
+fn signature_outcome(bundled: Option<Result<RubyType, UnknownReason>>) -> TypeInferenceOutcome {
+    match bundled {
+        Some(Ok(return_type)) => TypeInferenceOutcome::from_optional(
+            Some(return_type),
+            UnknownReason::UnresolvedMethodReturn,
+        ),
+        Some(Err(reason)) => TypeInferenceOutcome::unknown(reason),
+        None => TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn),
+    }
 }
 
 pub fn rbs_method_exists_for_type(
@@ -212,33 +257,24 @@ pub fn rbs_class_exists_for_type(receiver_type: &RubyType) -> bool {
     }
 }
 
-fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
+fn generic_rbs_method_return(
+    receiver_type: &RubyType,
+    method_name: &str,
+    arguments: Option<&CallArguments>,
+) -> Option<Result<RubyType, UnknownReason>> {
     match receiver_type {
-        RubyType::Array(element_types) => {
-            crate::inference::rbs::get_rbs_method_return_type_with_type_args(
-                "Array",
-                method_name,
-                false,
-                element_types,
-            )
-        }
-        RubyType::Hash(key_types, value_types) => {
-            let type_args = vec![
-                RubyType::union(key_types.clone()),
-                RubyType::union(value_types.clone()),
-            ];
-            crate::inference::rbs::get_rbs_method_return_type_with_type_args(
-                "Hash",
-                method_name,
-                false,
-                &type_args,
-            )
-        }
+        RubyType::Array(_) | RubyType::Hash(_, _) => crate::inference::rbs::rbs_call_return(
+            &receiver_rbs_class_name(receiver_type)?,
+            method_name,
+            false,
+            &type_args_for_receiver(receiver_type),
+            arguments,
+        ),
         RubyType::Shape(shape) => {
-            generic_rbs_method_return_type(&shape.generic_hash_type(), method_name)
+            generic_rbs_method_return(&shape.generic_hash_type(), method_name, arguments)
         }
-        RubyType::Literal(_) => None,
-        RubyType::Class(_)
+        RubyType::Literal(_)
+        | RubyType::Class(_)
         | RubyType::Module(_)
         | RubyType::ClassReference(_)
         | RubyType::ModuleReference(_)
@@ -314,22 +350,30 @@ pub fn rbs_method_signatures_for_type(
     signatures
 }
 
-fn rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
+fn rbs_method_return(
+    receiver_type: &RubyType,
+    method_name: &str,
+    arguments: Option<&CallArguments>,
+) -> Option<Result<RubyType, UnknownReason>> {
     match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            rbs_method_return_for_fqn(fqn, method_name, false)
+            rbs_method_return_for_fqn(fqn, method_name, false, arguments)
         }
         RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-            rbs_method_return_for_fqn(fqn, method_name, true)
+            rbs_method_return_for_fqn(fqn, method_name, true, arguments)
         }
         RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) => {
-            generic_rbs_method_return_type(receiver_type, method_name)
+            generic_rbs_method_return(receiver_type, method_name, arguments)
         }
-        RubyType::Literal(value) => rbs_method_return_type(&value.widened_type(), method_name),
+        RubyType::Literal(value) => {
+            rbs_method_return(&value.widened_type(), method_name, arguments)
+        }
         RubyType::Union(types) => resolve_proven_union(types, |ty| {
-            generic_rbs_method_return_type(ty, method_name)
-                .or_else(|| rbs_method_return_type(ty, method_name))
-        }),
+            generic_rbs_method_return(ty, method_name, arguments)
+                .or_else(|| rbs_method_return(ty, method_name, arguments))
+                .and_then(Result::ok)
+        })
+        .map(Ok),
         RubyType::Unknown => None,
     }
 }
@@ -338,17 +382,17 @@ fn rbs_method_return_for_fqn(
     fqn: &FullyQualifiedName,
     method_name: &str,
     is_singleton: bool,
-) -> Option<RubyType> {
-    for class_name in class_names_for_fqn(fqn) {
-        if let Some(return_type) = crate::inference::rbs::get_rbs_method_return_type_as_ruby_type(
-            &class_name,
+    arguments: Option<&CallArguments>,
+) -> Option<Result<RubyType, UnknownReason>> {
+    class_names_for_fqn(fqn).iter().find_map(|class_name| {
+        crate::inference::rbs::rbs_call_return(
+            class_name,
             method_name,
             is_singleton,
-        ) {
-            return Some(return_type);
-        }
-    }
-    None
+            &[],
+            arguments,
+        )
+    })
 }
 
 fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
@@ -374,31 +418,59 @@ fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
 
 /// The RBS return type of `method_name` on one receiver, substituting the
 /// receiver's element types for an Array or Hash. The class is looked up by
-/// its last constant name.
+/// its last constant name. `arguments` is what the call site proves, or
+/// `None` when no call site is visible; a signature the call does not
+/// decide is `Unknown`.
 pub(crate) fn receiver_rbs_return_type(
     receiver_type: &RubyType,
     method_name: &str,
+    arguments: Option<&CallArguments>,
 ) -> Option<RubyType> {
+    receiver_rbs_call_return(receiver_type, method_name, arguments)
+        .map(|outcome| outcome.unwrap_or(RubyType::Unknown))
+}
+
+/// As `receiver_rbs_return_type`, keeping why a return was withheld.
+pub(crate) fn receiver_rbs_call_return(
+    receiver_type: &RubyType,
+    method_name: &str,
+    arguments: Option<&CallArguments>,
+) -> Option<Result<RubyType, UnknownReason>> {
     let class_name = receiver_rbs_class_name(receiver_type)?;
-    let is_singleton = matches!(
+    crate::inference::rbs::rbs_call_return(
+        &class_name,
+        method_name,
+        receiver_is_singleton(receiver_type),
+        &type_args_for_receiver(receiver_type),
+        arguments,
+    )
+}
+
+/// Whether the arguments of a call decide the bundled return of
+/// `method_name` on this receiver or, for a union, on any member.
+pub(crate) fn receiver_rbs_return_depends_on_arguments(
+    receiver_type: &RubyType,
+    method_name: &str,
+) -> bool {
+    if let RubyType::Union(members) = receiver_type {
+        return members
+            .iter()
+            .any(|member| receiver_rbs_return_depends_on_arguments(member, method_name));
+    }
+    receiver_rbs_class_name(receiver_type).is_some_and(|class_name| {
+        crate::inference::rbs::rbs_return_depends_on_arguments(
+            &class_name,
+            method_name,
+            receiver_is_singleton(receiver_type),
+        )
+    })
+}
+
+fn receiver_is_singleton(receiver_type: &RubyType) -> bool {
+    matches!(
         receiver_type,
         RubyType::ClassReference(_) | RubyType::ModuleReference(_)
-    );
-    let type_args = type_args_for_receiver(receiver_type);
-    if type_args.is_empty() {
-        crate::inference::rbs::get_rbs_method_return_type_as_ruby_type(
-            &class_name,
-            method_name,
-            is_singleton,
-        )
-    } else {
-        crate::inference::rbs::get_rbs_method_return_type_with_type_args(
-            &class_name,
-            method_name,
-            is_singleton,
-            &type_args,
-        )
-    }
+    )
 }
 
 fn receiver_rbs_class_name(receiver_type: &RubyType) -> Option<String> {

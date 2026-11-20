@@ -11,6 +11,8 @@ mod callables;
 mod compound_local_writes;
 // Declared YARD/RBS types checked against inferred types.
 mod declared_types;
+// Calls typed by the overload their arguments select.
+mod overloaded_call_returns;
 // Receiver-aware method lookup across contexts, chains, and ancestors.
 mod method_resolution;
 // Inferred method and accessor return types.

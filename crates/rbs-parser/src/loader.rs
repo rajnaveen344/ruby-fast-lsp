@@ -212,6 +212,22 @@ impl Loader {
         }
     }
 
+    /// Look up an interface by name
+    pub fn get_interface(&self, name: &str) -> Option<&InterfaceDecl> {
+        match self.declarations.get(name)? {
+            Declaration::Interface(interface) => Some(interface),
+            _ => None,
+        }
+    }
+
+    /// Look up a type alias by name
+    pub fn get_type_alias(&self, name: &str) -> Option<&TypeAliasDecl> {
+        match self.declarations.get(name)? {
+            Declaration::TypeAlias(alias) => Some(alias),
+            _ => None,
+        }
+    }
+
     /// Look up an instance method by class name and method name
     pub fn get_instance_method(&self, class_name: &str, method_name: &str) -> Option<&MethodDecl> {
         let key = format!("{}#{}", class_name, method_name);
