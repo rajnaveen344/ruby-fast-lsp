@@ -328,7 +328,7 @@ fn push_unresolved_supertype_entries(
     entries: &mut Vec<TypeHierarchyEntry>,
 ) {
     for edge in engine.view().unresolved_graph_edges() {
-        if edge.source != *fqn {
+        if edge.source != *fqn || edge.target_is_unnameable() {
             continue;
         }
         let relation = match edge.kind {

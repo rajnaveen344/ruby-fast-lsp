@@ -116,6 +116,29 @@ impl UnresolvedGraphEdgeFact {
         self.provenance = provenance;
         self
     }
+
+    /// A superclass written as an expression (`class A < build(:kind)`).
+    /// No constant names it, so the edge has no target and never resolves;
+    /// it keeps the class's ancestry marked incomplete for as long as the
+    /// file declares it.
+    pub fn unnameable_superclass(
+        source: FullyQualifiedName,
+        context: FullyQualifiedName,
+        range: TextRange,
+    ) -> Self {
+        Self::new(
+            source,
+            Vec::new(),
+            false,
+            context,
+            GraphEdgeKind::Superclass,
+            range,
+        )
+    }
+
+    pub fn target_is_unnameable(&self) -> bool {
+        self.target_parts.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

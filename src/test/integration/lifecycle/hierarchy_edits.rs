@@ -182,3 +182,31 @@ async fn closed_buffer_keeps_delivered_definitions_until_reopened() {
         "restoring the delivered definitions"
     );
 }
+
+#[tokio::test]
+async fn naming_a_computed_parent_restores_missing_method_reports() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "base.rb",
+            "class Base\n  def self.variant(kind)\n    self\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open("special.rb", "class Special < Base.variant(:fast)\nend\n")
+        .await;
+    editor.open("caller.rb", "Special.new.other\n").await;
+    let silent = "<warn none code=\"unresolved-method\">Special.new.other</warn>\n";
+    let reported = "Special.new.<warn code=\"unresolved-method\">other</warn>\n";
+    editor.check("caller.rb", silent).await;
+
+    editor
+        .set("special.rb", "class Special < Base\nend\n")
+        .await;
+    editor.check("caller.rb", reported).await;
+
+    editor
+        .set("special.rb", "class Special < Base.variant(:fast)\nend\n")
+        .await;
+    editor.check("caller.rb", silent).await;
+}

@@ -407,6 +407,10 @@ impl Hierarchy {
             "unresolved graph edges must only store interned constant lookup ids",
             "intern unresolved graph edge targets before inserting facts",
         );
+        if lookup.path.is_empty() {
+            // An unnameable superclass has no target to find.
+            return None;
+        }
         let path = lookup.path.clone();
         let current_namespace = if lookup.absolute {
             Vec::new()

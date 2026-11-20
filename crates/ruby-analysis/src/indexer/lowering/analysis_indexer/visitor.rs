@@ -163,10 +163,15 @@ impl Visit<'_> for AnalysisIndexer<'_> {
                         super_range,
                     ));
             }
-        } else if reopened_target.is_none()
-            && !has_explicit_superclass
-            && class_implicitly_inherits_object(&fqn)
-        {
+        } else if has_explicit_superclass {
+            self.facts
+                .unresolved_graph_edges
+                .push(UnresolvedGraphEdgeFact::unnameable_superclass(
+                    fqn.clone(),
+                    FullyQualifiedName::namespace(lexical_context),
+                    range,
+                ));
+        } else if reopened_target.is_none() && class_implicitly_inherits_object(&fqn) {
             let object = RubyConstant::new("Object").expect_invariant(
                 "Object is not a valid Ruby constant",
                 "ruby's implicit class superclass must be representable",
