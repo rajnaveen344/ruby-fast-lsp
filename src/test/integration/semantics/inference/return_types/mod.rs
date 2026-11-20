@@ -4,6 +4,7 @@
 mod attrs;
 mod branch_variable_return;
 mod mixin_cross_module;
+mod receiver_returns;
 mod refinements;
 mod same_file;
 mod short_circuit_and_memo;

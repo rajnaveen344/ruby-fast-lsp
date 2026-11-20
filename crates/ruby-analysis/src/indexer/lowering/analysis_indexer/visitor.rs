@@ -329,6 +329,9 @@ impl Visit<'_> for AnalysisIndexer<'_> {
                 .with_availability(availability.clone())
                 .with_visibility(visibility)
                 .with_initialize_origin(normalized_from_initialize)
+                .with_receiver_return(
+                    crate::inference::method::receiver_return::returns_only_receiver(node),
+                )
                 .with_forwarded_block_call(forwarded_block_call.clone())
                 .with_direct_yield_call(direct_yield_call.clone())
                 .with_documented_yield(documented_yield.clone()),

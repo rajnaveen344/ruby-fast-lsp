@@ -205,6 +205,7 @@ impl<'a> View<'a> {
             namespace_fqn,
             method,
             access,
+            ReceiverProof::Exact,
             &mut HashSet::new(),
         )
     }
@@ -296,6 +297,7 @@ impl<'a> View<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         access: ReceiverAccess<'_>,
+        receiver: ReceiverProof,
         seen: &mut HashSet<MethodVisitKey>,
     ) -> Option<crate::core::RubyType> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
@@ -311,6 +313,7 @@ impl<'a> View<'a> {
                     &receiver,
                     method,
                     access,
+                    ReceiverProof::StandIn,
                     &mut seen.clone(),
                 )
             });
@@ -318,14 +321,24 @@ impl<'a> View<'a> {
 
         if let Some((_owner, facts)) = self.own_chain_method_facts(namespace_fqn, method, access) {
             return RubyType::union_from_proven(facts, |fact| {
-                self.method_return_type_inner(&fact, seen)
+                let proven = self.method_return_type_inner(&fact, seen);
+                if proven.is_none() && fact.returns_receiver() {
+                    return self.returned_receiver_type(namespace_fqn, receiver);
+                }
+                proven
             });
         }
 
         let applications = execution_context_application_targets(self.engine, namespace_fqn);
         if !applications.is_empty() {
             return RubyType::union_from_proven(applications, |application| {
-                self.method_return_type_for_receiver_inner(&application, method, access, seen)
+                self.method_return_type_for_receiver_inner(
+                    &application,
+                    method,
+                    access,
+                    ReceiverProof::StandIn,
+                    seen,
+                )
             });
         }
 
@@ -342,11 +355,27 @@ impl<'a> View<'a> {
                 namespace_fqn,
                 &method_missing_method(),
                 access,
+                ReceiverProof::StandIn,
                 seen,
             );
         }
 
         None
+    }
+
+    /// What a method that only returns `self` returns: the receiver it was
+    /// looked up on, not the class that declares it.
+    #[cold]
+    #[inline(never)]
+    fn returned_receiver_type(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        receiver: ReceiverProof,
+    ) -> Option<RubyType> {
+        match receiver {
+            ReceiverProof::Exact => self.receiver_value_type(namespace_fqn),
+            ReceiverProof::StandIn => None,
+        }
     }
 
     fn delegate_method_return_type(
@@ -362,6 +391,7 @@ impl<'a> View<'a> {
             &fact.owner,
             &receiver_method,
             ReceiverAccess::Any,
+            ReceiverProof::StandIn,
             seen,
         )?;
 
@@ -372,9 +402,22 @@ impl<'a> View<'a> {
                     &namespace,
                     delegated_method,
                     ReceiverAccess::Any,
+                    ReceiverProof::StandIn,
                     seen,
                 )
             },
         )
     }
+}
+
+/// Whether the namespace a return is looked up on is the call's receiver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiverProof {
+    /// The receiver's own namespace.
+    Exact,
+    /// A namespace the lookup reached on the receiver's behalf: an includer
+    /// of its module, an execution context, a declaring class, or a
+    /// delegation target. A method
+    /// returning `self` proves nothing about it.
+    StandIn,
 }

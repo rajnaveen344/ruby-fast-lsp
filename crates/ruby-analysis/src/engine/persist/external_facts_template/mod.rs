@@ -247,6 +247,7 @@ struct SnapshotMethodFact {
     param_facts: Vec<SnapshotMethodParamFact>,
     parameter_shape_complete: bool,
     normalized_from_initialize: bool,
+    returns_receiver: bool,
     delegate_receiver: Option<String>,
     visibility: SnapshotMethodVisibility,
     availability: SnapshotMethodAvailability,

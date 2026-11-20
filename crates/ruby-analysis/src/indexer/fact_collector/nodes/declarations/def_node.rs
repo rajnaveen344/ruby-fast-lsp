@@ -14,6 +14,7 @@ use log::warn;
 use ruby_prism::*;
 
 use crate::core::RubyType;
+use crate::inference::method::receiver_return::returns_only_receiver;
 use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::type_tracker::{LocalReadType, TypeTracker};
 
@@ -201,7 +202,8 @@ impl FactCollector {
             )
             .with_availability(availability.clone())
             .with_visibility(visibility)
-            .with_initialize_origin(normalized_from_initialize),
+            .with_initialize_origin(normalized_from_initialize)
+            .with_receiver_return(returns_only_receiver(node)),
         );
         if module_function_copy {
             self.direct_push_method_fact_with_signature_name_range_and_availability(

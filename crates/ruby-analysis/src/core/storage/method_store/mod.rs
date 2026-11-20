@@ -123,6 +123,9 @@ pub struct MethodFact {
     /// Whether this singleton `new` stands for an instance `initialize`
     /// rather than a `new` the source defines itself.
     pub(crate) normalized_from_initialize: bool,
+    /// Whether every path through the method returns `self`, so a call
+    /// returns its receiver.
+    pub(crate) returns_receiver: bool,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
     pub availability: MethodAvailability,
@@ -145,6 +148,7 @@ impl MethodFact {
             param_facts: Vec::new(),
             parameter_shape_complete: false,
             normalized_from_initialize: false,
+            returns_receiver: false,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -181,6 +185,7 @@ impl MethodFact {
             param_facts,
             parameter_shape_complete: true,
             normalized_from_initialize: false,
+            returns_receiver: false,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -204,6 +209,7 @@ impl MethodFact {
             param_facts: Vec::new(),
             parameter_shape_complete: false,
             normalized_from_initialize: false,
+            returns_receiver: false,
             delegate_receiver: Some(delegate_receiver),
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -231,6 +237,17 @@ impl MethodFact {
     pub(crate) fn with_initialize_origin(mut self, normalized: bool) -> Self {
         self.normalized_from_initialize = normalized;
         self
+    }
+
+    /// Record whether every path through the method returns `self`.
+    pub(crate) fn with_receiver_return(mut self, returns_receiver: bool) -> Self {
+        self.returns_receiver = returns_receiver;
+        self
+    }
+
+    /// Whether a call of this method returns its receiver.
+    pub fn returns_receiver(&self) -> bool {
+        self.returns_receiver
     }
 
     /// Whether the source itself defines this method, as opposed to a
@@ -456,6 +473,7 @@ pub struct StoredMethodFact {
 struct RareMethodDetails {
     availability: MethodAvailability,
     delegate_receiver: Option<RubyMethod>,
+    returns_receiver: bool,
     higher_order: HigherOrderMethodMetadata,
 }
 
@@ -475,6 +493,7 @@ impl StoredMethodFact {
             param_facts,
             parameter_shape_complete,
             normalized_from_initialize,
+            returns_receiver,
             delegate_receiver,
             visibility,
             availability,
@@ -494,6 +513,7 @@ impl StoredMethodFact {
         let rare = RareMethodDetails {
             availability,
             delegate_receiver,
+            returns_receiver,
             higher_order: higher_order.map(|metadata| *metadata).unwrap_or_default(),
         };
         let has_rare = rare != RareMethodDetails::default();
@@ -525,6 +545,7 @@ impl StoredMethodFact {
             param_facts: self.param_facts.to_vec(),
             parameter_shape_complete: self.parameter_shape_complete,
             normalized_from_initialize: self.normalized_from_initialize,
+            returns_receiver: self.returns_receiver(),
             delegate_receiver: self.delegate_receiver(),
             visibility: self.visibility,
             availability: self.availability().clone(),
@@ -553,6 +574,13 @@ impl StoredMethodFact {
 
     pub fn delegate_receiver(&self) -> Option<RubyMethod> {
         self.rare.as_deref().and_then(|rare| rare.delegate_receiver)
+    }
+
+    /// Whether a call of this method returns its receiver.
+    pub fn returns_receiver(&self) -> bool {
+        self.rare
+            .as_deref()
+            .is_some_and(|rare| rare.returns_receiver)
     }
 }
 

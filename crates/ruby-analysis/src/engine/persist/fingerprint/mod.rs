@@ -56,6 +56,7 @@ impl SemanticExportFingerprint {
                     stable_optional_string(hasher, parameter.documentation.as_deref());
                 }
                 stable_optional_method(hasher, fact.delegate_receiver);
+                stable_bool(hasher, fact.returns_receiver);
                 stable_method_visibility(hasher, fact.visibility);
                 stable_method_availability(hasher, &fact.availability);
                 stable_optional_string(hasher, fact.documentation.as_deref());
@@ -375,6 +376,7 @@ impl View<'_> {
                         stable_optional_string(hasher, parameter.documentation.as_deref());
                     }
                     stable_optional_method(hasher, fact.delegate_receiver);
+                    stable_bool(hasher, fact.returns_receiver);
                     stable_method_visibility(hasher, fact.visibility);
                     stable_method_availability(hasher, &fact.availability);
                     stable_optional_string(hasher, fact.documentation.as_deref());

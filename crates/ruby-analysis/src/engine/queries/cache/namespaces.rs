@@ -23,6 +23,33 @@ impl<'a> View<'a> {
         }
     }
 
+    /// The type of an object whose methods are looked up on `receiver`: an
+    /// instance of a class, or the class or module itself for its singleton
+    /// side. A collection is refused, since the namespace alone does not
+    /// carry its element types, and so is a module's instance side, which
+    /// names no single class.
+    pub(in crate::engine) fn receiver_value_type(
+        &self,
+        receiver: &FullyQualifiedName,
+    ) -> Option<RubyType> {
+        let parts = receiver.namespace_parts();
+        match receiver.namespace_kind()? {
+            crate::core::NamespaceKind::Singleton => self.constant_reference_type(&parts),
+            crate::core::NamespaceKind::Instance => {
+                let is_collection = matches!(
+                    parts.as_slice(),
+                    [name] if matches!(name.as_str(), "Array" | "Hash")
+                );
+                match self.namespace_node_kind(receiver)? {
+                    GraphNodeKind::Class if !is_collection => {
+                        Some(RubyType::Class(FullyQualifiedName::constant(parts)))
+                    }
+                    GraphNodeKind::Class | GraphNodeKind::Module => None,
+                }
+            }
+        }
+    }
+
     pub fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
         let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
         let constant_fqn = FullyQualifiedName::constant(path.to_vec());

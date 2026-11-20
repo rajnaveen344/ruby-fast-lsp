@@ -223,7 +223,7 @@ impl Project {
         resolution: &MethodLookupResult,
         caches: &mut MethodCallOutcomeCaches,
     ) -> crate::core::TypeInferenceOutcome {
-        let (owner, owner_kind, method, _is_super) = method_cache_key;
+        let (owner, owner_kind, method, is_super) = method_cache_key;
         let return_type = match (access, resolution) {
             (
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass | MethodReferenceAccess::InstanceMethodReflection,
@@ -277,6 +277,39 @@ impl Project {
                 MethodLookupResult::Missing | MethodLookupResult::Unknown(_),
             ) => None,
         };
+        // A method that only returns `self` returns the receiver this call
+        // looked it up on. A hidden method proves nothing, and `super` keeps
+        // the caller's receiver, which the lookup owner does not name.
+        let return_type = return_type
+            .filter(|ruby_type| *ruby_type != RubyType::Unknown)
+            .or_else(|| {
+                let MethodLookupResult::Found(fact) = resolution else {
+                    return None;
+                };
+                if !fact.returns_receiver() || is_super {
+                    return None;
+                }
+                let hidden = matches!(access, MethodReferenceAccess::ExplicitReceiver)
+                    && !self.explicit_receiver_sees(
+                        method_cache_key,
+                        fact,
+                        caller,
+                        method_lookup_chain_cache,
+                        caches,
+                    );
+                if hidden {
+                    return None;
+                }
+                let owner_lookup = self.names.const_lookup(owner).expect_invariant(
+                    "receiver-return call candidate points to a missing owner lookup",
+                    "reference candidates contain only interned lookup IDs",
+                    "retain the owner lookup for the candidate lifetime",
+                );
+                View::new(self).receiver_value_type(&FullyQualifiedName::namespace_with_kind(
+                    owner_lookup.path.to_vec(),
+                    owner_kind,
+                ))
+            });
         // Core Class#new is intentionally generic/untyped in the bundled
         // signature. A proven class receiver supplies the stronger language
         // constructor result, but only for that exact built-in declaration;
@@ -398,6 +431,31 @@ impl Project {
             fix = "keep ambiguous return lookup and insertion in one candidate step",
         );
         result
+    }
+
+    /// Whether an explicit-receiver call from `caller` may call `fact`.
+    fn explicit_receiver_sees(
+        &self,
+        key: MethodReferenceCacheKey,
+        fact: &MethodFact,
+        caller: Option<FqnId>,
+        method_lookup_chain_cache: &MethodLookupChainCache,
+        caches: &mut MethodCallOutcomeCaches,
+    ) -> bool {
+        match self.cached_method_visibility(key, fact, method_lookup_chain_cache, caches) {
+            CachedMethodVisibility::Public => true,
+            CachedMethodVisibility::Private => false,
+            CachedMethodVisibility::Protected(visibility_owner) => caller
+                .and_then(|caller| self.call_expression_caller_namespace(caller))
+                .is_some_and(|caller| {
+                    let visibility_owner = self.names.fqn(visibility_owner).expect_invariant(
+                        "cached protected visibility owner disappeared from the name registry",
+                        "resolve-local cache entries reference the immutable engine name registry",
+                        "discard visibility caches before mutating engine names",
+                    );
+                    protected_method_visible_from(self, visibility_owner, &caller)
+                }),
+        }
     }
 
     fn cached_method_visibility(
